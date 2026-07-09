@@ -1,0 +1,1288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Will's WO Review Tool — Guide</title>
+<script type="text/javascript" src="/ruxitagentjs_ICANVfqru_10333260303165926.js" data-dtconfig="rid=RID_1100704173|rpid=-768801828|domain=abbvienet.com|reportUrl=/rb_16a183f6-c871-4082-850b-a1f7a2ecd0b1|app=ea7c4b59f27d43eb|cuc=oao3vfhf|owasp=1|mel=100000|featureHash=ICANVfqru|dpvc=1|lastModification=1780263929434|tp=500,50,0|rdnt=1|uxrgce=1|srbbv=2|agentUri=/ruxitagentjs_ICANVfqru_10333260303165926.js"></script><style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #141414;
+    --card: #181818;
+    --tile-header: #252525;
+    --topbar: #2c2c2c;
+    --text: #eee;
+    --muted: #888;
+    --border: #333;
+    --teal: #7ec8e3;
+    --green: #2ecc71;
+    --red: #e74c3c;
+    --orange: #FF9800;
+    --yellow: #f1c40f;
+    --purple: #9b59b6;
+    --gray: #9E9E9E;
+    --sidebar-w: 230px;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* ── SIDEBAR ── */
+  #sidebar {
+    position: fixed;
+    top: 0; left: 0;
+    width: var(--sidebar-w);
+    height: 100vh;
+    background: #1a1a1a;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #sidebar-logo {
+    padding: 18px 16px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  #sidebar-logo .tool-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--teal);
+    letter-spacing: 0.5px;
+    line-height: 1.3;
+  }
+  #sidebar-logo .tool-sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  #sidebar nav { padding: 8px 0; flex: 1; }
+
+  #sidebar nav a {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 16px;
+    color: #bbb;
+    text-decoration: none;
+    font-size: 13px;
+    transition: background 0.15s, color 0.15s;
+    border-left: 3px solid transparent;
+  }
+  #sidebar nav a:hover, #sidebar nav a.active {
+    background: #222;
+    color: var(--teal);
+    border-left-color: var(--teal);
+  }
+  #sidebar nav a .sec-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background: #2a2a2a;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    flex-shrink: 0;
+    transition: background 0.15s, color 0.15s;
+  }
+  #sidebar nav a:hover .sec-num, #sidebar nav a.active .sec-num {
+    background: var(--teal);
+    color: #111;
+  }
+
+  #sidebar-footer {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* ── MAIN CONTENT ── */
+  #main {
+    margin-left: var(--sidebar-w);
+    flex: 1;
+    padding: 32px 40px 80px;
+    max-width: 960px;
+  }
+
+  /* ── SECTION ── */
+  .section {
+    margin-bottom: 64px;
+    scroll-margin-top: 24px;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .section-header h2 {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .section-icon {
+    font-size: 22px;
+    line-height: 1;
+  }
+  .sec-badge {
+    margin-left: auto;
+    background: #252525;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  p { margin-bottom: 12px; color: #ccc; }
+  p:last-child { margin-bottom: 0; }
+
+  h3 {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--teal);
+    margin: 24px 0 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
+
+  h4 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #ddd;
+    margin: 16px 0 8px;
+  }
+
+  /* ── TABLES ── */
+  .doc-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 20px;
+    font-size: 13px;
+  }
+  .doc-table th {
+    background: #222;
+    color: var(--teal);
+    padding: 8px 12px;
+    text-align: left;
+    border: 1px solid var(--border);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .doc-table td {
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    background: #1e1e1e;
+    vertical-align: top;
+    color: #ccc;
+  }
+  .doc-table tr:nth-child(even) td { background: #1a1a1a; }
+  .doc-table td code {
+    background: #0d0d0d;
+    color: var(--green);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+  .doc-table td .tag-teal {
+    background: rgba(126,200,227,0.12);
+    color: var(--teal);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  /* ── CODE BLOCKS ── */
+  pre {
+    background: #0a0a0a;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 10px 0 16px;
+    font-size: 12.5px;
+    line-height: 1.7;
+  }
+  pre code {
+    color: var(--green);
+    font-family: 'Consolas', 'Courier New', monospace;
+  }
+  pre code .kw { color: #cc99cd; }
+  pre code .str { color: #f8c555; }
+  pre code .cm { color: #666; font-style: italic; }
+  pre code .fn { color: var(--teal); }
+  pre code .num { color: var(--orange); }
+
+  code {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12.5px;
+  }
+  p code, li code {
+    background: #111;
+    color: var(--green);
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid #2a2a2a;
+  }
+
+  /* ── CALLOUT BOXES ── */
+  .callout {
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 14px 0;
+    font-size: 13px;
+    border-left: 4px solid;
+    color: #ccc;
+  }
+  .callout-tip { background: rgba(126,200,227,0.07); border-color: var(--teal); }
+  .callout-warn { background: rgba(255,152,0,0.07); border-color: var(--orange); }
+  .callout-danger { background: rgba(231,76,60,0.08); border-color: var(--red); }
+  .callout-info { background: rgba(46,204,113,0.07); border-color: var(--green); }
+  .callout strong { color: #eee; }
+
+  /* ── STATUS DOTS ── */
+  .dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    vertical-align: middle;
+    margin-right: 5px;
+  }
+  .dot-green { background: var(--green); }
+  .dot-red { background: var(--red); }
+  .dot-orange { background: var(--orange); }
+  .dot-yellow { background: var(--yellow); }
+  .dot-purple { background: var(--purple); }
+  .dot-gray { background: var(--gray); }
+
+  /* ── STATUS BADGE ── */
+  .status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+  .sb-green { background: rgba(46,204,113,0.15); color: var(--green); border: 1px solid rgba(46,204,113,0.3); }
+  .sb-red { background: rgba(231,76,60,0.15); color: var(--red); border: 1px solid rgba(231,76,60,0.3); }
+  .sb-orange { background: rgba(255,152,0,0.15); color: var(--orange); border: 1px solid rgba(255,152,0,0.3); }
+  .sb-yellow { background: rgba(241,196,15,0.15); color: var(--yellow); border: 1px solid rgba(241,196,15,0.3); }
+  .sb-purple { background: rgba(155,89,182,0.15); color: var(--purple); border: 1px solid rgba(155,89,182,0.3); }
+  .sb-gray { background: rgba(158,158,158,0.15); color: var(--gray); border: 1px solid rgba(158,158,158,0.3); }
+
+  ul, ol { padding-left: 22px; margin-bottom: 12px; color: #ccc; }
+  li { margin-bottom: 4px; }
+  li code { font-size: 12px; }
+
+  /* ── GRID ── */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 12px 0;
+  }
+  .three-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+    margin: 12px 0;
+  }
+
+  /* ── CARDS ── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .card h4 { margin-top: 0; }
+
+  /* ── QUICK REF GRID ── */
+  .qr-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 12px 0;
+  }
+  .qr-item {
+    background: #111;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    padding: 12px;
+  }
+  .qr-item .qr-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--teal);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 6px;
+  }
+  .qr-item pre {
+    margin: 0;
+    padding: 8px 10px;
+    font-size: 11.5px;
+    border: none;
+    background: #0a0a0a;
+    border-radius: 4px;
+  }
+
+  /* ── MOCK PANEL ── */
+  .panel-demo-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    margin: 20px 0 24px;
+  }
+  .panel-demo-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    margin-bottom: 8px;
+    padding: 3px 8px;
+    background: #222;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+
+  .mock-panel {
+    width: 300px;
+    height: 520px;
+    background: #141414;
+    border: 1px solid #3a3a3a;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.7), 0 0 0 1px #2a2a2a;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 12px;
+  }
+
+  .mp-topbar {
+    background: #2c2c2c;
+    padding: 8px 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px solid #3a3a3a;
+    flex-shrink: 0;
+  }
+  .mp-title {
+    flex: 1;
+  }
+  .mp-title .t1 {
+    font-size: 12px;
+    font-weight: 700;
+    color: #eee;
+    line-height: 1.2;
+  }
+  .mp-title .t2 {
+    font-size: 9px;
+    color: #888;
+    margin-top: 1px;
+  }
+  .mp-btn {
+    background: #3a3a3a;
+    border: 1px solid #4a4a4a;
+    color: #ccc;
+    border-radius: 4px;
+    padding: 3px 7px;
+    font-size: 10px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .mp-btn-red { background: rgba(231,76,60,0.2); border-color: var(--red); color: var(--red); }
+  .mp-btn-green { background: rgba(46,204,113,0.2); border-color: var(--green); color: var(--green); }
+
+  .mp-statusbar {
+    background: #1c1c1c;
+    padding: 4px 10px;
+    font-size: 10px;
+    color: var(--yellow);
+    border-bottom: 1px solid #2a2a2a;
+    flex-shrink: 0;
+  }
+
+  .mp-scanlog {
+    background: #161616;
+    padding: 4px 10px 5px;
+    border-bottom: 1px solid #2a2a2a;
+    flex-shrink: 0;
+  }
+  .mp-scanlog-row {
+    font-size: 10px;
+    color: #666;
+    line-height: 1.5;
+  }
+  .mp-scanlog-row .ok { color: #4a9; }
+
+  .mp-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .mp-body::-webkit-scrollbar { width: 4px; }
+  .mp-body::-webkit-scrollbar-track { background: #111; }
+  .mp-body::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+  .mp-tile {
+    background: #181818;
+    border: 1px solid #2a2a2a;
+    border-radius: 5px;
+    overflow: hidden;
+  }
+  .mp-tile-header {
+    background: #252525;
+    padding: 5px 8px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+  }
+  .mp-tile-dots {
+    display: flex;
+    gap: 3px;
+    flex-shrink: 0;
+  }
+  .mp-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .mp-tile-title {
+    flex: 1;
+    font-size: 11px;
+    font-weight: 700;
+    color: #ddd;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mp-tile-msg {
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 80px;
+  }
+  .mp-tile-chevron {
+    font-size: 9px;
+    color: #666;
+    flex-shrink: 0;
+  }
+  .mp-tile-x {
+    font-size: 10px;
+    color: #555;
+    flex-shrink: 0;
+    padding: 0 2px;
+  }
+
+  .mp-tile-body {
+    padding: 7px 8px;
+    border-top: 1px solid #222;
+  }
+  .mp-field-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  .mp-field {
+    flex: 1;
+  }
+  .mp-field-label {
+    font-size: 9px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .mp-field-val {
+    font-size: 11px;
+    color: #ddd;
+    font-weight: 600;
+  }
+  .mp-rule-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 5px;
+    padding-top: 5px;
+    border-top: 1px solid #222;
+  }
+  .mp-rule-label { font-size: 10px; color: #aaa; flex: 1; }
+  .mp-rule-status { font-size: 10px; font-weight: 700; }
+
+  .mp-bottom {
+    border-top: 1px solid #2a2a2a;
+    padding: 6px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .mp-return-preview {
+    background: #222;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 10px;
+    color: #bbb;
+    min-height: 32px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 4px;
+  }
+  .mp-copy-btn {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0;
+    flex-shrink: 0;
+  }
+  .mp-action-row {
+    display: flex;
+    gap: 5px;
+  }
+  .mp-action-btn {
+    flex: 1;
+    padding: 5px;
+    border-radius: 4px;
+    border: none;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .mp-btn-return { background: rgba(231,76,60,0.25); color: var(--red); border: 1px solid rgba(231,76,60,0.4); }
+  .mp-btn-approve { background: rgba(46,204,113,0.2); color: var(--green); border: 1px solid rgba(46,204,113,0.35); }
+  .mp-show-hidden {
+    background: #252525;
+    border: 1px solid #333;
+    color: #888;
+    border-radius: 4px;
+    padding: 4px;
+    font-size: 10px;
+    text-align: center;
+    cursor: pointer;
+    font-family: inherit;
+    width: 100%;
+  }
+
+  /* ── FLOW DIAGRAM ── */
+  .flow-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 12px 0;
+    position: relative;
+  }
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 14px;
+    background: #1a1a1a;
+    border: 1px solid var(--border);
+    position: relative;
+  }
+  .flow-step:first-child { border-radius: 6px 6px 0 0; }
+  .flow-step:last-child { border-radius: 0 0 6px 6px; }
+  .flow-step:not(:last-child) { border-bottom: none; }
+  .flow-num {
+    width: 22px;
+    height: 22px;
+    background: var(--teal);
+    color: #111;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .flow-text { font-size: 13px; color: #ccc; flex: 1; padding-top: 2px; }
+
+  /* ── HELPER TABLE ── */
+  .helper-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 20px;
+    font-size: 12.5px;
+  }
+  .helper-table th {
+    background: #1e1e1e;
+    color: var(--teal);
+    padding: 8px 12px;
+    text-align: left;
+    border: 1px solid var(--border);
+    font-weight: 700;
+    font-size: 12px;
+  }
+  .helper-table td {
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    background: #181818;
+    vertical-align: top;
+    color: #ccc;
+  }
+  .helper-table tr:nth-child(even) td { background: #1c1c1c; }
+  .helper-table td:first-child code {
+    color: var(--teal);
+    background: rgba(126,200,227,0.08);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  /* ── SCROLLSPY ── */
+  .back-top {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: #252525;
+    border: 1px solid var(--border);
+    color: var(--teal);
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    font-size: 16px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+    z-index: 200;
+  }
+  .back-top.visible { opacity: 1; pointer-events: all; }
+  .back-top:hover { background: #333; }
+
+  /* ── INLINE BADGE ── */
+  .inline-key {
+    display: inline-block;
+    background: #222;
+    border: 1px solid #3a3a3a;
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 11px;
+    color: #ccc;
+    font-family: 'Consolas', monospace;
+  }
+
+  /* ── PROPERTY BLOCK ── */
+  .prop-block {
+    background: #1a1a1a;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 10px 0 16px;
+  }
+  .prop-row {
+    display: flex;
+    align-items: flex-start;
+    border-bottom: 1px solid #222;
+    padding: 8px 14px;
+    gap: 16px;
+  }
+  .prop-row:last-child { border-bottom: none; }
+  .prop-key {
+    font-family: 'Consolas', monospace;
+    font-size: 12px;
+    color: var(--teal);
+    min-width: 150px;
+    flex-shrink: 0;
+    padding-top: 1px;
+  }
+  .prop-val { color: #bbb; font-size: 13px; flex: 1; }
+  .prop-val code {
+    background: #111;
+    color: var(--green);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11.5px;
+  }
+
+  /* ── SECTION DIVIDER ── */
+  .sec-divider {
+    height: 1px;
+    background: linear-gradient(to right, var(--border), transparent);
+    margin: 32px 0;
+  }
+
+  /* ── INTRO HERO ── */
+  .hero {
+    background: linear-gradient(135deg, #1a1a1a 0%, #1e1e1e 100%);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px 28px;
+    margin-bottom: 28px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(to right, var(--teal), var(--green));
+  }
+  .hero h1 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .hero p { color: #aaa; font-size: 13.5px; margin: 0; }
+  .hero .version-tag {
+    position: absolute;
+    top: 14px;
+    right: 16px;
+    background: rgba(126,200,227,0.12);
+    color: var(--teal);
+    border: 1px solid rgba(126,200,227,0.25);
+    border-radius: 4px;
+    padding: 3px 10px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  /* responsive */
+  @media (max-width: 768px) {
+    #sidebar { display: none; }
+    #main { margin-left: 0; padding: 20px; }
+    .qr-grid { grid-template-columns: 1fr; }
+    .two-col { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside id="sidebar">
+  <div id="sidebar-logo">
+    <div class="tool-name">Will's WO Review Tool</div>
+    <div class="tool-sub">Documentation Guide · v0.6.0</div>
+  </div>
+  <nav id="nav">
+    <a href="#s1" class="active"><span class="sec-num">1</span> Overview</a>
+    <a href="#s2"><span class="sec-num">2</span> The Panel</a>
+    <a href="#s3"><span class="sec-num">3</span> Rules</a>
+    <a href="#s4"><span class="sec-num">4</span> Variables</a>
+    <a href="#s5"><span class="sec-num">5</span> Groups &amp; Display</a>
+    <a href="#s6"><span class="sec-num">6</span> Scan System</a>
+    <a href="#s7"><span class="sec-num">7</span> Return Message &amp; Workflow</a>
+    <a href="#s8"><span class="sec-num">8</span> Settings</a>
+    <a href="#s9"><span class="sec-num">9</span> Export / Import</a>
+    <a href="#s10"><span class="sec-num">10</span> Formula Quick Reference</a>
+  </nav>
+  <div id="sidebar-footer">Will's WO Review Tool Guide</div>
+</aside>
+
+<!-- MAIN -->
+<main id="main">
+
+<!-- ══════════════════════════════════════════════════ -->
+<!-- SECTION 1 -->
+<!-- ══════════════════════════════════════════════════ -->
+<section class="section" id="s1">
+  <div class="section-header">
+    <span class="section-icon">🔍</span>
+    <h2>Overview</h2>
+    <span class="sec-badge">§1</span>
+  </div>
+
+  <div class="hero">
+    <div class="version-tag">v0.6.0</div>
+    <h1>Will's WO Review Tool</h1>
+    <p>A browser bookmarklet that injects a fixed right-side panel into Maximo work order pages, reads live DOM field values, evaluates configurable JS rules, and displays pass/fail/warn/na status in grouped tiles.</p>
+  </div>
+
+  <p>The tool injects a fixed 360px panel on the right side of any Maximo work order page. It traverses iframes to read field values and table data directly from the live DOM, evaluates JavaScript rule formulas, and displays results in grouped, collapsible tiles. The scan system automatically navigates Maximo tabs and dialogs to collect data from multiple areas of the WO, then returns to the WO tab. All configuration is persisted in browser <code>localStorage</code>.</p>
+
+  <h3>LocalStorage Keys</h3>
+  <table class="doc-table">
+    <thead>
+      <tr><th>Key</th><th>Contents</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>__wo_rules_config</code></td>
+        <td>Groups, rules, field registrations, settings (return message config, hotkey, message overrides)</td>
+      </tr>
+      <tr>
+        <td><code>__wo_scan_config</code></td>
+        <td>Scan targets — tabs/dialogs to visit, wait conditions</td>
+      </tr>
+      <tr>
+        <td><code>__wo_vars_config</code></td>
+        <td>Variables — named computed expressions</td>
+      </tr>
+      <tr>
+        <td><code>__wo_field_config</code></td>
+        <td>Registered field mappings (tab, label, DOM id)</td>
+      </tr>
+      <tr>
+        <td><code>__wo_group_state</code></td>
+        <td>Per-group collapsed/visible state and ordering</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Status Color Reference</h3>
+  <table class="doc-table">
+    <thead>
+      <tr><th>Color</th><th>Status</th><th>Trigger</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="dot dot-green"></span><span class="status-badge sb-green">PASS</span></td>
+        <td>Pass</td>
+        <td>Formula returned <code>true</code></td>
+      </tr>
+      <tr>
+        <td><span class="dot dot-red"></span><span class="status-badge sb-red">FAIL</span></td>
+        <td>Fail</td>
+        <td>Formula returned <code>false</code></td>
+      </tr>
+      <tr>
+        <td><span class="dot dot-orange"></span><span class="status-badge sb-orange">WARN</span></td>
+        <td>Warning</td>
+        <td>Formula returned <code>'warn'</code></td>
+      </tr>
+      <tr>
+        <td><span class="dot dot-yellow"></span><span class="status-badge sb-yellow">NA</span></td>
+        <td>Not Applicable</td>
+        <td>Formula returned <code>'na'</code></td>
+      </tr>
+      <tr>
+        <td><span class="dot dot-purple"></span><span class="status-badge sb-purple">ERROR</span></td>
+        <td>Error</td>
+        <td>Formula threw a JS exception</td>
+      </tr>
+      <tr>
+        <td><span class="dot dot-gray"></span><span class="status-badge sb-gray">—</span></td>
+        <td>Default / Unknown</td>
+        <td>Not yet evaluated or unrecognized return value</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!-- SECTION 2 -->
+<!-- ══════════════════════════════════════════════════ -->
+<section class="section" id="s2">
+  <div class="section-header">
+    <span class="section-icon">🖥️</span>
+    <h2>The Panel</h2>
+    <span class="sec-badge">§2</span>
+  </div>
+
+  <p>The panel is a fixed right-side overlay, 360px wide, that pushes page content left so nothing is obscured. It is independently scrollable and persists across Maximo tab navigation within the same page session.</p>
+
+  <h3>Panel Controls</h3>
+  <table class="doc-table">
+    <thead>
+      <tr><th>Control</th><th>Action</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Re-scan</strong></td>
+        <td>Triggers a full scan of all configured targets, then re-evaluates all rules and re-renders the panel</td>
+      </tr>
+      <tr>
+        <td><strong>Setup</strong></td>
+        <td>Opens the Setup UI modal for configuring rules, groups, scan targets, variables, and settings</td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--red)">Exit</strong></td>
+        <td>Removes the panel from the DOM. Run the bookmarklet again to restore it.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- MOCK PANEL -->
+  <div class="panel-demo-wrapper">
+    <div class="panel-demo-label">Example Panel</div>
+    <div class="mock-panel">
+      <!-- Top bar -->
+      <div class="mp-topbar">
+        <div class="mp-title">
+          <div class="t1">Will's WO | Review Tool</div>
+          <div class="t2">v0.6.0</div>
+        </div>
+        <button class="mp-btn">Re-scan</button>
+        <button class="mp-btn">Setup</button>
+        <button class="mp-btn mp-btn-red">Exit</button>
+      </div>
+      <!-- Status bar -->
+      <div class="mp-statusbar">Scan complete 10:34:21 AM</div>
+      <!-- Scan log -->
+      <div class="mp-scanlog">
+        <div class="mp-scanlog-row">▸ Actuals: <span class="ok">OK (1243ms)</span></div>
+        <div class="mp-scanlog-row">▸ Approvers: <span class="ok">OK (892ms)</span></div>
+      </div>
+      <!-- Tiles -->
+      <div class="mp-body">
+        <!-- Tile 1: expanded -->
+        <div class="mp-tile">
+          <div class="mp-tile-header">
+            <div class="mp-tile-dots">
+              <div class="mp-dot" style="background:var(--green)"></div>
+              <div class="mp-dot" style="background:var(--gray)"></div>
+            </div>
+            <div class="mp-tile-title">Work Order Summary</div>
+            <div class="mp-tile-chevron">▼</div>
+            <div class="mp-tile-x">×</div>
+          </div>
+          <div class="mp-tile-body">
+            <div class="mp-field-row">
+              <div class="mp-field">
+                <div class="mp-field-label">Work Order</div>
+                <div class="mp-field-val">1234567</div>
+              </div>
+              <div class="mp-field">
+                <div class="mp-field-label">Work Type</div>
+                <div class="mp-field-val">PM</div>
+              </div>
+            </div>
+            <div class="mp-field-row">
+              <div class="mp-field">
+                <div class="mp-field-label">Status</div>
+                <div class="mp-field-val">WAPPR</div>
+              </div>
+            </div>
+            <div class="mp-rule-row">
+              <div class="mp-dot" style="background:var(--green);width:7px;height:7px;border-radius:50%;flex-shrink:0"></div>
+              <div class="mp-rule-label">WO has description</div>
+              <div class="mp-rule-status" style="color:var(--green)">✓ OK</div>
+            </div>
+            <div class="mp-rule-row">
+              <div class="mp-dot" style="background:var(--gray);width:7px;height:7px;border-radius:50%;flex-shrink:0"></div>
+              <div class="mp-rule-label">Lot number check</div>
+              <div class="mp-rule-status" style="color:var(--gray)">— N/A</div>
+            </div>
+          </div>
+        </div>
+        <!-- Tile 2: collapsed, fail -->
+        <div class="mp-tile">
+          <div class="mp-tile-header">
+            <div class="mp-tile-dots">
+              <div class="mp-dot" style="background:var(--red)"></div>
+            </div>
+            <div class="mp-tile-title">Time Check</div>
+            <div class="mp-tile-msg" style="color:var(--red)">✗ Missing finish</div>
+            <div class="mp-tile-chevron">▶</div>
+            <div class="mp-tile-x">×</div>
+          </div>
+        </div>
+        <!-- Tile 3: collapsed, warn -->
+        <div class="mp-tile">
+          <div class="mp-tile-header">
+            <div class="mp-tile-dots">
+              <div class="mp-dot" style="background:var(--orange)"></div>
+            </div>
+            <div class="mp-tile-title">Lot Number</div>
+            <div class="mp-tile-msg" style="color:var(--orange)">⚠ Verify lot</div>
+            <div class="mp-tile-chevron">▶</div>
+            <div class="mp-tile-x">×</div>
+          </div>
+        </div>
+      </div>
+      <!-- Bottom -->
+      <div class="mp-bottom">
+        <div class="mp-return-preview">
+          <span>Please add actual finish date.</span>
+          <button class="mp-copy-btn">📋</button>
+        </div>
+        <div class="mp-action-row">
+          <button class="mp-action-btn mp-btn-return">↩ Return</button>
+          <button class="mp-action-btn mp-btn-approve">✓ Approve</button>
+        </div>
+        <button class="mp-show-hidden">Show hidden tiles</button>
+      </div>
+    </div>
+  </div>
+
+  <h3>Status Bar</h3>
+  <p>The status bar below the header displays the current scan state. Possible values:</p>
+  <ul>
+    <li><span style="color:var(--teal)">Scanning…</span> — scan in progress</li>
+    <li><span style="color:var(--yellow)">Scan complete HH:MM:SS AM/PM</span> — last successful scan time</li>
+    <li><span style="color:var(--muted)">Reading WO tab…</span> — initial data capture from WO tab</li>
+  </ul>
+
+  <h3>Scan Log</h3>
+  <p>A collapsible area below the status bar shows per-step results after each scan. It is scrollable up to 80px tall. Each line shows the target name and its result:</p>
+  <table class="doc-table">
+    <thead><tr><th>Log Entry</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>Target: OK (Xms)</code></td><td>Target captured successfully in X milliseconds</td></tr>
+      <tr><td><code>Target: TIMEOUT waiting for "text" (Xms)</code></td><td>waitFor text never appeared within the timeout window</td></tr>
+      <tr><td><code>Target: FAILED</code></td><td>An error occurred during navigation or capture</td></tr>
+      <tr><td><code>Target: skipped (condition false)</code></td><td>The target's <code>condition</code> formula returned false; target was skipped</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Group Tiles</h3>
+  <p>Each tile card has the following structure:</p>
+  <div class="prop-block">
+    <div class="prop-row"><div class="prop-key">Header bar</div><div class="prop-val">Background <code>#252525</code>. Contains: colored status dots (one per ruleRef), title in bold, optional ⓘ tooltip icon (teal), optional inline header message (colored by rule status), expand/collapse button (▶/▼), × hide button.</div></div>
+    <div class="prop-row"><div class="prop-key">Banner message</div><div class="prop-val">Optional blue-tinted box shown at the top of the expanded group body. Static text configured per group.</div></div>
+    <div class="prop-row"><div class="prop-key">Field rows</div><div class="prop-val">Captured field values with labels, arranged in configurable rows. Multiple fields can share a row with optional % width.</div></div>
+    <div class="prop-row"><div class="prop-key">Variable fields</div><div class="prop-val">Variable computed values rendered as labelled field rows with a teal <code>(var)</code> tag next to the label.</div></div>
+    <div class="prop-row"><div class="prop-key">Linked table</div><div class="prop-val">Shows captured table rows inline. Has a ⚙ Cols button to toggle column visibility.</div></div>
+    <div class="prop-row"><div class="prop-key">Rule status blocks</div><div class="prop-val">Small colored circle + rule label + status label. Sub-messages (bulleted, colored by status) appear below for fail/warn rules with configured messages.</div></div>
+  </div>
+
+  <h3>Rule Status Blocks</h3>
+  <p>Inside expanded tiles, each rule referenced by the group shows a status block:</p>
+  <ul>
+    <li>Small colored circle matching the rule result color</li>
+    <li>Rule label text</li>
+    <li>Status label: <span style="color:var(--green)">✓ OK</span> / <span style="color:var(--red)">✗ Failed</span> / <span style="color:var(--orange)">⚠ Warning</span> / <span style="color:var(--yellow)">— N/A</span></li>
+    <li>Sub-messages (bulleted, colored by status) appear below the status line for fail/warn rules that have configured messages</li>
+  </ul>
+
+  <h3>Bottom Controls</h3>
+  <div class="prop-block">
+    <div class="prop-row"><div class="prop-key">Return message box</div><div class="prop-val">Dark background (<code>#222</code>). Shows assembled return message text, or <em style="color:var(--muted)">(No failed rules — return message will appear here)</em> in muted gray when all rules pass. Has a 📋 clipboard copy button.</div></div>
+    <div class="prop-row"><div class="prop-key">↩ Return button</div><div class="prop-val">Red. Full-width flex 1. Opens Route Workflow dialog, selects "Return Work Order", fills memo with return message.</div></div>
+    <div class="prop-row"><div class="prop-key">✓ Approve button</div><div class="prop-val">Green. Full-width flex 1. Opens Route Workflow dialog, selects "Complete Review", submits.</div></div>
+    <div class="prop-row"><div class="prop-key">Show hidden tiles</div><div class="prop-val">Full-width button. Reveals all tiles previously hidden with the × button.</div></div>
+  </div>
+
+  <h3>Reordering Groups</h3>
+  <p>Groups can be dragged by their header bar to reorder. The new order is saved automatically to <code>__wo_group_state</code>.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!-- SECTION 3 -->
+<!-- ══════════════════════════════════════════════════ -->
+<section class="section" id="s3">
+  <div class="section-header">
+    <span class="section-icon">📋</span>
+    <h2>Rules</h2>
+    <span class="sec-badge">§3</span>
+  </div>
+
+  <p>Rules are JavaScript formulas evaluated against cached field and table data. Each rule returns a status value that drives the panel display and return message assembly.</p>
+
+  <h3>Return Values</h3>
+  <table class="doc-table">
+    <thead><tr><th>Return Value</th><th>Status</th><th>Color</th></tr></thead>
+    <tbody>
+      <tr><td><code>true</code></td><td>Pass</td><td><span class="dot dot-green"></span> Green</td></tr>
+      <tr><td><code>false</code></td><td>Fail</td><td><span class="dot dot-red"></span> Red</td></tr>
+      <tr><td><code>'warn'</code></td><td>Warning</td><td><span class="dot dot-orange"></span> Orange</td></tr>
+      <tr><td><code>'na'</code></td><td>Not Applicable</td><td><span class="dot dot-yellow"></span> Yellow</td></tr>
+      <tr><td><em>throws exception</em></td><td>Error</td><td><span class="dot dot-purple"></span> Purple</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Rule Properties</h3>
+  <table class="doc-table">
+    <thead><tr><th>Property</th><th>Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>id</code></td><td>string</td><td>Unique identifier for the rule</td></tr>
+      <tr><td><code>label</code></td><td>string</td><td>Display name shown in panel and used as fallback message</td></tr>
+      <tr><td><code>formula</code></td><td>JS string</td><td>The rule logic. Must return <code>true</code>, <code>false</code>, <code>'warn'</code>, or <code>'na'</code></td></tr>
+      <tr><td><code>passMsg</code></td><td>string</td><td>Message shown in panel when rule passes. Supports <code>{{expr}}</code>. Auto-prepends ✓</td></tr>
+      <tr><td><code>shortPassMsg</code></td><td>string</td><td>Compact message shown in collapsed tile header on pass. Supports <code>{{expr}}</code></td></tr>
+      <tr><td><code>shortFailMsg</code></td><td>string</td><td>Compact message shown in collapsed tile header on fail. Supports <code>{{expr}}</code></td></tr>
+      <tr><td><code>failMsgs</code></td><td>array</td><td>Messages contributed to the return message on fail. Supports conditional syntax.</td></tr>
+      <tr><td><code>warnMsgs</code></td><td>array</td><td>Messages contributed to the return message on warn. Supports conditional syntax.</td></tr>
+      <tr><td><code>shortWarnMsg</code></td><td>string</td><td>Compact message shown in collapsed tile header on warn. Supports <code>{{expr}}</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Helper Functions</h3>
+  <table class="helper-table">
+    <thead><tr><th>Function</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>F(field)</code></td><td>Get a field value by <code>"Tab :: Label"</code> key. Also resolves by suffix — e.g. <code>F('Status')</code> matches the first registered field ending with <code>' :: Status'</code></td></tr>
+      <tr><td><code>T(table)</code></td><td>Get all rows of a captured table as an array of objects (keyed by column header)</td></tr>
+      <tr><td><code>rowCount(table)</code></td><td>Number of rows in a captured table</td></tr>
+      <tr><td><code>col(table, colName)</code></td><td>Array of values from a specific column across all rows</td></tr>
+      <tr><td><code>has(table, colName, value)</code></td><td>Returns <code>true</code> if any row has the given value in the specified column</td></tr>
+      <tr><td><code>hours(str)</code></td><td>Parse a <code>HH:MM</code> or decimal string to a numeric hours value</td></tr>
+      <tr><td><code>hoursBetween(a, b)</code></td><td>Hours between two datetime strings (format: <code>DD/MM/YYYY HH:MM</code>)</td></tr>
+      <tr><td><code>oneOf(val, arr)</code></td><td>Returns <code>true</code> if <code>val</code> is in the array <code>arr</code></td></tr>
+      <tr><td><code>contains(text, pattern)</code></td><td>Regex test — returns boolean</td></tr>
+      <tr><td><code>matches(text, pattern)</code></td><td>Returns an array of unique regex matches</td></tr>
+      <tr><td><code>isEmpty(v)</code> / <code>notEmpty(v)</code></td><td>Empty / not-empty check (handles null, undefined, empty string)</td></tr>
+      <tr><td><code>maxLaborHours(tableTitle, nameCol, hoursCol)</code></td><td>Returns the maximum total hours attributed to any single person in the specified labor table</td></tr>
+      <tr><td><code>V(id)</code></td><td>Get a Variable's computed value by its ID or label</td></tr>
+    </tbody>
+  </table>
+
+  <h3>{{expr}} Interpolation</h3>
+  <p>Embed dynamic values in any message string (passMsg, shortFailMsg, etc.) using <code>{{expr}}</code>.</p>
+  <ul>
+    <li>The expression is evaluated at render time against the same cached data as rules</li>
+    <li>Do <strong>not</strong> use <code>return</code> inside <code>{{...}}</code> — for multi-statement expressions, wrap in an IIFE:</li>
+  </ul>
+  <pre><code><span class="cm">// Single expression — OK</span>
+<span class="str">"Lot: {{F('Lot Number')}}"</span>
+
+<span class="cm">// Multi-statement — use IIFE</span>
+<span class="str">"Hours: {{(function(){ var h=hoursBetween(F('Actual Start'),F('Actual Finish')); return h?h.toFixed(1):'?'; })()}}"</span></code></pre>
+
+  <div class="callout callout-warn">
+    <strong>Note:</strong> If <code>{{expr}}</code> renders as <code>?</code> in the panel, the expression threw an error. Use the Debug Dump in Settings to verify field key names.
+  </div>
+
+  <h3>Conditional Message Syntax (failMsgs / warnMsgs)</h3>
+  <p>Each entry in <code>failMsgs</code> or <code>warnMsgs</code> can be either a plain message or a conditional message:</p>
+  <div class="prop-block">
+    <div class="prop-row"><div class="prop-key">Plain line</div><div class="prop-val">Always included when the rule fails or warns.</div></div>
+    <div class="prop-row"><div class="prop-key"><code>condition :: message</code></div><div class="prop-val">Only included if the condition formula is truthy. The <code>::</code> is the separator.</div></div>
+  </div>
+
+  <div class="callout callout-danger">
+    <strong>Important:</strong> If you use a full field key in a condition (e.g. <code>F('Work Order :: Status')</code>), the <code>::</code> will be parsed as the condition/message separator. Use short keys instead: <code>F('Status')</code>
+  </div>
+
+  <h3>Code Examples</h3>
+
+  <h4>Field check (with na guard)</h4>
+  <pre><code><span class="kw">var</span> lot = <span class="fn">F</span>(<span class="str">'Work Order :: Production Run Lot #'</span>);
+<span class="kw">if</span> (!lot) <span class="kw">return</span> <span class="str">'na'</span>;
+<span class="kw">return</span> lot.length > <span class="num">3</span>;</code></pre>
+
+  <h4>Duration vs actual hours</h4>
+  <pre><code><span class="kw">var</span> d = <span class="fn">hours</span>(<span class="fn">F</span>(<span class="str">'Duration'</span>));
+<span class="kw">var</span> a = <span class="fn">hoursBetween</span>(<span class="fn">F</span>(<span class="str">'Actual Start'</span>), <span class="fn">F</span>(<span class="str">'Actual Finish'</span>));
+<span class="kw">if</span> (!d || !a) <span class="kw">return</span> <span class="str">'na'</span>;
+<span class="kw">return</span> d <= a;</code></pre>
+
+  <h4>Warn on emergency work type</h4>
+  <pre><code><span class="kw">var</span> wt = <span class="fn">F</span>(<span class="str">'Work Type'</span>);
+<span class="kw">if</span> (wt === <span class="str">'EM'</span>) <span class="kw">return</span> <span class="str">'warn'</span>;
+<span class="kw">return</span> <span class="kw">true</span>;</code></pre>
+
+  <h4>Table row count check</h4>
+  <pre><code><span class="kw">return</span> <span class="fn">rowCount</span>(<span class="str">'Labor'</span>) > <span class="num">0</span>;</code></pre>
+
+  <h4>Using a variable</h4>
+  <pre><code><span class="kw">var</span> total = parseFloat(<span class="fn">V</span>(<span class="str">'total_labor_hours'</span>));
+<span class="kw">if</span> (isNaN(total)) <span class="kw">return</span> <span class="str">'na'</span>;
+<span class="kw">return</span> total >= <span class="num">0.5</span>;</code></pre>
+</section>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!-- SECTION 4 -->
+<!-- ══════════════════════════════════════════════════ -->
+<section class="section" id="s4">
+  <div class="section-header">
+    <span class="section-icon">⚡</span>
+    <h2>Variables</h2>
+    <span class="sec-badge">§4</span>
+  </div>
+
+  <p>Variables are named computed expressions that return a display value (string, number, etc.) rather than a pass/fail status. They are evaluated before rules after each scan, making their values available for rules, group header messages, and field row display.</p>
+
+  <h3>Creating Variables</h3>
+  <p>Variables are created in <strong>Setup → Variables</strong>. Each variable has three properties:</p>
+  <div class="prop-block">
+    <div class="prop-row"><div class="prop-key">ID</div><div class="prop-val">Unique string identifier. Used in <code>V('id')</code> calls.</div></div>
+    <div class="prop-row"><div class="prop-key">Label</div><div class="prop-val">Display name. Can also be used in <code>V('label')</code> calls.</div></div>
+    <div class="prop-row"><div class="prop-key">Formula</div><div class="prop-val">JS expression that must <code>return</code> a value of any type. All rule helper functions are available.</div></div>
+  </div>
+
+  <h3>Using Variables</h3>
+  <table class="doc-table">
+    <thead><tr><th>Usage</th><th>How</th></tr></thead>
+    <tbody>
+      <tr><td>In rule formulas</td><td><code>V('label')</code> or <code>V('v_idstring')</code></td></tr>
+      <tr><td>As group header inline message</td><td>Set the group's headerMsg type to <code>'variable'</code> in Setup → Groups</td></tr>
+      <tr><td>As field rows in group body</td><td>Add to the group's Variable Fields list in Setup → Groups. Displayed with teal label and <code>(var)</code> tag.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Example Formulas</h3>
+
+  <h4>Work type and status summary</h4>
+  <pre><code><span class="kw">return</span> <span class="fn">F</span>(<span class="str">'Work Order :: Work Type'</span>) + <span class="str">' — '</span> + <span class="fn">F</span>(<span class="str">'Work Order :: Status'</span>);</code></pre>
+
+  <h4>Total labor hours from table</h4>
+  <pre><code><span class="kw">var</span> rows = <span class="fn">T</span>(<span class="str">'Labor'</span>);
+<span class="kw">var</span> total = <span class="num">0</span>;
+rows.forEach(<span class="kw">function</span>(r) {
+  total += <span class="fn">hours</span>(r[<span class="str">'Regular Hours'</span>] || <span class="str">'0'</span>);
+});
+<span class="kw">return</span> total.toFixed(<span class="num">2</span>) + <span class="str">' hrs'</span>;</code></pre>
+
+  <div class="callout callout-tip">
+    <strong>Tip:</strong> Variables are evaluated in the order they are defined. A variable can reference a previously defined variable via <code>V()</code>, but not one defined after it.
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!-- SECTION 5 -->
+<!-- ══════════════════════════════════════════════════ -->
+<section class="section" id="s5">
+  <div class="section-header">
+    <span class="section-icon">🗂️</span>
+    <h2>Groups &amp; Display</h2>
+    <span class="sec-badge">§5</span>
+  </div>
+
+  <p>Groups are the visual tile cards displayed in the panel. Each group provides a focused view of one area of the work order, combining field values, table data, and rule results.</p>
+
+  <h3>Group Contents</h3>
+  <table class="doc-table">
+    <thead><tr><th>Content Type</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Fields</strong></td><td>Captured field values with their labels, arranged in configurable rows</td></tr>
+      <tr><td><strong>Variable Fields</strong></td><td>Variable computed values rendered as labelled field rows with a teal <code>(var)</code> tag</td></tr>
+      <tr><td><strong>Linked Table</strong></td><td>Shows table rows inline with a ⚙
+
+
+
+
+
+
+
+
+
+
+
+
+
