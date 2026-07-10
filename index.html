@@ -1123,14 +1123,14 @@
       <tr><td><code>id</code></td><td>string</td><td>Unique identifier for the rule</td></tr>
       <tr><td><code>label</code></td><td>string</td><td>Display name shown in panel and used as fallback message</td></tr>
       <tr><td><code>formula</code></td><td>JS string</td><td>The rule logic. Must return <code>true</code>, <code>false</code>, <code>'warn'</code>, or <code>'na'</code></td></tr>
-      <tr><td><code>passMsg</code></td><td>string</td><td>Message shown in panel when rule passes. Supports <code>{{expr}}</code>. Auto-prepends ✓</td></tr>
-      <tr><td><code>shortPassMsg</code></td><td>string</td><td>Compact message shown in collapsed tile header on pass. Supports <code>{{expr}}</code></td></tr>
-      <tr><td><code>shortFailMsg</code></td><td>string</td><td>Compact message shown in collapsed tile header on fail. Supports <code>{{expr}}</code></td></tr>
-      <tr><td><code>failMsgs</code></td><td>array</td><td>Messages contributed to the return message on fail. Supports conditional syntax.</td></tr>
-      <tr><td><code>warnMsgs</code></td><td>array</td><td>Messages contributed to the return message on warn. Supports conditional syntax.</td></tr>
-      <tr><td><code>shortWarnMsg</code></td><td>string</td><td>Compact message shown in collapsed tile header on warn. Supports <code>{{expr}}</code></td></tr>
+      <tr><td><code>pass</code> / <code>fail</code> / <code>warn</code></td><td>object</td><td>One message config per status: <code>{ short, long, returnMode, returnCustom }</code> (<code>pass</code> has no <code>returnMode</code>/<code>returnCustom</code> — only fail/warn contribute to the return message)</td></tr>
+      <tr><td>&nbsp;&nbsp;<code>.short</code></td><td>string</td><td>One-line message shown in the collapsed group header. Supports <code>{{expr}}</code></td></tr>
+      <tr><td>&nbsp;&nbsp;<code>.long</code></td><td>array</td><td>List of <code>{ condition, msg }</code> entries shown as a bullet list in the expanded tile. Every entry whose <code>condition</code> is blank or truthy is shown</td></tr>
+      <tr><td>&nbsp;&nbsp;<code>.returnMode</code></td><td>string</td><td><code>'none'</code> / <code>'short'</code> / <code>'long'</code> / <code>'custom'</code> — what this status contributes to the copied return message</td></tr>
+      <tr><td>&nbsp;&nbsp;<code>.returnCustom</code></td><td>string</td><td>Text used when <code>returnMode</code> is <code>'custom'</code>. Supports <code>{{expr}}</code></td></tr>
     </tbody>
   </table>
+  <p>All three statuses (Pass/Fail/Warn) use the identical <code>{ short, long }</code> shape, edited inline in each rule's collapsible Pass/Fail/Warn section in Setup → Rules — there's no separate "return message" screen anymore.</p>
 
   <h3>Helper Functions</h3>
   <table class="helper-table">
@@ -1153,7 +1153,7 @@
   </table>
 
   <h3>{{expr}} Interpolation</h3>
-  <p>Embed dynamic values in any message string (passMsg, shortFailMsg, etc.) using <code>{{expr}}</code>.</p>
+  <p>Embed dynamic values in any message string (a Short field, a Long entry's message, or a return message's Custom text) using <code>{{expr}}</code>.</p>
   <ul>
     <li>The expression is evaluated at render time against the same cached data as rules</li>
     <li>Do <strong>not</strong> use <code>return</code> inside <code>{{...}}</code> — for multi-statement expressions, wrap in an IIFE:</li>
@@ -1168,15 +1168,15 @@
     <strong>Note:</strong> If <code>{{expr}}</code> renders as <code>?</code> in the panel, the expression threw an error. Use the Debug Dump in Settings to verify field key names.
   </div>
 
-  <h3>Conditional Message Syntax (failMsgs / warnMsgs)</h3>
-  <p>Each entry in <code>failMsgs</code> or <code>warnMsgs</code> can be either a plain message or a conditional message:</p>
+  <h3>Conditional Messages (Long list entries)</h3>
+  <p>Each entry in a Pass/Fail/Warn "Long" list has its own separate <strong>Condition</strong> and <strong>Message</strong> input — added with the "+ Add message" button in Setup → Rules:</p>
   <div class="prop-block">
-    <div class="prop-row"><div class="prop-key">Plain line</div><div class="prop-val">Always included when the rule fails or warns.</div></div>
-    <div class="prop-row"><div class="prop-key"><code>condition :: message</code></div><div class="prop-val">Only included if the condition formula is truthy. The <code>::</code> is the separator.</div></div>
+    <div class="prop-row"><div class="prop-key">Condition blank</div><div class="prop-val">The message is always included when the rule reaches that status.</div></div>
+    <div class="prop-row"><div class="prop-key">Condition set</div><div class="prop-val">A JS formula (same rules as the main formula box) — the message is only included if it's truthy.</div></div>
   </div>
 
-  <div class="callout callout-danger">
-    <strong>Important:</strong> If you use a full field key in a condition (e.g. <code>F('Work Order :: Status')</code>), the <code>::</code> will be parsed as the condition/message separator. Use short keys instead: <code>F('Status')</code>
+  <div class="callout callout-tip">
+    <strong>Note:</strong> Condition and message are separate fields, so a condition that references a qualified field key like <code>F('Work Order :: Status')</code> is completely safe — there's no delimiter to collide with. (Older versions parsed <code>condition :: message</code> out of a single line, which broke exactly on inputs like this; that's why this changed.)
   </div>
 
   <h3>Code Examples</h3>

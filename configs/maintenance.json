@@ -2,7 +2,7 @@
   "id": "maintenance",
   "name": "Maintenance",
   "description": "Designed for maintenance personnel",
-  "configVersion": 1,
+  "configVersion": 2,
   "rules": {
     "groups": [
       {
@@ -320,129 +320,266 @@
         "id": "r_lot",
         "label": "Lot Number Provided",
         "formula": "var lot=(F('Work Order :: Production Run Lot #')||'').trim();\nif(/^n[\\/\\\\]?a$/i.test(lot)) return 'warn';\nreturn lot.length>3;\n",
-        "passMsg": "{{(function(){var lot=(F('Production Run Lot #')||'').trim();return lot.length>3?'Lot #: '+lot:'';})()}}",
-        "shortPassMsg": "{{(function(){var lot=(F('Production Run Lot #')||'').trim();return lot.length>3?'✓ '+lot:'';})()}}",
-        "failMsgs": [
-          {
-            "msg": "No Lot # provided."
-          }
-        ],
-        "shortFailMsg": "No Lot #",
-        "warnMsgs": [
-          {
-            "msg": "{{(function(){var lot=(F('Production Run Lot #')||'').trim();return lot?'Lot number is '+lot:'Lot number is N/A';})()}}"
-          }
-        ],
-        "shortWarnMsg": "{{(function(){var lot=(F('Production Run Lot #')||'').trim();return lot?'⚠ Lot is '+lot:'⚠ N/A';})()}}"
+        "pass": {
+          "short": "{{(function(){var lot=(F('Production Run Lot #')||'').trim();return lot.length>3?'✓ '+lot:'';})()}}",
+          "long": [
+            {
+              "condition": "",
+              "msg": "{{(function(){var lot=(F('Production Run Lot #')||'').trim();return lot.length>3?'Lot #: '+lot:'';})()}}"
+            }
+          ]
+        },
+        "fail": {
+          "short": "No Lot #",
+          "long": [
+            {
+              "condition": "",
+              "msg": "No Lot # provided."
+            }
+          ],
+          "returnMode": "custom",
+          "returnCustom": "lot# missing"
+        },
+        "warn": {
+          "short": "{{(function(){var lot=(F('Production Run Lot #')||'').trim();return lot?'⚠ Lot is '+lot:'⚠ N/A';})()}}",
+          "long": [
+            {
+              "condition": "",
+              "msg": "{{(function(){var lot=(F('Production Run Lot #')||'').trim();return lot?'Lot number is '+lot:'Lot number is N/A';})()}}"
+            }
+          ],
+          "returnMode": "none",
+          "returnCustom": "lot# missing"
+        }
       },
       {
         "id": "r_duration",
         "label": "Time Validated",
         "formula": "var start = F('Work Order :: Actual Start');\nvar finish = F('Work Order :: Actual Finish');\nvar dur = F('Work Order :: Duration');\nif (!start || !finish) return false;\nvar d = hours(dur);\nvar a = hoursBetween(start, finish);\nif (d == null || d === 0 || a == null) return false;\nreturn d <= a;\n",
-        "failMsgs": [
-          {
-            "msg": "{{(function(){var s=F('Actual Start');var f=F('Actual Finish');var d=hours(F('Duration'));var ms=[];if(!s)ms.push('Actual Start missing');if(!f)ms.push('Actual Finish missing');if(!d)ms.push('Duration missing or zero');var a=hoursBetween(s,f);if(d&&d>0&&a!=null&&d>a)ms.push('Duration ('+d.toFixed(2)+' hrs) exceeds elapsed ('+a.toFixed(2)+' hrs)');return ms.join(' | ');})()}}"
-          }
-        ],
-        "passMsg": "{{(function(){var d=hours(F('Duration'));var a=hoursBetween(F('Actual Start'),F('Actual Finish'));return (d!=null&&a!=null)?d.toFixed(2)+' hrs duration / '+a.toFixed(2)+' hrs elapsed':'';})()}}",
-        "shortPassMsg": "{{(function(){var d=hours(F('Duration'));return d!=null?'✓ '+d.toFixed(2)+' hrs':'';})()}}",
-        "shortFailMsg": "{{!(F('Work Order :: Actual Start'))&&!(F('Work Order :: Actual Finish'))&&(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'Missing: Start, Finish, Duration':!(F('Work Order :: Actual Start'))&&(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'Missing: Start, Duration':!(F('Work Order :: Actual Finish'))&&(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'Missing: Finish, Duration':!(F('Work Order :: Actual Start'))&&!(F('Work Order :: Actual Finish'))?'Missing: Start, Finish':!(F('Work Order :: Actual Start'))?'Missing: Actual Start':!(F('Work Order :: Actual Finish'))?'Missing: Actual Finish':(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'Missing: Duration':hours(F('Work Order :: Duration'))!=null&&hoursBetween(F('Work Order :: Actual Start'),F('Work Order :: Actual Finish'))!=null&&hours(F('Work Order :: Duration'))>hoursBetween(F('Work Order :: Actual Start'),F('Work Order :: Actual Finish'))?'Duration > Elapsed':'Check times'}}"
+        "pass": {
+          "short": "{{(function(){var d=hours(F('Duration'));return d!=null?'✓ '+d.toFixed(2)+' hrs':'';})()}}",
+          "long": [
+            {
+              "condition": "",
+              "msg": "{{(function(){var d=hours(F('Duration'));var a=hoursBetween(F('Actual Start'),F('Actual Finish'));return (d!=null&&a!=null)?d.toFixed(2)+' hrs duration / '+a.toFixed(2)+' hrs elapsed':'';})()}}"
+            }
+          ]
+        },
+        "fail": {
+          "short": "{{!(F('Work Order :: Actual Start'))&&!(F('Work Order :: Actual Finish'))&&(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'Missing: Start, Finish, Duration':!(F('Work Order :: Actual Start'))&&(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'Missing: Start, Duration':!(F('Work Order :: Actual Finish'))&&(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'Missing: Finish, Duration':!(F('Work Order :: Actual Start'))&&!(F('Work Order :: Actual Finish'))?'Missing: Start, Finish':!(F('Work Order :: Actual Start'))?'Missing: Actual Start':!(F('Work Order :: Actual Finish'))?'Missing: Actual Finish':(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'Missing: Duration':hours(F('Work Order :: Duration'))!=null&&hoursBetween(F('Work Order :: Actual Start'),F('Work Order :: Actual Finish'))!=null&&hours(F('Work Order :: Duration'))>hoursBetween(F('Work Order :: Actual Start'),F('Work Order :: Actual Finish'))?'Duration > Elapsed':'Check times'}}",
+          "long": [
+            {
+              "condition": "",
+              "msg": "{{(function(){var s=F('Actual Start');var f=F('Actual Finish');var d=hours(F('Duration'));var ms=[];if(!s)ms.push('Actual Start missing');if(!f)ms.push('Actual Finish missing');if(!d)ms.push('Duration missing or zero');var a=hoursBetween(s,f);if(d&&d>0&&a!=null&&d>a)ms.push('Duration ('+d.toFixed(2)+' hrs) exceeds elapsed ('+a.toFixed(2)+' hrs)');return ms.join(' | ');})()}}"
+            }
+          ],
+          "returnMode": "custom",
+          "returnCustom": "{{!(F('Work Order :: Actual Start'))&&!(F('Work Order :: Actual Finish'))&&(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'missing actual start/finish and duration':!(F('Work Order :: Actual Start'))&&(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'missing actual start and duration':!(F('Work Order :: Actual Finish'))&&(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'missing actual finish and duration':!(F('Work Order :: Actual Start'))&&!(F('Work Order :: Actual Finish'))?'missing actual start/finish':!(F('Work Order :: Actual Start'))?'missing actual start':!(F('Work Order :: Actual Finish'))?'missing actual finish':(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'missing duration':hours(F('Work Order :: Duration'))!=null&&hoursBetween(F('Work Order :: Actual Start'),F('Work Order :: Actual Finish'))!=null&&hours(F('Work Order :: Duration'))>hoursBetween(F('Work Order :: Actual Start'),F('Work Order :: Actual Finish'))?'duration bigger than time between actual start/finish':'Check times'}}"
+        },
+        "warn": {
+          "short": "",
+          "long": [],
+          "returnMode": "none",
+          "returnCustom": "{{!(F('Work Order :: Actual Start'))&&!(F('Work Order :: Actual Finish'))&&(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'missing actual start/finish and duration':!(F('Work Order :: Actual Start'))&&(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'missing actual start and duration':!(F('Work Order :: Actual Finish'))&&(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'missing actual finish and duration':!(F('Work Order :: Actual Start'))&&!(F('Work Order :: Actual Finish'))?'missing actual start/finish':!(F('Work Order :: Actual Start'))?'missing actual start':!(F('Work Order :: Actual Finish'))?'missing actual finish':(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'missing duration':hours(F('Work Order :: Duration'))!=null&&hoursBetween(F('Work Order :: Actual Start'),F('Work Order :: Actual Finish'))!=null&&hours(F('Work Order :: Duration'))>hoursBetween(F('Work Order :: Actual Start'),F('Work Order :: Actual Finish'))?'duration bigger than time between actual start/finish':'Check times'}}"
+        }
       },
       {
         "id": "r_downtime",
         "label": "Downtime Logged",
         "formula": "var wt = F('Work Order :: Work Type');\nif (!oneOf(wt, ['DM','DMPDM','DMPM','FDM','RBLD','SAFDM','TRBL','SDDM'])) return true;\nif (!notEmpty(F('Work Order :: Asset'))) return true;\nreturn rowCount('m69f3c12d') > 0;\n",
-        "passMsg": "{{(function(){var wt=F('Work Type');var types=['DM','DMPDM','DMPM','FDM','RBLD','SAFDM','TRBL','SDDM'];if(!oneOf(wt,types))return 'Not req.';if(!notEmpty(F('Asset')))return '✓ No asset - skipped';return '✓ Downtime confirmed: '+col('m69f3c12d','Downtime').reduce(function(s,v){var h=hours(v);return s+(h||0);},0).toFixed(2)+' hrs';})()}}",
-        "shortPassMsg": "{{(function(){var wt=F('Work Type');var types=['DM','DMPDM','DMPM','FDM','RBLD','SAFDM','TRBL','SDDM'];if(!oneOf(wt,types))return '✓ Not req.';if(!notEmpty(F('Asset')))return '✓ No asset';return '✓ Downtime: '+col('m69f3c12d','Downtime').reduce(function(s,v){var h=hours(v);return s+(h||0);},0).toFixed(2);})()}}",
-        "shortFailMsg": "Downtime missing",
-        "failMsgs": [
-          {
-            "msg": "Downtime record is missing. At least one downtime entry is required for corrective work types."
-          }
-        ]
+        "pass": {
+          "short": "{{(function(){var wt=F('Work Type');var types=['DM','DMPDM','DMPM','FDM','RBLD','SAFDM','TRBL','SDDM'];if(!oneOf(wt,types))return '✓ Not req.';if(!notEmpty(F('Asset')))return '✓ No asset';return '✓ Downtime: '+col('m69f3c12d','Downtime').reduce(function(s,v){var h=hours(v);return s+(h||0);},0).toFixed(2);})()}}",
+          "long": [
+            {
+              "condition": "",
+              "msg": "{{(function(){var wt=F('Work Type');var types=['DM','DMPDM','DMPM','FDM','RBLD','SAFDM','TRBL','SDDM'];if(!oneOf(wt,types))return 'Not req.';if(!notEmpty(F('Asset')))return '✓ No asset - skipped';return '✓ Downtime confirmed: '+col('m69f3c12d','Downtime').reduce(function(s,v){var h=hours(v);return s+(h||0);},0).toFixed(2)+' hrs';})()}}"
+            }
+          ]
+        },
+        "fail": {
+          "short": "Downtime missing",
+          "long": [
+            {
+              "condition": "",
+              "msg": "Downtime record is missing. At least one downtime entry is required for corrective work types."
+            }
+          ],
+          "returnMode": "custom",
+          "returnCustom": "downtime missing"
+        },
+        "warn": {
+          "short": "",
+          "long": [],
+          "returnMode": "none",
+          "returnCustom": "downtime missing"
+        }
       },
       {
         "id": "r_related",
         "label": "Related WO Attached",
-        "formula": "var text=[F('Work Order :: Description'),F('Work Order :: Reason for Maintenance'),F('Work Order :: As Found Condition'),F('Work Order :: Work Performed')].join(' ');\nvar self=F('Work Order :: Work Order');\nvar found=matches(text,'\\\\b\\\\d{6}\\\\b').filter(function(f){return f!==self;});\nif(found.length===0) return 'na';\nvar vals=col('Related Work Orders','Work Order');\nreturn found.every(function(f){return vals.some(function(v){return (v||'').indexOf(f)>=0;});});"
+        "formula": "var text=[F('Work Order :: Description'),F('Work Order :: Reason for Maintenance'),F('Work Order :: As Found Condition'),F('Work Order :: Work Performed')].join(' ');\nvar self=F('Work Order :: Work Order');\nvar found=matches(text,'\\\\b\\\\d{6}\\\\b').filter(function(f){return f!==self;});\nif(found.length===0) return 'na';\nvar vals=col('Related Work Orders','Work Order');\nreturn found.every(function(f){return vals.some(function(v){return (v||'').indexOf(f)>=0;});});",
+        "pass": {
+          "short": "",
+          "long": []
+        },
+        "fail": {
+          "short": "",
+          "long": [],
+          "returnMode": "none",
+          "returnCustom": ""
+        },
+        "warn": {
+          "short": "",
+          "long": [],
+          "returnMode": "none",
+          "returnCustom": ""
+        }
       },
       {
         "id": "r_1783432272115",
         "label": "Labor",
         "formula": "var laborRows = rowCount('Labor');\nif (laborRows === 0) return false;\nvar dur = hours(F('Work Order :: Duration'));\nvar totalHrs = col('Labor', 'Regular Hours').reduce(function(s, v) {\n  var h = hours(v);\n  return s + (h || 0);\n}, 0);\nif (dur != null && totalHrs > dur) return false;\n\nvar desc = F('Work Order :: Description') || '';\nvar hasTrainingKeyword = /\\btraining\\b/i.test(desc) || /\\bTT\\b/.test(desc);\nif (hasTrainingKeyword) {\n  var laborTypes = col('Labor', 'Labor Type');\n  if (!laborTypes.length) return 'warn';\n  var trainingCount = laborTypes.filter(function(v) {\n    return (v || '').toUpperCase() === 'TRAINING';\n  }).length;\n  if (trainingCount < laborTypes.length) return 'warn';\n}\nreturn true;\n",
-        "passMsg": "{{col('Labor','Regular Hours').reduce(function(s,v){var h=hours(v);return s+(h||0);},0).toFixed(2)+' hrs | '+rowCount('Labor')+' entr'+(rowCount('Labor')===1?'y':'ies')}}",
-        "shortPassMsg": "{{(function(){var total=col('Labor','Regular Hours').reduce(function(s,v){var h=hours(v);return s+(h||0);},0);return '✓ '+total.toFixed(2)+' hrs | '+rowCount('Labor')+' rows';})()}}",
-        "failMsgs": [
-          {
-            "condition": "rowCount('Labor') === 0",
-            "msg": "No labor entries found."
-          },
-          {
-            "condition": "var dur=hours(F('Work Order",
-            "msg": "Duration'));var total=col('Labor','Regular Hours').reduce(function(s,v){var h=hours(v);return s+(h||0);},0);dur!=null&&total>dur :: Total labor hours ({{col('Labor','Regular Hours').reduce(function(s,v){var h=hours(v);return s+(h||0);},0).toFixed(2)}} hrs) exceed WO duration ({{hours(F('Work Order :: Duration'))!=null?hours(F('Work Order :: Duration')).toFixed(2)+'hrs':'unknown'}})."
-          }
-        ],
-        "shortFailMsg": "{{rowCount('Labor')===0?'No Labor':'Labor > Duration'}}",
-        "shortWarnMsg": "{{(function(){   var hasKw = /\\b(tt|training)\\b/.test((F('Work Order :: Description') || '').toLowerCase());   if (!hasKw) return '';   var types = col('Labor', 'Labor Type');   if (!types.length) return 'labor types not collected — re-scan';   var tc = types.filter(function(v) { return (v || '').toUpperCase() === 'TRAINING'; }).length;   if (tc === 0) return 'no labor type TRAINING';   if (tc < types.length) return tc + ' of ' + types.length + ' labor rows are TRAINING';   return ''; })()}}",
-        "warnMsgs": [
-          {
-            "msg": "{{(function(){var types=col('Labor','Labor Type');if(!types.length)return 'Labor types not collected — re-scan Actuals tab';var tc=types.filter(function(v){return(v||'').toUpperCase()==='TRAINING';}).length;var counts={};types.forEach(function(v){var k=(v||'(blank)').toUpperCase();counts[k]=(counts[k]||0)+1;});var summary=Object.keys(counts).map(function(k){return k+' ('+counts[k]+')';}).join(', ');if(tc===0)return 'No TRAINING labor type. Types: '+summary;return tc+' of '+types.length+' rows are TRAINING. Types: '+summary;})()}}"
-          }
-        ]
+        "pass": {
+          "short": "{{(function(){var total=col('Labor','Regular Hours').reduce(function(s,v){var h=hours(v);return s+(h||0);},0);return '✓ '+total.toFixed(2)+' hrs | '+rowCount('Labor')+' rows';})()}}",
+          "long": [
+            {
+              "condition": "",
+              "msg": "{{col('Labor','Regular Hours').reduce(function(s,v){var h=hours(v);return s+(h||0);},0).toFixed(2)+' hrs | '+rowCount('Labor')+' entr'+(rowCount('Labor')===1?'y':'ies')}}"
+            }
+          ]
+        },
+        "fail": {
+          "short": "{{rowCount('Labor')===0?'No Labor':'Labor > Duration'}}",
+          "long": [
+            {
+              "condition": "rowCount('Labor') === 0",
+              "msg": "No labor entries found."
+            },
+            {
+              "condition": "var dur=hours(F('Work Order :: Duration'));var total=col('Labor','Regular Hours').reduce(function(s,v){var h=hours(v);return s+(h||0);},0);dur!=null&&total>dur",
+              "msg": "Total labor hours ({{col('Labor','Regular Hours').reduce(function(s,v){var h=hours(v);return s+(h||0);},0).toFixed(2)}} hrs) exceed WO duration ({{hours(F('Work Order :: Duration'))!=null?hours(F('Work Order :: Duration')).toFixed(2)+'hrs':'unknown'}})."
+            }
+          ],
+          "returnMode": "custom",
+          "returnCustom": "{{rowCount('Labor')===0?'no labor logged in actuals':col('Labor','Regular Hours').reduce(function(s,v){var h=hours(v);return s+(h!=null?h:0);},0)>(hours(F('Work Order :: Duration'))||0)?'labor hours exceed WO duration':'Check labor'}}"
+        },
+        "warn": {
+          "short": "{{(function(){   var hasKw = /\\b(tt|training)\\b/.test((F('Work Order :: Description') || '').toLowerCase());   if (!hasKw) return '';   var types = col('Labor', 'Labor Type');   if (!types.length) return 'labor types not collected — re-scan';   var tc = types.filter(function(v) { return (v || '').toUpperCase() === 'TRAINING'; }).length;   if (tc === 0) return 'no labor type TRAINING';   if (tc < types.length) return tc + ' of ' + types.length + ' labor rows are TRAINING';   return ''; })()}}",
+          "long": [
+            {
+              "condition": "",
+              "msg": "{{(function(){var types=col('Labor','Labor Type');if(!types.length)return 'Labor types not collected — re-scan Actuals tab';var tc=types.filter(function(v){return(v||'').toUpperCase()==='TRAINING';}).length;var counts={};types.forEach(function(v){var k=(v||'(blank)').toUpperCase();counts[k]=(counts[k]||0)+1;});var summary=Object.keys(counts).map(function(k){return k+' ('+counts[k]+')';}).join(', ');if(tc===0)return 'No TRAINING labor type. Types: '+summary;return tc+' of '+types.length+' rows are TRAINING. Types: '+summary;})()}}"
+            }
+          ],
+          "returnMode": "none",
+          "returnCustom": "{{rowCount('Labor')===0?'no labor logged in actuals':col('Labor','Regular Hours').reduce(function(s,v){var h=hours(v);return s+(h!=null?h:0);},0)>(hours(F('Work Order :: Duration'))||0)?'labor hours exceed WO duration':'Check labor'}}"
+        }
       },
       {
         "id": "r_1783519719295",
         "label": "Production Approver",
         "formula": "var lot = (F('Work Order :: Production Run Lot #') || '').trim();\nif (lot.length < 4) return true;\nvar grp1 = (F('Approvers :: Approval Group 1') || '').trim();\nvar grp2 = (F('Approvers :: Approval Group 2') || '').trim();\nvar grp3 = (F('Approvers :: Approval Group 3') || '').trim();\nvar filled = grp1 || grp2 || grp3;\nif (!filled) return false;\nvar knownGroups = ['AVWP-PRD-B1', 'AVWP-PRD-B1-C1', 'AVWP-PRD-B-PACK'];\nvar isKnown = knownGroups.indexOf(filled) !== -1;\nif (!isKnown) return 'na';\nreturn true;\n",
-        "failMsgs": [
-          {
-            "msg": "{{(function(){var g1=(F('Approval Group 1')||'').trim();var g2=(F('Approval Group 2')||'').trim();var g3=(F('Approval Group 3')||'').trim();if(!g1&&!g2&&!g3)return 'No Approval Group assigned.';var g=g1||g2||g3;var known=['AVWP-PRD-B1','AVWP-PRD-B1-C1','AVWP-PRD-B-PACK'];if(known.indexOf(g)===-1)return 'Unrecognized approval group: '+g;return 'Check approval group.';})()}}"
-          }
-        ],
-        "passMsg": "{{(function(){var lot=(F('Production Run Lot #')||'').trim();if(lot.length<4)return 'No Lot # - Skipped';var g=[(F('Approvers :: Approval Group 1')||'').trim(),(F('Approvers :: Approval Group 2')||'').trim(),(F('Approvers :: Approval Group 3')||'').trim()].find(function(v){return v.length>0;})||'';if(g==='AVWP-PRD-B1')return 'C2/3 Production Group';if(g==='AVWP-PRD-B1-C1')return 'C1 Production Group';if(g==='AVWP-PRD-B-PACK')return 'Biologics Packaging Group';return g;})()}}",
-        "shortPassMsg": "{{(function(){var lot=(F('Production Run Lot #')||'').trim();if(lot.length<4)return '✓ Skipped';var g=[(F('Approval Group 1')||'').trim(),(F('Approval Group 2')||'').trim(),(F('Approval Group 3')||'').trim()].find(function(v){return v.length>0;})||'';if(g==='AVWP-PRD-B1')return '✓ C2/3 Prod.';if(g==='AVWP-PRD-B1-C1')return '✓ C1 Prod.';if(g==='AVWP-PRD-B-PACK')return '✓ B1 Pack';return '✓ '+g;})()}}",
-        "shortFailMsg": "{{(function(){var g1=(F('Approvers :: Approval Group 1')||'').trim();var g2=(F('Approvers :: Approval Group 2')||'').trim();var g3=(F('Approvers :: Approval Group 3')||'').trim();if(!g1&&!g2&&!g3)return 'No Approver';var g=g1||g2||g3;var known=['AVWP-PRD-B1','AVWP-PRD-B1-C1','AVWP-PRD-B-PACK'];return known.indexOf(g)===-1?'Unknown Group':'Check Group';})()}}"
+        "pass": {
+          "short": "{{(function(){var lot=(F('Production Run Lot #')||'').trim();if(lot.length<4)return '✓ Skipped';var g=[(F('Approval Group 1')||'').trim(),(F('Approval Group 2')||'').trim(),(F('Approval Group 3')||'').trim()].find(function(v){return v.length>0;})||'';if(g==='AVWP-PRD-B1')return '✓ C2/3 Prod.';if(g==='AVWP-PRD-B1-C1')return '✓ C1 Prod.';if(g==='AVWP-PRD-B-PACK')return '✓ B1 Pack';return '✓ '+g;})()}}",
+          "long": [
+            {
+              "condition": "",
+              "msg": "{{(function(){var lot=(F('Production Run Lot #')||'').trim();if(lot.length<4)return 'No Lot # - Skipped';var g=[(F('Approvers :: Approval Group 1')||'').trim(),(F('Approvers :: Approval Group 2')||'').trim(),(F('Approvers :: Approval Group 3')||'').trim()].find(function(v){return v.length>0;})||'';if(g==='AVWP-PRD-B1')return 'C2/3 Production Group';if(g==='AVWP-PRD-B1-C1')return 'C1 Production Group';if(g==='AVWP-PRD-B-PACK')return 'Biologics Packaging Group';return g;})()}}"
+            }
+          ]
+        },
+        "fail": {
+          "short": "{{(function(){var g1=(F('Approvers :: Approval Group 1')||'').trim();var g2=(F('Approvers :: Approval Group 2')||'').trim();var g3=(F('Approvers :: Approval Group 3')||'').trim();if(!g1&&!g2&&!g3)return 'No Approver';var g=g1||g2||g3;var known=['AVWP-PRD-B1','AVWP-PRD-B1-C1','AVWP-PRD-B-PACK'];return known.indexOf(g)===-1?'Unknown Group':'Check Group';})()}}",
+          "long": [
+            {
+              "condition": "",
+              "msg": "{{(function(){var g1=(F('Approval Group 1')||'').trim();var g2=(F('Approval Group 2')||'').trim();var g3=(F('Approval Group 3')||'').trim();if(!g1&&!g2&&!g3)return 'No Approval Group assigned.';var g=g1||g2||g3;var known=['AVWP-PRD-B1','AVWP-PRD-B1-C1','AVWP-PRD-B-PACK'];if(known.indexOf(g)===-1)return 'Unrecognized approval group: '+g;return 'Check approval group.';})()}}"
+            }
+          ],
+          "returnMode": "none",
+          "returnCustom": ""
+        },
+        "warn": {
+          "short": "",
+          "long": [],
+          "returnMode": "none",
+          "returnCustom": ""
+        }
       },
       {
         "id": "r_1783525682564",
         "label": "Descriptions",
         "formula": "var desc = (F('Work Order :: Description') || '').trim();\nvar reason = (F('Work Order :: Reason for Maintenance') || '').trim();\nvar asFound = (F('Work Order :: As Found Condition') || '').trim();\nvar workDone = (F('Work Order :: Work Performed') || '').trim();\n\nif (!desc || !reason || !asFound || !workDone) return false;\n\nvar naPattern = /^(n\\/?a|not\\s+applicable|none|n\\.a\\.?)$/i;\nvar fields = [desc, reason, asFound, workDone];\n\nvar hasNA = fields.some(function(v) { return naPattern.test(v); });\nif (hasNA) return 'warn';\n\nvar hasShort = fields.some(function(v) { return v.length < 30; });\nif (hasShort) return 'warn';\n\nvar seen = {};\nvar hasDup = fields.filter(function(v) { return v.length > 0; }).some(function(v) {\n    var k = v.toLowerCase();\n    if (seen[k]) return true;\n    seen[k] = 1;\n    return false;\n});\nif (hasDup) return 'warn';\n\nreturn true;\n",
-        "failMsgs": [
-          {
-            "msg": "{{(function(){var ms=[];if(!(F('Description')||'').trim())ms.push('Description');if(!(F('Reason for Maintenance')||'').trim())ms.push('Reason for Maintenance');if(!(F('As Found Condition')||'').trim())ms.push('As Found Condition');if(!(F('Work Performed')||'').trim())ms.push('Work Performed');return ms.length?'Missing: '+ms.join(', '):'Check text fields';})()}}"
-          }
-        ],
-        "passMsg": "{{(function(){return 'All text fields complete';})()}}",
-        "shortPassMsg": "{{(function(){return '✓ Text fields OK';})()}}",
-        "shortFailMsg": "{{(function(){var ms=[];if(!(F('Description')||'').trim())ms.push('Desc');if(!(F('Reason for Maintenance')||'').trim())ms.push('Reason');if(!(F('As Found Condition')||'').trim())ms.push('As Found');if(!(F('Work Performed')||'').trim())ms.push('Work Done');return ms.length?'Missing: '+ms.join(', '):'';})()}}",
-        "warnMsgs": [
-          {
-            "condition": "(F('As Found Condition')||'').trim().toLowerCase()==='n/a'||(F('As Found Condition')||'').trim().toLowerCase()==='na'||(F('Work Performed')||'').trim().toLowerCase()==='n/a'||(F('Work Performed')||'').trim().toLowerCase()==='na'||(F('Reason for Maintenance')||'').trim().toLowerCase()==='n/a'||(F('Reason for Maintenance')||'').trim().toLowerCase()==='na'",
-            "msg": "One or more fields contain N/A — check As Found Condition, Work Performed, and Reason for Maintenance"
-          },
-          {
-            "condition": "((F('As Found Condition')||'').trim().length>0&&(F('As Found Condition')||'').trim().length<30&&(F('As Found Condition')||'').trim().toLowerCase()!=='n/a'&&(F('As Found Condition')||'').trim().toLowerCase()!=='na')||((F('Work Performed')||'').trim().length>0&&(F('Work Performed')||'').trim().length<30&&(F('Work Performed')||'').trim().toLowerCase()!=='n/a'&&(F('Work Performed')||'').trim().toLowerCase()!=='na')||((F('Reason for Maintenance')||'').trim().length>0&&(F('Reason for Maintenance')||'').trim().length<30&&(F('Reason for Maintenance')||'').trim().toLowerCase()!=='n/a'&&(F('Reason for Maintenance')||'').trim().toLowerCase()!=='na')",
-            "msg": "One or more fields are under 30 characters — check As Found Condition, Work Performed, and Reason for Maintenance"
-          },
-          {
-            "condition": "((function(){var vals=[(F('Description')||'').trim(),(F('Reason for Maintenance')||'').trim(),(F('As Found Condition')||'').trim(),(F('Work Performed')||'').trim()].filter(function(v){return v.length>0;});var seen={};return vals.some(function(v){if(seen[v.toLowerCase()])return true;seen[v.toLowerCase()]=1;return false;});})())",
-            "msg": "Two or more fields have identical content — check Description, Reason for Maintenance, As Found Condition, and Work Performed"
-          }
-        ],
-        "shortWarnMsg": "{{(function(){var p=/^(n\\/?a|not\\s+applicable|none|n\\.a\\.?)$/i;var vals=[(F('Work Order :: Description')||'').trim(),(F('Work Order :: Reason for Maintenance')||'').trim(),(F('Work Order :: As Found Condition')||'').trim(),(F('Work Order :: Work Performed')||'').trim()];var hasNA=vals.some(function(v){return p.test(v);});var hasShort=vals.some(function(v){return v&&!p.test(v)&&v.length<30;});var seen={};var hasDup=vals.filter(function(v){return v.length>0;}).some(function(v){var k=v.toLowerCase();if(seen[k])return true;seen[k]=1;return false;});if(hasNA&&hasShort&&hasDup)return '⚠ N/A + short + duplicate fields';if(hasNA&&hasDup)return '⚠ N/A + duplicate fields';if(hasShort&&hasDup)return '⚠ short + duplicate fields';if(hasNA&&hasShort)return '⚠ N/A + short fields';if(hasDup)return '⚠ duplicate fields';if(hasNA)return '⚠ N/A in fields';if(hasShort)return '⚠ short fields (<30 chars)';return '';})()}}"
+        "pass": {
+          "short": "{{(function(){return '✓ Text fields OK';})()}}",
+          "long": [
+            {
+              "condition": "",
+              "msg": "{{(function(){return 'All text fields complete';})()}}"
+            }
+          ]
+        },
+        "fail": {
+          "short": "{{(function(){var ms=[];if(!(F('Description')||'').trim())ms.push('Desc');if(!(F('Reason for Maintenance')||'').trim())ms.push('Reason');if(!(F('As Found Condition')||'').trim())ms.push('As Found');if(!(F('Work Performed')||'').trim())ms.push('Work Done');return ms.length?'Missing: '+ms.join(', '):'';})()}}",
+          "long": [
+            {
+              "condition": "",
+              "msg": "{{(function(){var ms=[];if(!(F('Description')||'').trim())ms.push('Description');if(!(F('Reason for Maintenance')||'').trim())ms.push('Reason for Maintenance');if(!(F('As Found Condition')||'').trim())ms.push('As Found Condition');if(!(F('Work Performed')||'').trim())ms.push('Work Performed');return ms.length?'Missing: '+ms.join(', '):'Check text fields';})()}}"
+            }
+          ],
+          "returnMode": "custom",
+          "returnCustom": "{{(function(){var ms=[];if(!(F('Description')||'').trim())ms.push('description');if(!(F('Reason for Maintenance')||'').trim())ms.push('reason for maintenance');if(!(F('As Found Condition')||'').trim())ms.push('as found condition');if(!(F('Work Performed')||'').trim())ms.push('work performed');return ms.length?'missing '+ms.join(', '):'';})()}}"
+        },
+        "warn": {
+          "short": "{{(function(){var p=/^(n\\/?a|not\\s+applicable|none|n\\.a\\.?)$/i;var vals=[(F('Work Order :: Description')||'').trim(),(F('Work Order :: Reason for Maintenance')||'').trim(),(F('Work Order :: As Found Condition')||'').trim(),(F('Work Order :: Work Performed')||'').trim()];var hasNA=vals.some(function(v){return p.test(v);});var hasShort=vals.some(function(v){return v&&!p.test(v)&&v.length<30;});var seen={};var hasDup=vals.filter(function(v){return v.length>0;}).some(function(v){var k=v.toLowerCase();if(seen[k])return true;seen[k]=1;return false;});if(hasNA&&hasShort&&hasDup)return '⚠ N/A + short + duplicate fields';if(hasNA&&hasDup)return '⚠ N/A + duplicate fields';if(hasShort&&hasDup)return '⚠ short + duplicate fields';if(hasNA&&hasShort)return '⚠ N/A + short fields';if(hasDup)return '⚠ duplicate fields';if(hasNA)return '⚠ N/A in fields';if(hasShort)return '⚠ short fields (<30 chars)';return '';})()}}",
+          "long": [
+            {
+              "condition": "(F('As Found Condition')||'').trim().toLowerCase()==='n/a'||(F('As Found Condition')||'').trim().toLowerCase()==='na'||(F('Work Performed')||'').trim().toLowerCase()==='n/a'||(F('Work Performed')||'').trim().toLowerCase()==='na'||(F('Reason for Maintenance')||'').trim().toLowerCase()==='n/a'||(F('Reason for Maintenance')||'').trim().toLowerCase()==='na'",
+              "msg": "One or more fields contain N/A — check As Found Condition, Work Performed, and Reason for Maintenance"
+            },
+            {
+              "condition": "((F('As Found Condition')||'').trim().length>0&&(F('As Found Condition')||'').trim().length<30&&(F('As Found Condition')||'').trim().toLowerCase()!=='n/a'&&(F('As Found Condition')||'').trim().toLowerCase()!=='na')||((F('Work Performed')||'').trim().length>0&&(F('Work Performed')||'').trim().length<30&&(F('Work Performed')||'').trim().toLowerCase()!=='n/a'&&(F('Work Performed')||'').trim().toLowerCase()!=='na')||((F('Reason for Maintenance')||'').trim().length>0&&(F('Reason for Maintenance')||'').trim().length<30&&(F('Reason for Maintenance')||'').trim().toLowerCase()!=='n/a'&&(F('Reason for Maintenance')||'').trim().toLowerCase()!=='na')",
+              "msg": "One or more fields are under 30 characters — check As Found Condition, Work Performed, and Reason for Maintenance"
+            },
+            {
+              "condition": "((function(){var vals=[(F('Description')||'').trim(),(F('Reason for Maintenance')||'').trim(),(F('As Found Condition')||'').trim(),(F('Work Performed')||'').trim()].filter(function(v){return v.length>0;});var seen={};return vals.some(function(v){if(seen[v.toLowerCase()])return true;seen[v.toLowerCase()]=1;return false;});})())",
+              "msg": "Two or more fields have identical content — check Description, Reason for Maintenance, As Found Condition, and Work Performed"
+            }
+          ],
+          "returnMode": "none",
+          "returnCustom": "{{(function(){var ms=[];if(!(F('Description')||'').trim())ms.push('description');if(!(F('Reason for Maintenance')||'').trim())ms.push('reason for maintenance');if(!(F('As Found Condition')||'').trim())ms.push('as found condition');if(!(F('Work Performed')||'').trim())ms.push('work performed');return ms.length?'missing '+ms.join(', '):'';})()}}"
+        }
       },
       {
         "id": "r_1783525879134",
         "label": "Required WO Fields",
         "formula": "var wt = (F('Work Order :: Work Type') || '').trim();\nvar pri = (F('Work Order :: Priority') || '').trim();\nvar wg = (F('Work Order :: Work Group') || '').trim();\nvar lead = (F('Work Order :: Lead') || '').trim();\nvar owner = (F('Work Order :: Owner') || '').trim();\nif (!wt || !pri || !wg || !lead || !owner) return false;\nreturn true;\n",
-        "failMsgs": [
-          {
-            "msg": "{{(function(){var ms=[];if(!(F('Work Type')||'').trim())ms.push('Work Type');if(!(F('Priority')||'').trim())ms.push('Priority');if(!(F('Work Group')||'').trim())ms.push('Work Group');if(!(F('Lead')||'').trim())ms.push('Lead');if(!(F('Owner')||'').trim())ms.push('Owner');return ms.length?'Missing: '+ms.join(', '):'Check required fields';})()}}"
-          }
-        ],
-        "passMsg": "{{(function(){return 'All required fields complete';})()}}",
-        "shortPassMsg": "{{(function(){return '✓ Required fields OK';})()}}",
-        "shortFailMsg": "{{(function(){var ms=[];if(!(F('Work Type')||'').trim())ms.push('Work Type');if(!(F('Priority')||'').trim())ms.push('Priority');if(!(F('Work Group')||'').trim())ms.push('Work Group');if(!(F('Lead')||'').trim())ms.push('Lead');if(!(F('Owner')||'').trim())ms.push('Owner');return ms.length?'Missing: '+ms.join(', '):'';})()}}"
+        "pass": {
+          "short": "{{(function(){return '✓ Required fields OK';})()}}",
+          "long": [
+            {
+              "condition": "",
+              "msg": "{{(function(){return 'All required fields complete';})()}}"
+            }
+          ]
+        },
+        "fail": {
+          "short": "{{(function(){var ms=[];if(!(F('Work Type')||'').trim())ms.push('Work Type');if(!(F('Priority')||'').trim())ms.push('Priority');if(!(F('Work Group')||'').trim())ms.push('Work Group');if(!(F('Lead')||'').trim())ms.push('Lead');if(!(F('Owner')||'').trim())ms.push('Owner');return ms.length?'Missing: '+ms.join(', '):'';})()}}",
+          "long": [
+            {
+              "condition": "",
+              "msg": "{{(function(){var ms=[];if(!(F('Work Type')||'').trim())ms.push('Work Type');if(!(F('Priority')||'').trim())ms.push('Priority');if(!(F('Work Group')||'').trim())ms.push('Work Group');if(!(F('Lead')||'').trim())ms.push('Lead');if(!(F('Owner')||'').trim())ms.push('Owner');return ms.length?'Missing: '+ms.join(', '):'Check required fields';})()}}"
+            }
+          ],
+          "returnMode": "custom",
+          "returnCustom": "{{(function(){var ms=[];if(!(F('Work Type')||'').trim())ms.push('work type');if(!(F('Priority')||'').trim())ms.push('priority');if(!(F('Work Group')||'').trim())ms.push('work group');if(!(F('Lead')||'').trim())ms.push('lead');if(!(F('Owner')||'').trim())ms.push('owner');return ms.length?'no '+ms.join(', '):'';})()}}"
+        },
+        "warn": {
+          "short": "",
+          "long": [],
+          "returnMode": "none",
+          "returnCustom": "{{(function(){var ms=[];if(!(F('Work Type')||'').trim())ms.push('work type');if(!(F('Priority')||'').trim())ms.push('priority');if(!(F('Work Group')||'').trim())ms.push('work group');if(!(F('Lead')||'').trim())ms.push('lead');if(!(F('Owner')||'').trim())ms.push('owner');return ms.length?'no '+ms.join(', '):'';})()}}"
+        }
       }
     ]
   },
@@ -936,49 +1073,6 @@
     "msgPrefix": "",
     "msgSuffix": "- wz",
     "msgDelim": ". ",
-    "ruleMessages": {},
-    "ruleReturnCfg": {
-      "r_lot": {
-        "fail": "custom",
-        "warn": "none",
-        "custom": "lot# missing"
-      },
-      "r_duration": {
-        "fail": "custom",
-        "warn": "none",
-        "custom": "{{!(F('Work Order :: Actual Start'))&&!(F('Work Order :: Actual Finish'))&&(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'missing actual start/finish and duration':!(F('Work Order :: Actual Start'))&&(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'missing actual start and duration':!(F('Work Order :: Actual Finish'))&&(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'missing actual finish and duration':!(F('Work Order :: Actual Start'))&&!(F('Work Order :: Actual Finish'))?'missing actual start/finish':!(F('Work Order :: Actual Start'))?'missing actual start':!(F('Work Order :: Actual Finish'))?'missing actual finish':(hours(F('Work Order :: Duration'))==null||hours(F('Work Order :: Duration'))===0)?'missing duration':hours(F('Work Order :: Duration'))!=null&&hoursBetween(F('Work Order :: Actual Start'),F('Work Order :: Actual Finish'))!=null&&hours(F('Work Order :: Duration'))>hoursBetween(F('Work Order :: Actual Start'),F('Work Order :: Actual Finish'))?'duration bigger than time between actual start/finish':'Check times'}}"
-      },
-      "r_downtime": {
-        "fail": "custom",
-        "warn": "none",
-        "custom": "downtime missing"
-      },
-      "r_related": {
-        "fail": "none",
-        "warn": "none",
-        "custom": ""
-      },
-      "r_1783432272115": {
-        "fail": "custom",
-        "warn": "none",
-        "custom": "{{rowCount('Labor')===0?'no labor logged in actuals':col('Labor','Regular Hours').reduce(function(s,v){var h=hours(v);return s+(h!=null?h:0);},0)>(hours(F('Work Order :: Duration'))||0)?'labor hours exceed WO duration':'Check labor'}}"
-      },
-      "r_1783519719295": {
-        "fail": "none",
-        "warn": "none",
-        "custom": ""
-      },
-      "r_1783525682564": {
-        "fail": "custom",
-        "warn": "none",
-        "custom": "{{(function(){var ms=[];if(!(F('Description')||'').trim())ms.push('description');if(!(F('Reason for Maintenance')||'').trim())ms.push('reason for maintenance');if(!(F('As Found Condition')||'').trim())ms.push('as found condition');if(!(F('Work Performed')||'').trim())ms.push('work performed');return ms.length?'missing '+ms.join(', '):'';})()}}"
-      },
-      "r_1783525879134": {
-        "fail": "custom",
-        "warn": "none",
-        "custom": "{{(function(){var ms=[];if(!(F('Work Type')||'').trim())ms.push('work type');if(!(F('Priority')||'').trim())ms.push('priority');if(!(F('Work Group')||'').trim())ms.push('work group');if(!(F('Lead')||'').trim())ms.push('lead');if(!(F('Owner')||'').trim())ms.push('owner');return ms.length?'no '+ms.join(', '):'';})()}}"
-      }
-    },
     "autoScan": false
   }
 }

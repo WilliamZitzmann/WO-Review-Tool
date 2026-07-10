@@ -1,10 +1,21 @@
 {
-  "latest": "0.16.1",
+  "latest": "0.17.0",
   "channels": {
-    "stable": "0.16.1",
-    "beta": "0.16.1"
+    "stable": "0.17.0",
+    "beta": "0.17.0"
   },
   "versions": [
+    {
+      "version": "0.17.0",
+      "changes": [
+        "Redesigned rule messages: Pass, Fail, and Warn are now each a Short (one line, for the group header) and Long (a list of one-or-more messages, each with its own optional condition) — all edited inline in the Rules tab",
+        "Fixed a real corruption bug: fail/warn message conditions used to be parsed from a single textarea by splitting on the first ' :: ', which collided with qualified field names like \"Tab :: Field\" (the exact string the field-insert dropdown produces) — condition and message are now separate input fields, so this can no longer happen",
+        "Pass messages now support the same multi-entry, conditional list as Fail/Warn (previously a single string)",
+        "Per-rule \"include in return message\" (None/Short/Long/Custom) moved from Settings > Quick Return Message into each rule's Fail/Warn section — Settings still holds the shared prefix/suffix/delimiter",
+        "Existing configs migrate automatically on load — old-shape rules (in a saved profile, a restored backup, or a stale pinned version's data) are normalized every time they're read, so this can never silently break by loading old data after updating",
+        "configs/default.json and configs/maintenance.json migrated to the new schema; one real corrupted rule (a fail-message condition truncated by the ' :: ' bug) was found and repaired in the process"
+      ]
+    },
     {
       "version": "0.16.1",
       "changes": [

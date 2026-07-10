@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.16.1';
+    var TOOL_VERSION = '0.17.0';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -87,23 +87,38 @@
         rules: [{
             id: 'r_lot',
             label: 'Lot Number Provided',
-            formula: "var lot=(F('Work Order :: Production Run Lot #')||'').trim();\nif(/^n\\/?a$/i.test(lot)) return 'na';\nreturn lot.length>3;"
+            formula: "var lot=(F('Work Order :: Production Run Lot #')||'').trim();\nif(/^n\\/?a$/i.test(lot)) return 'na';\nreturn lot.length>3;",
+            pass: { short: '', long: [] },
+            fail: { short: '', long: [], returnMode: 'none', returnCustom: '' },
+            warn: { short: '', long: [], returnMode: 'none', returnCustom: '' }
         }, {
             id: 'r_duration',
             label: 'Time Validated',
-            formula: "var d=hours(F('Work Order :: Duration'));\nvar a=hoursBetween(F('Work Order :: Actual Start'),F('Work Order :: Actual Finish'));\nif(d==null) return 'na';\nif(a==null) return 'na';\nreturn d<=a;"
+            formula: "var d=hours(F('Work Order :: Duration'));\nvar a=hoursBetween(F('Work Order :: Actual Start'),F('Work Order :: Actual Finish'));\nif(d==null) return 'na';\nif(a==null) return 'na';\nreturn d<=a;",
+            pass: { short: '', long: [] },
+            fail: { short: '', long: [], returnMode: 'none', returnCustom: '' },
+            warn: { short: '', long: [], returnMode: 'none', returnCustom: '' }
         }, {
             id: 'r_downtime',
             label: 'Downtime Logged',
-            formula: "var wt=F('Work Order :: Work Type');\nif(!oneOf(wt,['DM'])) return 'na';\nreturn rowCount('m69f3c12d')>0;"
+            formula: "var wt=F('Work Order :: Work Type');\nif(!oneOf(wt,['DM'])) return 'na';\nreturn rowCount('m69f3c12d')>0;",
+            pass: { short: '', long: [] },
+            fail: { short: '', long: [], returnMode: 'none', returnCustom: '' },
+            warn: { short: '', long: [], returnMode: 'none', returnCustom: '' }
         }, {
             id: 'r_related',
             label: 'Related WO Attached',
-            formula: "var text=[F('Work Order :: Description'),F('Work Order :: Reason for Maintenance'),F('Work Order :: As Found Condition'),F('Work Order :: Work Performed')].join(' ');\nvar self=F('Work Order :: Work Order');\nvar found=matches(text,'\\\\b\\\\d{6}\\\\b').filter(function(f){return f!==self;});\nif(found.length===0) return 'na';\nvar vals=col('Related Work Orders','Work Order');\nreturn found.every(function(f){return vals.some(function(v){return (v||'').indexOf(f)>=0;});});"
+            formula: "var text=[F('Work Order :: Description'),F('Work Order :: Reason for Maintenance'),F('Work Order :: As Found Condition'),F('Work Order :: Work Performed')].join(' ');\nvar self=F('Work Order :: Work Order');\nvar found=matches(text,'\\\\b\\\\d{6}\\\\b').filter(function(f){return f!==self;});\nif(found.length===0) return 'na';\nvar vals=col('Related Work Orders','Work Order');\nreturn found.every(function(f){return vals.some(function(v){return (v||'').indexOf(f)>=0;});});",
+            pass: { short: '', long: [] },
+            fail: { short: '', long: [], returnMode: 'none', returnCustom: '' },
+            warn: { short: '', long: [], returnMode: 'none', returnCustom: '' }
         }, {
             id: 'r_approver',
             label: 'Production Approver',
-            formula: "var lot=(F('Work Order :: Production Run Lot #')||'').trim();\nif(/^n\\/?a$/i.test(lot)||lot.length<=3) return 'na';\nvar loc=F('Work Order :: Location')||'';\nvar field='Approvers :: Approval Group 3';\nif(loc.indexOf('AVWP-B1')===0) field='Approvers :: Approval Group 1';\nelse if(loc.indexOf('AVWP-B2')===0) field='Approvers :: Approval Group 2';\nreturn notEmpty(F(field));"
+            formula: "var lot=(F('Work Order :: Production Run Lot #')||'').trim();\nif(/^n\\/?a$/i.test(lot)||lot.length<=3) return 'na';\nvar loc=F('Work Order :: Location')||'';\nvar field='Approvers :: Approval Group 3';\nif(loc.indexOf('AVWP-B1')===0) field='Approvers :: Approval Group 1';\nelse if(loc.indexOf('AVWP-B2')===0) field='Approvers :: Approval Group 2';\nreturn notEmpty(F(field));",
+            pass: { short: '', long: [] },
+            fail: { short: '', long: [], returnMode: 'none', returnCustom: '' },
+            warn: { short: '', long: [], returnMode: 'none', returnCustom: '' }
         }]
     };
     var DEFAULT_SCAN = {
@@ -744,9 +759,104 @@
         return r.status === 'pass';
     }
 
+    // ── Rule message schema migration ──
+    // Old shape: rule.passMsg (string), rule.shortPassMsg/shortFailMsg/shortWarnMsg
+    // (strings), rule.failMsgs/warnMsgs (arrays of string or {condition,msg}, parsed
+    // from a single textarea via a ' :: ' delimiter that collides with qualified
+    // field names like "Tab :: Field"), plus per-rule return-message config living
+    // separately in __wo_settings.ruleReturnCfg.
+    // New shape: rule.pass/fail/warn, each {short, long:[{condition,msg}]}; fail/warn
+    // also carry {returnMode, returnCustom} inline instead of in Settings.
+    // normalizeCfg() runs on every getCfg() read (not just once at startup) so any
+    // path that can put old-shape rules back into RKEY — an old profile switch, a
+    // restored backup, a stale pinned version's data — self-heals on the next read
+    // instead of silently breaking new-schema consumers.
+    function isNewRuleShape(rule) {
+        return !!(rule && rule.pass && rule.fail && rule.warn &&
+            typeof rule.fail === 'object' && !Array.isArray(rule.fail));
+    }
+
+    function normalizeMsgEntry(e) {
+        if (typeof e === 'string') return {
+            condition: '',
+            msg: e
+        };
+        return {
+            condition: (e && e.condition) || '',
+            msg: (e && e.msg) || ''
+        };
+    }
+
+    function normalizeRule(rule, legacyReturnCfg) {
+        if (isNewRuleShape(rule)) return rule;
+        var oldRet = legacyReturnCfg || {
+            fail: 'none',
+            warn: 'none',
+            custom: ''
+        };
+        var mode = function(m) {
+            return m === 'full' ? 'long' : (m || 'none');
+        };
+        var out = {
+            id: rule.id,
+            label: rule.label,
+            formula: rule.formula,
+            pass: {
+                short: rule.shortPassMsg || '',
+                long: rule.passMsg ? [{
+                    condition: '',
+                    msg: rule.passMsg
+                }] : []
+            },
+            fail: {
+                short: rule.shortFailMsg || '',
+                long: (rule.failMsgs || []).map(normalizeMsgEntry),
+                returnMode: mode(oldRet.fail),
+                returnCustom: oldRet.custom || ''
+            },
+            warn: {
+                short: rule.shortWarnMsg || '',
+                long: (rule.warnMsgs || []).map(normalizeMsgEntry),
+                returnMode: mode(oldRet.warn),
+                returnCustom: oldRet.custom || ''
+            }
+        };
+        return out;
+    }
+
+    // legacyAllOverride lets callers hand in the ruleReturnCfg that actually
+    // belongs to `raw` (e.g. a stored profile's own settings) instead of
+    // defaulting to whatever's in the live __wo_settings — otherwise migrating
+    // a profile that isn't the active one would fold in the WRONG rule's
+    // return-message config (whatever the currently-active profile left behind).
+    function normalizeCfg(raw, legacyAllOverride) {
+        if (!raw || !raw.rules) return raw;
+        var anyLegacy = raw.rules.some(function(r) {
+            return !isNewRuleShape(r);
+        });
+        if (!anyLegacy) return raw;
+        var legacyAll = legacyAllOverride;
+        if (!legacyAll) {
+            legacyAll = {};
+            try {
+                var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+                legacyAll = st.ruleReturnCfg || {};
+            } catch (e) {}
+        }
+        var out = {};
+        for (var k in raw) {
+            if (raw.hasOwnProperty(k)) out[k] = raw[k];
+        }
+        out.rules = raw.rules.map(function(r) {
+            return isNewRuleShape(r) ? r : normalizeRule(r, legacyAll[r.id]);
+        });
+        return out;
+    }
+
     function getCfg() {
         try {
-            return JSON.parse(localStorage.getItem(RKEY) || 'null') || DEFAULT_CFG;
+            var raw = JSON.parse(localStorage.getItem(RKEY) || 'null') || DEFAULT_CFG;
+            return normalizeCfg(raw);
         } catch (e) {
             return DEFAULT_CFG;
         }
@@ -927,7 +1037,12 @@
     // auto-update/backup preferences, or hotkey.
     var PROFILES_KEY = '__wo_profiles';
     var ACTIVE_PROFILE_KEY = '__wo_active_profile_id';
-    var PROFILE_SETTINGS_KEYS = ['msgPrefix', 'msgSuffix', 'msgDelim', 'ruleMessages', 'ruleReturnCfg', 'autoScan'];
+    // ruleReturnCfg/ruleMessages used to live here (rule return-message config
+    // in Settings, keyed by rule id) — that's now folded inline into each rule
+    // (rule.fail.returnMode/returnCustom, rule.warn.returnMode/returnCustom) by
+    // normalizeCfg(), so it travels with the rules themselves and no longer
+    // needs its own profile-settings key.
+    var PROFILE_SETTINGS_KEYS = ['msgPrefix', 'msgSuffix', 'msgDelim', 'autoScan'];
 
     function getProfiles() {
         try {
@@ -977,7 +1092,14 @@
     // version, auto-update/backup prefs, hotkey) is never touched by a profile.
     function applyProfile(p) {
         if (!p) return;
-        if (p.rules) localStorage.setItem(RKEY, JSON.stringify(p.rules));
+        if (p.rules) {
+            // Normalize using THIS profile's own legacy ruleReturnCfg (if any),
+            // not whatever's currently in live __wo_settings — otherwise
+            // switching to an old-shape profile would fold in the previously
+            // active profile's return-message config instead of its own.
+            var legacyReturnCfg = (p.settings && p.settings.ruleReturnCfg) || {};
+            localStorage.setItem(RKEY, JSON.stringify(normalizeCfg(p.rules, legacyReturnCfg)));
+        }
         if (p.scan) localStorage.setItem(SKEY, JSON.stringify(p.scan));
         if (p.fields) localStorage.setItem(FKEY, JSON.stringify(p.fields));
         if (p.state) localStorage.setItem(GSTATE, JSON.stringify(p.state));
@@ -2065,34 +2187,25 @@
         });
     }
 
-    function resolveFailMsgs(failMsgs, data) {
+    // Unified resolver for a rule's pass/fail/warn "long" message list — each
+    // entry is {condition, msg} with its own dedicated fields (no ' :: ' delimiter
+    // parsing), so a condition referencing a qualified field name like
+    // "Tab :: Field" can never corrupt the message. Entries whose condition
+    // evaluates false are skipped; surviving messages run through resolveMsg()
+    // for {{expr}} substitution.
+    function resolveMsgList(list, data) {
         var out = [];
-        (failMsgs || []).forEach(function(entry) {
+        (list || []).forEach(function(entry) {
+            if (!entry) return;
             if (typeof entry === 'string') {
                 out.push(resolveMsg(entry, data));
                 return;
             }
-            if (entry.condition) {
-                if (!formulaBool(entry.condition, data)) return;
-            }
+            if (entry.condition && !formulaBool(entry.condition, data)) return;
+            if (!entry.msg) return;
             out.push(resolveMsg(entry.msg, data));
         });
-        return out.length ? out : ['Check failed'];
-    }
-
-    function resolveWarnMsgs(warnMsgs, data) {
-        var out = [];
-        (warnMsgs || []).forEach(function(entry) {
-            if (typeof entry === 'string') {
-                out.push(resolveMsg(entry, data));
-                return;
-            }
-            if (entry.condition) {
-                if (!formulaBool(entry.condition, data)) return;
-            }
-            out.push(resolveMsg(entry.msg, data));
-        });
-        return out.length ? out : ['Warning'];
+        return out;
     }
     /* ── auto-discover all columns from a rendered table prefix ── */
     function discoverTableCols(tableTitle) {
@@ -2800,40 +2913,25 @@
         var prefix = (st2.msgPrefix || '').trim();
         var suffix = (st2.msgSuffix || '').trim();
         var delim = st2.msgDelim !== undefined ? st2.msgDelim : '. ';
-        var ruleMessages2 = st2.ruleMessages || {};
         var cfg3 = getCfg();
         var parts = [];
         cfg3.rules.forEach(function(rule) {
             var res = runFormula(rule.formula, cache);
-            if (res.status === 'fail' || res.status === 'warn') {
-
-                var retCfg2 = (st2.ruleReturnCfg || {})[rule.id] || {
-                    fail: 'none',
-                    warn: 'none',
-                    custom: ''
-                };
-                var modeKey2 = res.status === 'warn' ? retCfg2.warn : retCfg2.fail;
-                var msg = '';
-                if (modeKey2 === 'custom') {
-                    msg = retCfg2.custom ? resolveMsg(retCfg2.custom, cache) : '';
-                } else if (modeKey2 === 'short') {
-                    if (res.status === 'warn') {
-                        msg = rule.shortWarnMsg ? resolveMsg(rule.shortWarnMsg, cache) :
-                            (rule.warnMsgs && rule.warnMsgs.length ? resolveWarnMsgs(rule.warnMsgs, cache)[0] : '');
-                    } else {
-                        msg = rule.shortFailMsg ? resolveMsg(rule.shortFailMsg, cache) :
-                            (rule.failMsgs && rule.failMsgs.length ? resolveFailMsgs(rule.failMsgs, cache)[0] : '');
-                    }
-                } else if (modeKey2 === 'full') {
-                    if (res.status === 'warn') {
-                        msg = rule.warnMsgs && rule.warnMsgs.length ? resolveWarnMsgs(rule.warnMsgs, cache)[0] : '';
-                    } else {
-                        msg = rule.failMsgs && rule.failMsgs.length ? resolveFailMsgs(rule.failMsgs, cache)[0] : '';
-                    }
-                }
-                if (msg) parts.push(msg);
-
+            if (res.status !== 'fail' && res.status !== 'warn') return;
+            var side = res.status === 'warn' ? rule.warn : rule.fail;
+            if (!side) return;
+            var modeKey2 = side.returnMode || 'none';
+            var msg = '';
+            if (modeKey2 === 'custom') {
+                msg = side.returnCustom ? resolveMsg(side.returnCustom, cache) : '';
+            } else if (modeKey2 === 'short') {
+                msg = side.short ? resolveMsg(side.short, cache) : (resolveMsgList(side.long, cache)[0] || '');
+            } else if (modeKey2 === 'long') {
+                // "long" return mode intentionally joins every matching entry
+                // (not just the first) — that's the point of "long" vs "short".
+                msg = resolveMsgList(side.long, cache).join('; ');
             }
+            if (msg) parts.push(msg);
         });
         var body = parts.join(delim);
         var full = (prefix ? prefix + (body ? delim : '') : '') + body + (suffix ? (body || prefix ? ' ' : '') + suffix : '');
@@ -2909,18 +3007,26 @@
                     var statusLabel = '';
                     var subMsgs = [];
                     if (s === 'pass') {
-                        var pm = rule.passMsg ? resolveMsg(rule.passMsg, cache) : null;
-                        statusLabel = '<span style="font-weight:bold;color:' + color + ';\">' + (pm ? '✓ ' + pm : '✓ OK') + '</span>';
+                        var passLong = resolveMsgList(rule.pass && rule.pass.long, cache);
+                        if (passLong.length) {
+                            subMsgs = passLong;
+                            statusLabel = '<span style="font-weight:bold;color:' + color + ';">✓ Passed</span>';
+                        } else {
+                            var passShort = (rule.pass && rule.pass.short) ? resolveMsg(rule.pass.short, cache) : '';
+                            statusLabel = '<span style="font-weight:bold;color:' + color + ';">' + (passShort ? '✓ ' + String(passShort).replace(/</g, '&lt;') : '✓ OK') + '</span>';
+                        }
                     } else if (s === 'fail') {
-                        if (rule.failMsgs && rule.failMsgs.length) {
-                            subMsgs = resolveFailMsgs(rule.failMsgs, cache);
+                        var failLong = resolveMsgList(rule.fail && rule.fail.long, cache);
+                        if (failLong.length) {
+                            subMsgs = failLong;
                             statusLabel = '<span style="font-weight:bold;color:' + color + ';">✗ Failed</span>';
                         } else {
                             statusLabel = '<span style="font-weight:bold;color:' + color + ';">✗ ' + String(res.detail).replace(/</g, '&lt;') + '</span>';
                         }
                     } else if (s === 'warn') {
-                        if (rule.warnMsgs && rule.warnMsgs.length) {
-                            subMsgs = resolveWarnMsgs(rule.warnMsgs, cache);
+                        var warnLong = resolveMsgList(rule.warn && rule.warn.long, cache);
+                        if (warnLong.length) {
+                            subMsgs = warnLong;
                             statusLabel = '<span style="font-weight:bold;color:' + color + ';">⚠ Warning</span>';
                         } else {
                             statusLabel = '<span style="font-weight:bold;color:' + color + ';">⚠ ' + String(res.detail).replace(/</g, '&lt;') + '</span>';
@@ -2932,7 +3038,7 @@
                         statusLabel = '<span style="font-weight:bold;color:' + color + ';">⚠ ' + String(res.detail).replace(/</g, '&lt;') + '</span>';
                     }
 
-                    var subColor = (s === 'warn') ? '#e67e22' : '#e74c3c';
+                    var subColor = (s === 'warn') ? '#e67e22' : (s === 'pass' ? '#2ecc71' : '#e74c3c');
                     var subHtml = subMsgs.map(function(m) {
                         return '<div style="margin-left:20px;color:' + subColor + ';font-size:10px;padding:1px 0;">• ' + String(m).replace(/</g, '&lt;') + '</div>';
                     }).join('');
@@ -3048,25 +3154,28 @@
                         var hmRes = results[hmRaw];
                         if (hmRes) {
                             if (hmRes.status === 'pass') {
-                                var hmShort = hmRule.shortPassMsg || hmRule.passMsg || '';
-                                hmText = hmShort ? resolveMsg(String(hmShort), cache) : '✓';
+                                var hmShort = (hmRule.pass && hmRule.pass.short) || '';
+                                if (hmShort) {
+                                    hmText = resolveMsg(String(hmShort), cache);
+                                } else {
+                                    var hmPassLong = resolveMsgList(hmRule.pass && hmRule.pass.long, cache);
+                                    hmText = hmPassLong[0] || '✓';
+                                }
                             } else if (hmRes.status === 'fail') {
-                                var hmShortFail = hmRule.shortFailMsg || '';
+                                var hmShortFail = (hmRule.fail && hmRule.fail.short) || '';
                                 if (hmShortFail) {
                                     hmText = resolveMsg(String(hmShortFail), cache);
-                                } else if (hmRule.failMsgs && hmRule.failMsgs.length) {
-                                    hmText = resolveFailMsgs(hmRule.failMsgs, cache)[0] || '✗';
                                 } else {
-                                    hmText = '✗';
+                                    var hmFailLong = resolveMsgList(hmRule.fail && hmRule.fail.long, cache);
+                                    hmText = hmFailLong[0] || '✗';
                                 }
                             } else if (hmRes.status === 'warn') {
-                                var hmShortWarn = hmRule.shortWarnMsg || '';
+                                var hmShortWarn = (hmRule.warn && hmRule.warn.short) || '';
                                 if (hmShortWarn) {
                                     hmText = resolveMsg(String(hmShortWarn), cache);
-                                } else if (hmRule.warnMsgs && hmRule.warnMsgs.length) {
-                                    hmText = resolveWarnMsgs(hmRule.warnMsgs, cache)[0] || '⚠';
                                 } else {
-                                    hmText = '⚠';
+                                    var hmWarnLong = resolveMsgList(hmRule.warn && hmRule.warn.long, cache);
+                                    hmText = hmWarnLong[0] || '⚠';
                                 }
                             } else if (hmRes.status === 'na') {
                                 hmText = '';
@@ -3760,6 +3869,96 @@
         }
 
         // ── RULES TAB ──
+        var RETURN_MODES = [
+            ['none', 'None (exclude)'],
+            ['short', 'Short message'],
+            ['long', 'Long message(s)'],
+            ['custom', 'Custom text below']
+        ];
+
+        // Builds one collapsible Pass/Fail/Warn section for a rule: a Short
+        // (one-line, for the group header) input, a Long list editor — each
+        // entry has its OWN condition + message fields (no ' :: ' delimiter
+        // parsing, so a condition referencing a qualified field name like
+        // "Tab :: Field" can never corrupt the message) — and, for fail/warn,
+        // an inline "include in return message" control.
+        function msgSection(rule, key, label, color, includeReturn) {
+            var side = rule[key];
+            var sec = document.createElement('div');
+            sec.style.cssText = 'border:1px solid ' + color + ';border-radius:5px;padding:6px;margin-top:6px;';
+            sec.innerHTML =
+                '<div data-coll-header style="display:flex;align-items:center;gap:6px;cursor:pointer;">' +
+                '<span data-coll-arrow style="font-size:10px;color:#aaa;min-width:10px;">▶</span>' +
+                '<b style="color:' + color + ';font-size:11px;">' + label + '</b>' +
+                '</div>' +
+                '<div data-coll-body style="margin-top:6px;">' +
+                '<label style="color:#aaa;font-size:10px;">Short (one line, shown in the group header):</label><br>' +
+                '<input type="text" data-short value="' + String(side.short || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#333;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;margin-top:2px;">' +
+                '<div style="margin-top:6px;color:#aaa;font-size:10px;">Long — one or more messages, each with its own optional condition. Every matching entry is shown as a bullet list.</div>' +
+                '<div data-long-list style="margin-top:4px;"></div>' +
+                '<button data-add-long type="button" style="font-size:10px;margin-top:2px;">+ Add message</button>' +
+                (includeReturn ?
+                    ('<div style="margin-top:8px;border-top:1px solid #333;padding-top:6px;">' +
+                        '<label style="color:#aaa;font-size:10px;">Include in return message:</label><br>' +
+                        RETURN_MODES.map(function(m) {
+                            return '<label style="margin-right:8px;font-size:10px;color:#ccc;"><input type="radio" name="__ret_' + rule.id + '_' + key + '" data-ret-mode value="' + m[0] + '" ' + ((side.returnMode || 'none') === m[0] ? 'checked' : '') + '> ' + m[1] + '</label>';
+                        }).join('') +
+                        '<div style="margin-top:4px;"><input type="text" data-ret-custom placeholder="Custom text (supports {{expr}})" value="' + String(side.returnCustom || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;"></div>' +
+                        '</div>') : '') +
+                '</div>';
+
+            makeCollapsible(sec, label);
+
+            sec.querySelector('[data-short]').oninput = function(e) {
+                side.short = e.target.value;
+            };
+
+            function renderLongList() {
+                var wrap = sec.querySelector('[data-long-list]');
+                wrap.innerHTML = '';
+                (side.long || []).forEach(function(entry, i) {
+                    var row = document.createElement('div');
+                    row.style.cssText = 'display:flex;gap:4px;align-items:center;margin-bottom:4px;';
+                    row.innerHTML =
+                        '<input type="text" placeholder="Condition (optional)" data-cond value="' + String(entry.condition || '').replace(/"/g, '&quot;') + '" style="flex:1;min-width:0;background:#000;color:#7ec8e3;font-family:monospace;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:10px;">' +
+                        '<input type="text" placeholder="Message (supports {{expr}})" data-msg value="' + String(entry.msg || '').replace(/"/g, '&quot;') + '" style="flex:2;min-width:0;background:#333;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;">' +
+                        '<button data-rm-entry type="button" style="color:#e74c3c;flex-shrink:0;">✕</button>';
+                    row.querySelector('[data-cond]').oninput = function(e) {
+                        entry.condition = e.target.value;
+                    };
+                    row.querySelector('[data-msg]').oninput = function(e) {
+                        entry.msg = e.target.value;
+                    };
+                    row.querySelector('[data-rm-entry]').onclick = function() {
+                        side.long.splice(i, 1);
+                        renderLongList();
+                    };
+                    wrap.appendChild(row);
+                });
+            }
+            renderLongList();
+            sec.querySelector('[data-add-long]').onclick = function() {
+                if (!side.long) side.long = [];
+                side.long.push({
+                    condition: '',
+                    msg: ''
+                });
+                renderLongList();
+            };
+
+            if (includeReturn) {
+                sec.querySelectorAll('[data-ret-mode]').forEach(function(r) {
+                    r.onchange = function(e) {
+                        if (e.target.checked) side.returnMode = e.target.value;
+                    };
+                });
+                sec.querySelector('[data-ret-custom]').oninput = function(e) {
+                    side.returnCustom = e.target.value;
+                };
+            }
+            return sec;
+        }
+
         function rulesTab() {
             content.innerHTML = '';
             cfg.rules.forEach(function(rule, idx) {
@@ -3777,27 +3976,8 @@
                     '<div data-coll-body>' +
                     '<div style="margin-top:4px;">Insert field: <select data-i><option value="">--</option>' + fo + '</select></div>' +
                     formulaBox(rule, 'formula') +
-                    '<div style="margin-top:4px;"><label style="color:#aaa;">Pass Message (optional, supports {{expr}}):</label><br>' +
-                    '<input type="text" data-pm value="' + (rule.passMsg || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#333;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;margin-top:2px;"></div>' +
-                    '<div style="margin-top:4px;"><label style="color:#aaa;">Short Pass Message:</label><br>' +
-                    '<input type="text" data-spm value="' + (rule.shortPassMsg || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#333;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;margin-top:2px;"></div>' +
-                    '<div style="margin-top:4px;"><label style="color:#aaa;">Short Fail Message:</label><br>' +
-                    '<input type="text" data-sfm value="' + (rule.shortFailMsg || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#333;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;margin-top:2px;"></div>' +
-                    '<div style="margin-top:4px;"><label style="color:#aaa;">Fail Messages:</label><br>' +
-                    '<textarea data-fm style="width:100%;height:64px;font-family:monospace;font-size:11px;background:#000;color:#f88;border:1px solid #444;padding:4px;margin-top:2px;">' +
-                    (rule.failMsgs || []).map(function(fm) {
-                        if (typeof fm === 'string') return fm;
-                        return fm.condition ? (fm.condition + ' :: ' + fm.msg) : fm.msg;
-                    }).join('\n') + '</textarea></div>' +
-                    '<div style="margin-top:4px;"><label style="color:#aaa;">Warn Messages:</label><br>' +
-                    '<textarea data-wm style="width:100%;height:64px;font-family:monospace;font-size:11px;background:#000;color:#e67e22;border:1px solid #444;padding:4px;margin-top:2px;">' +
-                    (rule.warnMsgs || []).map(function(wm) {
-                        if (typeof wm === 'string') return wm;
-                        return wm.condition ? (wm.condition + ' :: ' + wm.msg) : wm.msg;
-                    }).join('\n') + '</textarea></div>' +
-                    '<div style="margin-top:4px;"><label style="color:#aaa;">Short Warn Message:</label><br>' +
-                    '<input type="text" data-swm value="' + (rule.shortWarnMsg || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#333;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;margin-top:2px;"></div>' +
-                    '<div style="margin-top:4px;"><button data-t>Test</button> <span data-r style="margin-left:6px;"></span></div>' +
+                    '<div data-msg-sections style="margin-top:6px;"></div>' +
+                    '<div style="margin-top:6px;"><button data-t type="button">Test</button> <span data-r style="margin-left:6px;"></span></div>' +
                     '<div style="margin-top:4px;color:#777;font-size:10px;">Available: F(field) T(table) rowCount(t) col(t,n) has(t,c,v) hours(str) hoursBetween(a,b) oneOf(v,arr) contains(t,p) matches(t,p) isEmpty(v) notEmpty(v) <b>maxLaborHours(tableTitle,nameCol,hoursCol)</b></div>' +
                     '</div>';
 
@@ -3805,53 +3985,17 @@
                 content.appendChild(box);
                 makeCollapsible(box, rule.label);
 
+                var msgWrap = box.querySelector('[data-msg-sections]');
+                msgWrap.appendChild(msgSection(rule, 'pass', '✓ Pass', '#2ecc71', false));
+                msgWrap.appendChild(msgSection(rule, 'fail', '✗ Fail — must be fixed', '#e74c3c', true));
+                msgWrap.appendChild(msgSection(rule, 'warn', '⚠ Warn — needs reviewer confirmation', '#FF9800', true));
+
                 var fa = box.querySelector('[data-f]');
                 box.querySelector('[data-l]').oninput = function(e) {
                     rule.label = e.target.value;
                 };
                 fa.oninput = function() {
                     rule.formula = fa.value;
-                };
-                box.querySelector('[data-pm]').oninput = function(e) {
-                    rule.passMsg = e.target.value || undefined;
-                };
-                box.querySelector('[data-spm]').oninput = function(e) {
-                    rule.shortPassMsg = e.target.value || undefined;
-                };
-                box.querySelector('[data-sfm]').oninput = function(e) {
-                    rule.shortFailMsg = e.target.value || undefined;
-                };
-
-                box.querySelector('[data-fm]').oninput = function(e) {
-                    rule.failMsgs = e.target.value.split('\n').map(function(line) {
-                        line = line.trim();
-                        if (!line) return null;
-                        var sep = line.indexOf(' :: ');
-                        if (sep >= 0) return {
-                            condition: line.slice(0, sep).trim(),
-                            msg: line.slice(sep + 4).trim()
-                        };
-                        return {
-                            msg: line
-                        };
-                    }).filter(Boolean);
-                };
-                box.querySelector('[data-wm]').oninput = function(e) {
-                    rule.warnMsgs = e.target.value.split('\n').map(function(line) {
-                        line = line.trim();
-                        if (!line) return null;
-                        var sep = line.indexOf(' :: ');
-                        if (sep >= 0) return {
-                            condition: line.slice(0, sep).trim(),
-                            msg: line.slice(sep + 4).trim()
-                        };
-                        return {
-                            msg: line
-                        };
-                    }).filter(Boolean);
-                };
-                box.querySelector('[data-swm]').oninput = function(e) {
-                    rule.shortWarnMsg = e.target.value || undefined;
                 };
 
                 box.querySelector('[data-i]').onchange = function(e) {
@@ -3875,48 +4019,19 @@
                     var detail = '';
 
                     if (res.status === 'pass') {
-                        var shortPass = box.querySelector('[data-spm]').value.trim() || box.querySelector('[data-pm]').value.trim();
-                        var longPass = box.querySelector('[data-pm]').value.trim();
-                        detail = (shortPass ? 'Header: "' + resolveMsg(shortPass, cache) + '"' : 'Header: ✓ OK') +
-                            (longPass ? ' | Long: "' + resolveMsg(longPass, cache) + '"' : '');
+                        var passLongT = resolveMsgList(rule.pass.long, cache);
+                        detail = (rule.pass.short ? 'Header: "' + resolveMsg(rule.pass.short, cache) + '"' : 'Header: ✓ OK') +
+                            (passLongT.length ? ' | Long: "' + passLongT.join(' / ') + '"' : '');
                     } else if (res.status === 'warn') {
-                        var shortWarn = box.querySelector('[data-swm]').value.trim();
-                        var shortWarnResolved = shortWarn ? resolveMsg(shortWarn, cache) : '';
-                        var warnMsgsRaw = box.querySelector('[data-wm]').value.trim();
-                        var warnMsgsParsed = warnMsgsRaw ? warnMsgsRaw.split('\n').map(function(line) {
-                            line = line.trim();
-                            if (!line) return null;
-                            var sep = line.indexOf(' :: ');
-                            if (sep >= 0) return {
-                                condition: line.slice(0, sep).trim(),
-                                msg: line.slice(sep + 4).trim()
-                            };
-                            return {
-                                msg: line
-                            };
-                        }).filter(Boolean) : [];
-                        var longWarns = warnMsgsParsed.length ? resolveWarnMsgs(warnMsgsParsed, cache) : [];
-                        detail = 'Header: "' + (shortWarnResolved || (longWarns[0] ? '⚠ ' + longWarns[0] : '⚠ Warning')) + '"' +
-                            (longWarns.length ? ' | Long: "' + longWarns.join(' / ') + '"' : '');
+                        var warnLongT = resolveMsgList(rule.warn.long, cache);
+                        var shortWarnResolved = rule.warn.short ? resolveMsg(rule.warn.short, cache) : '';
+                        detail = 'Header: "' + (shortWarnResolved || (warnLongT[0] ? '⚠ ' + warnLongT[0] : '⚠ Warning')) + '"' +
+                            (warnLongT.length ? ' | Long: "' + warnLongT.join(' / ') + '"' : '');
                     } else if (res.status === 'fail') {
-                        var shortFail = box.querySelector('[data-sfm]').value.trim();
-                        var shortFailResolved = shortFail ? resolveMsg(shortFail, cache) : '';
-                        var failMsgsRaw = box.querySelector('[data-fm]').value.trim();
-                        var failMsgsParsed = failMsgsRaw ? failMsgsRaw.split('\n').map(function(line) {
-                            line = line.trim();
-                            if (!line) return null;
-                            var sep = line.indexOf(' :: ');
-                            if (sep >= 0) return {
-                                condition: line.slice(0, sep).trim(),
-                                msg: line.slice(sep + 4).trim()
-                            };
-                            return {
-                                msg: line
-                            };
-                        }).filter(Boolean) : [];
-                        var longFails = failMsgsParsed.length ? resolveFailMsgs(failMsgsParsed, cache) : [];
-                        detail = 'Header: "' + (shortFailResolved || (longFails[0] ? '✗ ' + longFails[0] : '✗ Failed')) + '"' +
-                            (longFails.length ? ' | Long: "' + longFails.join(' / ') + '"' : '');
+                        var failLongT = resolveMsgList(rule.fail.long, cache);
+                        var shortFailResolved = rule.fail.short ? resolveMsg(rule.fail.short, cache) : '';
+                        detail = 'Header: "' + (shortFailResolved || (failLongT[0] ? '✗ ' + failLongT[0] : '✗ Failed')) + '"' +
+                            (failLongT.length ? ' | Long: "' + failLongT.join(' / ') + '"' : '');
                     } else if (res.status === 'na') {
                         detail = 'Not applicable';
                     } else {
@@ -3934,7 +4049,22 @@
                     id: 'r_' + Date.now(),
                     label: 'New Rule',
                     formula: 'return true;',
-                    failMsgs: []
+                    pass: {
+                        short: '',
+                        long: []
+                    },
+                    fail: {
+                        short: '',
+                        long: [],
+                        returnMode: 'none',
+                        returnCustom: ''
+                    },
+                    warn: {
+                        short: '',
+                        long: [],
+                        returnMode: 'none',
+                        returnCustom: ''
+                    }
                 });
                 rulesTab();
             };
@@ -4460,7 +4590,9 @@
             var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
             content.innerHTML = '';
 
-            // Quick Return / Copy Message
+            // Quick Return / Copy Message — prefix/suffix/delimiter are global;
+            // per-rule return-message config now lives inline in the Rules tab
+            // (see msgSection()'s "Include in return message" control).
             var qrDiv = document.createElement('div');
             qrDiv.style.cssText = 'border:1px solid #333;border-radius:6px;margin-bottom:10px;';
             qrDiv.innerHTML =
@@ -4475,64 +4607,10 @@
                 '<input id="__st_suffix" type="text" value="' + (st.msgSuffix || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;margin-top:2px;"></div>' +
                 '<div style="margin-top:6px;"><label style="color:#aaa;font-size:11px;">Delimiter between messages (default: space + period)</label><br>' +
                 '<input id="__st_delim" type="text" value="' + (st.msgDelim !== undefined ? st.msgDelim : '. ').replace(/"/g, '&quot;') + '" style="width:80px;background:#222;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;margin-top:2px;"></div>' +
-                '<div style="margin-top:8px;"><b style="color:#aaa;font-size:11px;">Per-rule copy messages (shown when rule fails — these appear in the copied message)</b></div>' +
-                '<div id="__st_rulemsg_list" style="margin-top:4px;"></div>' +
+                '<div style="margin-top:8px;color:#666;font-size:10px;">Per-rule "include in return message" settings have moved to each rule\'s Fail/Warn section in the Rules tab.</div>' +
                 '</div>';
             content.appendChild(qrDiv);
             makeCollapsible(qrDiv, 'Quick Return Message');
-
-
-            // per-rule messages — supports multi-line "condition :: message" entries
-            var ruleMessages = st.ruleMessages || {};
-            var rl = qrDiv.querySelector('#__st_rulemsg_list');
-            getCfg().rules.forEach(function(rule) {
-                var stored = ruleMessages[rule.id];
-                var taVal = '';
-                if (Array.isArray(stored)) {
-                    taVal = stored.map(function(e) {
-                        if (typeof e === 'string') return e;
-                        return e.condition ? (e.condition + ' :: ' + e.msg) : e.msg;
-                    }).join('\n');
-                } else if (typeof stored === 'string') {
-                    taVal = stored;
-                }
-                // Load stored return config for this rule
-                var retCfg = st.ruleReturnCfg || {};
-                var ruleCfg = retCfg[rule.id] || {
-                    fail: 'none',
-                    warn: 'none',
-                    custom: ''
-                };
-
-                var rd = document.createElement('div');
-                rd.style.cssText = 'margin-bottom:10px;padding:8px;background:#1a1a1a;border:1px solid #333;border-radius:4px;';
-                rd.innerHTML = '<div style="color:#ccc;font-size:11px;font-weight:bold;margin-bottom:6px;">' + rule.label + '</div>' +
-                    '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;">' +
-                    '<div>' +
-                    '<div style="color:#e74c3c;font-size:10px;margin-bottom:3px;">✗ Fail — include in return message as:</div>' +
-                    '<select data-ret-fail="' + rule.id + '" style="background:#222;color:#eee;border:1px solid #444;font-size:11px;padding:2px 4px;">' +
-                    '<option value="none"' + (ruleCfg.fail === 'none' ? ' selected' : '') + '>None (exclude)</option>' +
-                    '<option value="short"' + (ruleCfg.fail === 'short' ? ' selected' : '') + '>Short fail message</option>' +
-                    '<option value="full"' + (ruleCfg.fail === 'full' ? ' selected' : '') + '>Full fail message</option>' +
-                    '<option value="custom"' + (ruleCfg.fail === 'custom' ? ' selected' : '') + '>Custom text below</option>' +
-                    '</select>' +
-                    '</div>' +
-                    '<div>' +
-                    '<div style="color:#FF9800;font-size:10px;margin-bottom:3px;">⚠ Warn — include in return message as:</div>' +
-                    '<select data-ret-warn="' + rule.id + '" style="background:#222;color:#eee;border:1px solid #444;font-size:11px;padding:2px 4px;">' +
-                    '<option value="none"' + (ruleCfg.warn === 'none' ? ' selected' : '') + '>None (exclude)</option>' +
-                    '<option value="short"' + (ruleCfg.warn === 'short' ? ' selected' : '') + '>Short warn message</option>' +
-                    '<option value="full"' + (ruleCfg.warn === 'full' ? ' selected' : '') + '>Full warn message</option>' +
-                    '<option value="custom"' + (ruleCfg.warn === 'custom' ? ' selected' : '') + '>Custom text below</option>' +
-                    '</select>' +
-                    '</div>' +
-                    '</div>' +
-                    '<div style="margin-top:6px;"><div style="color:#aaa;font-size:10px;margin-bottom:2px;">Custom text (used when "Custom text" is selected above, supports {{expr}}):</div>' +
-                    '<input type="text" data-ret-custom="' + rule.id + '" value="' + (ruleCfg.custom || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;">' +
-                    '</div>';
-                rl.appendChild(rd);
-            });
-
 
             // Scan hotkey
             var hkDiv = document.createElement('div');
@@ -4618,36 +4696,6 @@
                 if (!st.rescanHotkey && currentSaved.rescanHotkey) {
                     st.rescanHotkey = currentSaved.rescanHotkey;
                 }
-
-                st.ruleReturnCfg = {};
-
-                content.querySelectorAll('[data-ret-fail]').forEach(function(sel) {
-                    var id = sel.getAttribute('data-ret-fail');
-                    if (!st.ruleReturnCfg[id]) st.ruleReturnCfg[id] = {
-                        fail: 'none',
-                        warn: 'none',
-                        custom: ''
-                    };
-                    st.ruleReturnCfg[id].fail = sel.value;
-                });
-                content.querySelectorAll('[data-ret-warn]').forEach(function(sel) {
-                    var id = sel.getAttribute('data-ret-warn');
-                    if (!st.ruleReturnCfg[id]) st.ruleReturnCfg[id] = {
-                        fail: 'none',
-                        warn: 'none',
-                        custom: ''
-                    };
-                    st.ruleReturnCfg[id].warn = sel.value;
-                });
-                content.querySelectorAll('[data-ret-custom]').forEach(function(inp) {
-                    var id = inp.getAttribute('data-ret-custom');
-                    if (!st.ruleReturnCfg[id]) st.ruleReturnCfg[id] = {
-                        fail: 'none',
-                        warn: 'none',
-                        custom: ''
-                    };
-                    st.ruleReturnCfg[id].custom = inp.value;
-                });
 
                 saveSettingsCfg(st);
                 applyHotkey();
@@ -5173,6 +5221,44 @@
             });
         }
     }).then(function() {
+        // One-time write-back: if storage still has old-shape rules (an old
+        // profile, a restored backup, a stale pin), persist the normalized
+        // form now so later getCfg() calls hit the fast already-migrated path
+        // instead of re-normalizing every time. Purely a perf optimization —
+        // getCfg() normalizes on every read regardless, so correctness never
+        // depends on this running.
+        try {
+            var rawCfgCheck = JSON.parse(localStorage.getItem(RKEY) || 'null');
+            if (rawCfgCheck && rawCfgCheck.rules && rawCfgCheck.rules.some(function(r) {
+                    return !isNewRuleShape(r);
+                })) {
+                saveCfg(getCfg());
+            }
+        } catch (e) {}
+        // Same write-back, but for STORED (not-currently-active) profiles —
+        // switching to one later must not fold in whatever ruleReturnCfg the
+        // active profile happens to have left in live settings, so each
+        // profile's own settings.ruleReturnCfg is passed in explicitly.
+        try {
+            var profiles = getProfiles();
+            var profilesChanged = false;
+            Object.keys(profiles).forEach(function(pid) {
+                var p = profiles[pid];
+                if (!p || !p.rules || !p.rules.rules) return;
+                var needsMigration = p.rules.rules.some(function(r) {
+                    return !isNewRuleShape(r);
+                });
+                if (!needsMigration) return;
+                var legacyAll = (p.settings && p.settings.ruleReturnCfg) || {};
+                p.rules = normalizeCfg(p.rules, legacyAll);
+                if (p.settings) {
+                    delete p.settings.ruleReturnCfg;
+                    delete p.settings.ruleMessages;
+                }
+                profilesChanged = true;
+            });
+            if (profilesChanged) saveProfiles(profiles);
+        } catch (e) {}
         render();
         checkAutoScan();
         startWOWatcher();
