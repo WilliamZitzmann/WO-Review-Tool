@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.15.0';
+    var TOOL_VERSION = '0.15.1';
     var DEFAULT_CFG = {
         groups: [{
             id: 'g_core',
@@ -1232,12 +1232,21 @@
         return 'locked';
     };
 
+    // A semver pre-release suffix (e.g. "0.15.1-beta1") marks a beta/dev build.
+    // Plain releases ("0.15.0") are available to everyone; pre-releases require unlock.
+    function isPrerelease(v) {
+        return typeof v === 'string' && v.indexOf('-') !== -1;
+    }
+
     // ── Resolve which version/channel should be running ──
+    // Everyone can pick "stable" or pin to any released (non-prerelease) version.
+    // Only "beta"/"dev" channels and beta/dev-tagged pins require the console unlock.
     function resolveUpdateTarget(remote) {
         var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
         var tier = getDevTier();
-        var channel = tier ? (st.channel || 'stable') : 'stable';
+        var channel = st.channel || 'stable';
         if (channel === 'dev' && tier !== 'dev') channel = 'stable';
+        if (channel === 'beta' && tier !== 'beta' && tier !== 'dev') channel = 'stable';
         if (channel !== 'stable' && channel !== 'dev' && channel !== 'beta') channel = 'stable';
 
         if (channel === 'dev') {
@@ -1249,7 +1258,9 @@
             };
         }
 
-        var pin = (tier && st.pinnedVersion) ? st.pinnedVersion : '';
+        var pin = st.pinnedVersion || '';
+        if (pin && isPrerelease(pin) && tier !== 'beta' && tier !== 'dev') pin = '';
+
         var channels = remote.channels || {};
         var version = pin || channels[channel] || channels.stable || remote.latest;
         return {
@@ -4260,64 +4271,69 @@
                 saveSettingsCfg(st);
             };
 
-            // ── Update Channel (hidden unless unlocked via window.__woEnableBeta()/__woEnableDev() in the console) ──
+            // ── Update Channel — always visible. Stable + pinning to any released
+            // version is available to everyone; beta/dev channels and beta/dev-tagged
+            // pins only appear once unlocked via window.__woEnableBeta()/__woEnableDev(). ──
             var devTier = getDevTier();
-            if (devTier) {
-                var chDiv = document.createElement('div');
-                chDiv.style.cssText = 'border:1px solid #7ec8e3;border-radius:6px;padding:10px;margin-bottom:10px;';
-                var chOptions = ['stable', 'beta'];
-                if (devTier === 'dev') chOptions.push('dev');
-                var curChannel = st.channel || 'stable';
-                if (curChannel === 'dev' && devTier !== 'dev') curChannel = 'stable';
-                if (chOptions.indexOf(curChannel) === -1) curChannel = 'stable';
-                chDiv.innerHTML = '<b style="color:#7ec8e3;">⚙ Update Channel</b> <span style="color:#555;font-size:10px;">(' + devTier + ' mode unlocked)</span>' +
-                    '<div style="margin-top:8px;">' +
-                    '<label style="color:#aaa;font-size:11px;">Channel:</label><br>' +
-                    '<select id="__st_channel" style="background:#222;color:#eee;border:1px solid #444;padding:3px 6px;border-radius:3px;font-size:11px;margin-top:2px;">' +
-                    chOptions.map(function(c) {
-                        return '<option value="' + c + '"' + (c === curChannel ? ' selected' : '') + '>' + c + '</option>';
-                    }).join('') +
-                    '</select>' +
-                    '</div>' +
-                    '<div style="margin-top:8px;">' +
-                    '<label style="color:#aaa;font-size:11px;">Pin specific version (overrides channel; blank = follow channel):</label><br>' +
-                    '<select id="__st_pin" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:3px 6px;border-radius:3px;font-size:11px;margin-top:4px;"><option value="">— follow channel —</option></select>' +
-                    '</div>' +
-                    '<div style="margin-top:8px;color:#555;font-size:10px;">window.__woLockDev() in the console re-hides this and resets to stable.</div>';
-                content.appendChild(chDiv);
+            var chDiv = document.createElement('div');
+            chDiv.style.cssText = 'border:1px solid ' + (devTier ? '#7ec8e3' : '#333') + ';border-radius:6px;padding:10px;margin-bottom:10px;';
+            var chOptions = ['stable'];
+            if (devTier === 'beta' || devTier === 'dev') chOptions.push('beta');
+            if (devTier === 'dev') chOptions.push('dev');
+            var curChannel = st.channel || 'stable';
+            if (chOptions.indexOf(curChannel) === -1) curChannel = 'stable';
+            chDiv.innerHTML = '<b' + (devTier ? ' style="color:#7ec8e3;"' : '') + '>⚙ Update Channel</b>' +
+                (devTier ? ' <span style="color:#555;font-size:10px;">(' + devTier + ' mode unlocked)</span>' : '') +
+                '<div style="margin-top:8px;">' +
+                '<label style="color:#aaa;font-size:11px;">Channel:</label><br>' +
+                '<select id="__st_channel" style="background:#222;color:#eee;border:1px solid #444;padding:3px 6px;border-radius:3px;font-size:11px;margin-top:2px;">' +
+                chOptions.map(function(c) {
+                    return '<option value="' + c + '"' + (c === curChannel ? ' selected' : '') + '>' + c + '</option>';
+                }).join('') +
+                '</select>' +
+                '</div>' +
+                '<div style="margin-top:8px;">' +
+                '<label style="color:#aaa;font-size:11px;">Pin specific version (overrides channel; blank = follow channel):</label><br>' +
+                '<select id="__st_pin" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:3px 6px;border-radius:3px;font-size:11px;margin-top:4px;"><option value="">— follow channel —</option></select>' +
+                '</div>' +
+                (devTier ?
+                    '<div style="margin-top:8px;color:#555;font-size:10px;">window.__woLockDev() in the console re-hides beta/dev options and resets to stable.</div>' :
+                    '');
+            content.appendChild(chDiv);
 
-                chDiv.querySelector('#__st_channel').onchange = function(e) {
-                    st.channel = e.target.value;
-                    saveSettingsCfg(st);
-                    setStatus('Channel set to ' + st.channel + ' — checking for update...');
-                    checkForUpdate();
-                };
+            chDiv.querySelector('#__st_channel').onchange = function(e) {
+                st.channel = e.target.value;
+                saveSettingsCfg(st);
+                setStatus('Channel set to ' + st.channel + ' — checking for update...');
+                checkForUpdate();
+            };
 
-                var pinSel = chDiv.querySelector('#__st_pin');
-                var xhrV = new XMLHttpRequest();
-                xhrV.open('GET', REPO_RAW_BASE + '/main/version.json', true);
-                xhrV.onload = function() {
-                    if (xhrV.status !== 200) return;
-                    try {
-                        var remoteV = JSON.parse(xhrV.responseText);
-                        (remoteV.versions || []).forEach(function(v) {
-                            var opt = document.createElement('option');
-                            opt.value = v.version;
-                            opt.textContent = v.version;
-                            if (st.pinnedVersion === v.version) opt.selected = true;
-                            pinSel.appendChild(opt);
-                        });
-                    } catch (e) {}
-                };
-                xhrV.send();
+            var pinSel = chDiv.querySelector('#__st_pin');
+            var xhrV = new XMLHttpRequest();
+            xhrV.open('GET', REPO_RAW_BASE + '/main/version.json', true);
+            xhrV.onload = function() {
+                if (xhrV.status !== 200) return;
+                try {
+                    var remoteV = JSON.parse(xhrV.responseText);
+                    (remoteV.versions || []).forEach(function(v) {
+                        var isPre = isPrerelease(v.version);
+                        if (isPre && devTier !== 'beta' && devTier !== 'dev') return; // beta/dev builds stay hidden
+                        var opt = document.createElement('option');
+                        opt.value = v.version;
+                        opt.textContent = v.version;
+                        if (st.pinnedVersion === v.version) opt.selected = true;
+                        pinSel.appendChild(opt);
+                    });
+                } catch (e) {}
+            };
+            xhrV.send();
 
-                pinSel.onchange = function(e) {
-                    st.pinnedVersion = e.target.value;
-                    saveSettingsCfg(st);
-                    setStatus(st.pinnedVersion ? 'Pinned to v' + st.pinnedVersion + ' — checking...' : 'Unpinned — following channel');
-                    checkForUpdate();
-                };
-            }
+            pinSel.onchange = function(e) {
+                st.pinnedVersion = e.target.value;
+                saveSettingsCfg(st);
+                setStatus(st.pinnedVersion ? 'Pinned to v' + st.pinnedVersion + ' — checking...' : 'Unpinned — following channel');
+                checkForUpdate();
+            };
 
             // Debug button (dev tier only — moved from panel)
             if (devTier === 'dev') {

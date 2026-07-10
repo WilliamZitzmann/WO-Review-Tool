@@ -1,15 +1,21 @@
 {
-  "latest": "0.15.0",
+  "latest": "0.15.1",
   "channels": {
-    "stable": "0.15.0",
-    "beta": "0.15.0"
+    "stable": "0.15.1",
+    "beta": "0.15.1"
   },
   "versions": [
+    {
+      "version": "0.15.1",
+      "changes": [
+        "Fixed: Update Channel is now visible to everyone — all users can pick Stable or pin to any released version",
+        "Only the Beta and Dev channel options (and beta/dev-tagged builds in the pin list) stay hidden until window.__woEnableBeta()/__woEnableDev() is run in the console"
+      ]
+    },
     {
       "version": "0.15.0",
       "changes": [
         "Added tag-pinned update channels (stable/beta/dev) so installs can be pinned or rolled back to any prior version",
-        "Channel and version-pin controls are hidden by default — unlock with window.__woEnableBeta() or window.__woEnableDev() in the browser console",
         "dev channel tracks the tip of main directly; stable/beta pull from immutable git tags",
         "Failed or corrupted update downloads now always fall back to the currently running version instead of risking a broken install"
       ]
