@@ -1,8 +1,8 @@
 {
-  "latest": "0.9.0",
+  "latest": "0.14.3",
   "versions": [
     {
-      "version": "0.9.0",
+      "version": "0.14.3",
       "changes": [
         "Added post-scan actions — fill fields automatically after each tab is scanned",
         "Added auto-backup to local file (Chrome/Edge)",
