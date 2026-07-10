@@ -1,10 +1,19 @@
 {
-  "latest": "0.15.1",
+  "latest": "0.15.2",
   "channels": {
-    "stable": "0.15.1",
-    "beta": "0.15.1"
+    "stable": "0.15.2",
+    "beta": "0.15.2"
   },
   "versions": [
+    {
+      "version": "0.15.2",
+      "changes": [
+        "Fixed: fresh installs on a new browser now seed from the GitHub-hosted config.json default instead of a bare hardcoded fallback — custom rules, groups, variables, scan steps, and rule messages now arrive out of the box",
+        "Added a built-in default scan hotkey (Ctrl+Shift+S) that applies whenever no config has set one, regardless of which config/profile is loaded",
+        "Fixed a landmine where seeding from config.json could have silently downgraded a fresh install back to an old cached code version — code is now never sourced from a config file",
+        "Consolidated the channel/version-pin controls into the existing Settings → Updates section instead of a separate box"
+      ]
+    },
     {
       "version": "0.15.1",
       "changes": [

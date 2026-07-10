@@ -20,7 +20,12 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.15.1';
+    var TOOL_VERSION = '0.15.2';
+    // Built-in fallback hotkey — used whenever __wo_settings has never set
+    // rescanHotkey (undefined), regardless of which config/profile is loaded.
+    // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
+    // is left alone, not overridden.
+    var DEFAULT_HOTKEY = 'Ctrl+Shift+S';
     var DEFAULT_CFG = {
         groups: [{
             id: 'g_core',
@@ -906,6 +911,47 @@
         if (b.settings) localStorage.setItem('__wo_settings', JSON.stringify(b.settings));
         if (b.src) localStorage.setItem('__wo_tool_src', b.src); // ← ADD THIS
         localStorage.setItem('__wo_config_saved_at', b.savedAt || new Date().toISOString());
+    }
+
+    // ── Seed the GitHub-hosted default config on a brand-new install ──
+    // Only runs when no local config exists at all (nothing was restored from
+    // a linked backup file) — never overwrites a config the user already has.
+    function seedDefaultConfigIfMissing() {
+        if (localStorage.getItem(RKEY)) return Promise.resolve(false);
+        return new Promise(function(resolve) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', REPO_RAW_BASE + '/main/config.json', true);
+            xhr.onload = function() {
+                if (xhr.status !== 200) {
+                    resolve(false);
+                    return;
+                }
+                try {
+                    var b = JSON.parse(xhr.responseText);
+                    // Deliberately exclude b.src: config.json may carry an old code
+                    // snapshot from whenever it was last exported. Code version is
+                    // owned by the update-channel system, never by a config seed —
+                    // applying it here could silently downgrade a fresh install.
+                    applyBackup({
+                        rules: b.rules,
+                        scan: b.scan,
+                        fields: b.fields,
+                        state: b.state,
+                        vars: b.vars,
+                        settings: b.settings,
+                        savedAt: b.savedAt
+                    });
+                    setStatus('✅ Loaded default config from GitHub');
+                    resolve(true);
+                } catch (e) {
+                    resolve(false);
+                }
+            };
+            xhr.onerror = function() {
+                resolve(false);
+            };
+            xhr.send();
+        });
     }
 
 
@@ -4223,8 +4269,9 @@
             // Scan hotkey
             var hkDiv = document.createElement('div');
             hkDiv.style.cssText = 'border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:10px;';
+            var hkCurrent = (st.rescanHotkey !== undefined) ? st.rescanHotkey : DEFAULT_HOTKEY;
             hkDiv.innerHTML = '<b>Scan Hotkey</b><br>' +
-                '<div style="margin-top:6px;color:#aaa;font-size:11px;">Current: <b id="__st_hk_display" style="color:#ff8;">' + (st.rescanHotkey || 'not set') + '</b></div>' +
+                '<div style="margin-top:6px;color:#aaa;font-size:11px;">Current: <b id="__st_hk_display" style="color:#ff8;">' + (hkCurrent || 'not set') + '</b></div>' +
                 '<div style="margin-top:4px;"><input id="__st_hk_input" type="text" readonly placeholder="Click here, then press your key combo..." style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;cursor:pointer;">' +
                 ' <button id="__st_hk_clear">Clear</button></div>';
             content.appendChild(hkDiv);
@@ -4271,69 +4318,7 @@
                 saveSettingsCfg(st);
             };
 
-            // ── Update Channel — always visible. Stable + pinning to any released
-            // version is available to everyone; beta/dev channels and beta/dev-tagged
-            // pins only appear once unlocked via window.__woEnableBeta()/__woEnableDev(). ──
             var devTier = getDevTier();
-            var chDiv = document.createElement('div');
-            chDiv.style.cssText = 'border:1px solid ' + (devTier ? '#7ec8e3' : '#333') + ';border-radius:6px;padding:10px;margin-bottom:10px;';
-            var chOptions = ['stable'];
-            if (devTier === 'beta' || devTier === 'dev') chOptions.push('beta');
-            if (devTier === 'dev') chOptions.push('dev');
-            var curChannel = st.channel || 'stable';
-            if (chOptions.indexOf(curChannel) === -1) curChannel = 'stable';
-            chDiv.innerHTML = '<b' + (devTier ? ' style="color:#7ec8e3;"' : '') + '>⚙ Update Channel</b>' +
-                (devTier ? ' <span style="color:#555;font-size:10px;">(' + devTier + ' mode unlocked)</span>' : '') +
-                '<div style="margin-top:8px;">' +
-                '<label style="color:#aaa;font-size:11px;">Channel:</label><br>' +
-                '<select id="__st_channel" style="background:#222;color:#eee;border:1px solid #444;padding:3px 6px;border-radius:3px;font-size:11px;margin-top:2px;">' +
-                chOptions.map(function(c) {
-                    return '<option value="' + c + '"' + (c === curChannel ? ' selected' : '') + '>' + c + '</option>';
-                }).join('') +
-                '</select>' +
-                '</div>' +
-                '<div style="margin-top:8px;">' +
-                '<label style="color:#aaa;font-size:11px;">Pin specific version (overrides channel; blank = follow channel):</label><br>' +
-                '<select id="__st_pin" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:3px 6px;border-radius:3px;font-size:11px;margin-top:4px;"><option value="">— follow channel —</option></select>' +
-                '</div>' +
-                (devTier ?
-                    '<div style="margin-top:8px;color:#555;font-size:10px;">window.__woLockDev() in the console re-hides beta/dev options and resets to stable.</div>' :
-                    '');
-            content.appendChild(chDiv);
-
-            chDiv.querySelector('#__st_channel').onchange = function(e) {
-                st.channel = e.target.value;
-                saveSettingsCfg(st);
-                setStatus('Channel set to ' + st.channel + ' — checking for update...');
-                checkForUpdate();
-            };
-
-            var pinSel = chDiv.querySelector('#__st_pin');
-            var xhrV = new XMLHttpRequest();
-            xhrV.open('GET', REPO_RAW_BASE + '/main/version.json', true);
-            xhrV.onload = function() {
-                if (xhrV.status !== 200) return;
-                try {
-                    var remoteV = JSON.parse(xhrV.responseText);
-                    (remoteV.versions || []).forEach(function(v) {
-                        var isPre = isPrerelease(v.version);
-                        if (isPre && devTier !== 'beta' && devTier !== 'dev') return; // beta/dev builds stay hidden
-                        var opt = document.createElement('option');
-                        opt.value = v.version;
-                        opt.textContent = v.version;
-                        if (st.pinnedVersion === v.version) opt.selected = true;
-                        pinSel.appendChild(opt);
-                    });
-                } catch (e) {}
-            };
-            xhrV.send();
-
-            pinSel.onchange = function(e) {
-                st.pinnedVersion = e.target.value;
-                saveSettingsCfg(st);
-                setStatus(st.pinnedVersion ? 'Pinned to v' + st.pinnedVersion + ' — checking...' : 'Unpinned — following channel');
-                checkForUpdate();
-            };
 
             // Debug button (dev tier only — moved from panel)
             if (devTier === 'dev') {
@@ -4444,11 +4429,30 @@
                 backupSettDiv.querySelector('#__st_link_backup').disabled = true;
             }
 
-            // ── Updates section ──
+            // ── Updates section — channel + version pin available to everyone;
+            // beta/dev channel options and beta/dev-tagged pins need the console unlock. ──
             var updSettDiv = document.createElement('div');
             updSettDiv.style.cssText = 'border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:10px;';
+            var chOptions = ['stable'];
+            if (devTier === 'beta' || devTier === 'dev') chOptions.push('beta');
+            if (devTier === 'dev') chOptions.push('dev');
+            var curChannel = st.channel || 'stable';
+            if (chOptions.indexOf(curChannel) === -1) curChannel = 'stable';
             updSettDiv.innerHTML = '<b>Updates</b>' +
+                (devTier ? ' <span style="color:#7ec8e3;font-size:10px;">(' + devTier + ' mode unlocked)</span>' : '') +
                 '<div style="margin-top:8px;">' +
+                '<label style="color:#aaa;font-size:11px;">Channel:</label><br>' +
+                '<select id="__st_channel" style="background:#222;color:#eee;border:1px solid #444;padding:3px 6px;border-radius:3px;font-size:11px;margin-top:2px;">' +
+                chOptions.map(function(c) {
+                    return '<option value="' + c + '"' + (c === curChannel ? ' selected' : '') + '>' + c + '</option>';
+                }).join('') +
+                '</select>' +
+                '</div>' +
+                '<div style="margin-top:8px;">' +
+                '<label style="color:#aaa;font-size:11px;">Version:</label><br>' +
+                '<select id="__st_pin" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:3px 6px;border-radius:3px;font-size:11px;margin-top:2px;"><option value="">— latest on channel —</option></select>' +
+                '</div>' +
+                '<div style="margin-top:10px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_upd_disable" ' + (st.updateDisabled ? 'checked' : '') + '>' +
                 '<span style="color:#aaa;font-size:11px;">Disable update check on launch</span>' +
@@ -4460,8 +4464,45 @@
                 '</label></div>' +
                 '<div style="margin-top:8px;">' +
                 '<button id="__st_check_now" style="background:#2c2c2c;color:#eee;border:1px solid #444;padding:4px 10px;cursor:pointer;border-radius:4px;font-size:11px;">Check for Updates Now</button>' +
-                '</div>';
+                '</div>' +
+                (devTier ?
+                    '<div style="margin-top:8px;color:#555;font-size:10px;">window.__woLockDev() in the console re-hides beta/dev options and resets to stable.</div>' :
+                    '');
             content.appendChild(updSettDiv);
+
+            updSettDiv.querySelector('#__st_channel').onchange = function(e) {
+                st.channel = e.target.value;
+                saveSettingsCfg(st);
+                setStatus('Channel set to ' + st.channel + ' — checking for update...');
+                checkForUpdate();
+            };
+
+            var pinSel = updSettDiv.querySelector('#__st_pin');
+            var xhrV = new XMLHttpRequest();
+            xhrV.open('GET', REPO_RAW_BASE + '/main/version.json', true);
+            xhrV.onload = function() {
+                if (xhrV.status !== 200) return;
+                try {
+                    var remoteV = JSON.parse(xhrV.responseText);
+                    (remoteV.versions || []).forEach(function(v) {
+                        var isPre = isPrerelease(v.version);
+                        if (isPre && devTier !== 'beta' && devTier !== 'dev') return; // beta/dev builds stay hidden
+                        var opt = document.createElement('option');
+                        opt.value = v.version;
+                        opt.textContent = v.version;
+                        if (st.pinnedVersion === v.version) opt.selected = true;
+                        pinSel.appendChild(opt);
+                    });
+                } catch (e) {}
+            };
+            xhrV.send();
+
+            pinSel.onchange = function(e) {
+                st.pinnedVersion = e.target.value;
+                saveSettingsCfg(st);
+                setStatus(st.pinnedVersion ? 'Pinned to v' + st.pinnedVersion + ' — checking...' : 'Unpinned — following channel');
+                checkForUpdate();
+            };
 
             updSettDiv.querySelector('#__st_upd_disable').onchange = function(e) {
                 st.updateDisabled = e.target.checked;
@@ -4656,7 +4697,7 @@
 
     function applyHotkey() {
         var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
-        var hk = st.rescanHotkey || '';
+        var hk = (st.rescanHotkey !== undefined) ? st.rescanHotkey : DEFAULT_HOTKEY;
         if (window.__wo_hk_listener) document.removeEventListener('keydown', window.__wo_hk_listener);
         // Update rescan button tooltip
         var rescanBtn = panel && panel.querySelector('#__wo_rescan');
@@ -4683,6 +4724,9 @@
     // mergeSnapshot(extractSnapshotFull());
 
     startupRestore().then(function() {
+        return seedDefaultConfigIfMissing();
+    }).then(function(seeded) {
+        if (seeded) applyHotkey(); // config just arrived — (re)attach hotkey listener from it
         render();
         checkAutoScan();
         startWOWatcher();
