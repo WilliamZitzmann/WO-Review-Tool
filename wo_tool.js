@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.14.5';
+    var TOOL_VERSION = '0.15.0';
     var DEFAULT_CFG = {
         groups: [{
             id: 'g_core',
@@ -1193,6 +1193,73 @@
         return false;
     }
 
+    // ── Dev/beta unlock (console-only, deliberately not in Setup UI) ──
+    // Stored outside __wo_settings so it never rides along in a shared/exported backup.
+    var DEV_UNLOCK_KEY = '__wo_dev_unlock';
+    var REPO_RAW_BASE = 'https://raw.githubusercontent.com/WilliamZitzmann/WO-Review-Tool';
+
+    function getDevTier() {
+        var t = '';
+        try {
+            t = localStorage.getItem(DEV_UNLOCK_KEY) || '';
+        } catch (e) {}
+        return (t === 'beta' || t === 'dev') ? t : '';
+    }
+
+    window.__woEnableBeta = function() {
+        if (getDevTier() === 'dev') {
+            console.log('[WO Tool] Developer mode already unlocked (includes beta). Use window.__woLockDev() to reset.');
+            return 'dev';
+        }
+        localStorage.setItem(DEV_UNLOCK_KEY, 'beta');
+        console.log('[WO Tool] Beta features unlocked. Reopen Setup > Settings to see Update Channel.');
+        return 'beta';
+    };
+
+    window.__woEnableDev = function() {
+        localStorage.setItem(DEV_UNLOCK_KEY, 'dev');
+        console.log('[WO Tool] Developer mode unlocked. Reopen Setup > Settings to see Update Channel.');
+        return 'dev';
+    };
+
+    window.__woLockDev = function() {
+        localStorage.removeItem(DEV_UNLOCK_KEY);
+        var s = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+        s.channel = 'stable';
+        s.pinnedVersion = '';
+        saveSettingsCfg(s);
+        console.log('[WO Tool] Developer mode locked. Channel reset to stable.');
+        return 'locked';
+    };
+
+    // ── Resolve which version/channel should be running ──
+    function resolveUpdateTarget(remote) {
+        var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+        var tier = getDevTier();
+        var channel = tier ? (st.channel || 'stable') : 'stable';
+        if (channel === 'dev' && tier !== 'dev') channel = 'stable';
+        if (channel !== 'stable' && channel !== 'dev' && channel !== 'beta') channel = 'stable';
+
+        if (channel === 'dev') {
+            return {
+                channel: 'dev',
+                version: null,
+                codeUrl: REPO_RAW_BASE + '/main/wo_tool.js',
+                pinned: false
+            };
+        }
+
+        var pin = (tier && st.pinnedVersion) ? st.pinnedVersion : '';
+        var channels = remote.channels || {};
+        var version = pin || channels[channel] || channels.stable || remote.latest;
+        return {
+            channel: channel,
+            version: version,
+            codeUrl: REPO_RAW_BASE + '/v' + version + '/wo_tool.js',
+            pinned: !!pin
+        };
+    }
+
     // ── Update check from GitHub ──
     function checkForUpdate() {
         var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
@@ -1200,8 +1267,7 @@
             setStatus('Update check disabled (see Settings)');
             return;
         }
-        var GITHUB_VERSION_URL = 'https://raw.githubusercontent.com/WilliamZitzmann/WO-Review-Tool/main/version.json';
-        var GITHUB_CODE_URL = 'https://raw.githubusercontent.com/WilliamZitzmann/WO-Review-Tool/main/wo_tool.js';
+        var GITHUB_VERSION_URL = REPO_RAW_BASE + '/main/version.json';
         setStatus('Checking for updates...');
         var xhr = new XMLHttpRequest();
         xhr.open('GET', GITHUB_VERSION_URL, true);
@@ -1212,21 +1278,36 @@
             }
             try {
                 var remote = JSON.parse(xhr.responseText);
-                if (!versionGt(remote.latest, TOOL_VERSION)) {
-                    setStatus('Running the latest version (v' + TOOL_VERSION + ')');
+                var target = resolveUpdateTarget(remote);
+
+                if (target.channel === 'dev') {
+                    checkDevUpdate(target.codeUrl);
                     return;
                 }
+
+                if (target.version === TOOL_VERSION) {
+                    setStatus('Running the latest ' + target.channel + ' version (v' + TOOL_VERSION + ')');
+                    return;
+                }
+
+                if (target.pinned) {
+                    // Explicit user pin/rollback — install immediately, no prompt.
+                    setStatus('🔄 Installing pinned v' + target.version + '...');
+                    installUpdate(target.version, target.codeUrl);
+                    return;
+                }
+
                 if (st.autoUpdate) {
-                    setStatus('🔄 Auto-installing update v' + remote.latest + '...');
-                    installUpdate(remote.latest, GITHUB_CODE_URL);
+                    setStatus('🔄 Auto-installing update v' + target.version + '...');
+                    installUpdate(target.version, target.codeUrl);
                 } else {
                     var skipped = st.skippedVersion || '';
-                    if (skipped === remote.latest) {
-                        setStatus('Update v' + remote.latest + ' available (skipped — see Settings to re-enable)');
+                    if (skipped === target.version) {
+                        setStatus('Update v' + target.version + ' available (skipped — see Settings to re-enable)');
                         return;
                     }
                     setStatus('Update available - current version: v' + TOOL_VERSION);
-                    showUpdatePrompt(remote, GITHUB_CODE_URL);
+                    showUpdatePrompt(remote, target);
                 }
 
             } catch (e) {
@@ -1239,8 +1320,32 @@
         xhr.send();
     }
 
+    // ── Dev channel: tracks tip of main directly, no version numbers to compare ──
+    function checkDevUpdate(codeUrl) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', codeUrl, true);
+        xhr.onload = function() {
+            if (xhr.status !== 200) {
+                setStatus('Dev channel check failed (HTTP ' + xhr.status + ') — running v' + TOOL_VERSION);
+                return;
+            }
+            var code = xhr.responseText;
+            var cached = localStorage.getItem('__wo_tool_src') || '';
+            if (code === cached) {
+                setStatus('Running latest dev build (main) — v' + TOOL_VERSION);
+                return;
+            }
+            setStatus('🔄 Installing latest dev build...');
+            rawInstall(code, 'dev (main)');
+        };
+        xhr.onerror = function() {
+            setStatus('Dev channel check: no connection — running v' + TOOL_VERSION);
+        };
+        xhr.send();
+    }
+
     // ── Show update prompt with cumulative changelog ──
-    function showUpdatePrompt(remote, codeUrl) {
+    function showUpdatePrompt(remote, target) {
         var old = document.getElementById('__wo_update_banner');
         if (old) old.remove();
         var relevantVersions = (remote.versions || []).filter(function(v) {
@@ -1262,7 +1367,7 @@
         banner.id = '__wo_update_banner';
         banner.style.cssText = 'background:#1a2e1a;border:1px solid #2ecc71;border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:11px;';
         banner.innerHTML =
-            '<div style="color:#2ecc71;font-weight:bold;margin-bottom:6px;"> Latest version: v' + remote.latest + '<br>' +
+            '<div style="color:#2ecc71;font-weight:bold;margin-bottom:6px;"> Latest ' + target.channel + ' version: v' + target.version + '<br>' +
             '<div style="max-height:120px;overflow-y:auto;margin-bottom:8px;">' + changelogHtml + '</div>' +
             '<div style="display:flex;gap:6px;">' +
             '<button id="__wo_update_btn" style="background:#2ecc71;color:#000;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:bold;">Install Update</button>' +
@@ -1272,11 +1377,11 @@
 
         if (bodyEl) bodyEl.insertBefore(banner, bodyEl.firstChild);
         document.getElementById('__wo_update_btn').onclick = function() {
-            installUpdate(remote.latest, codeUrl);
+            installUpdate(target.version, target.codeUrl);
         };
         document.getElementById('__wo_update_skip').onclick = function() {
             var s = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
-            s.skippedVersion = remote.latest;
+            s.skippedVersion = target.version;
             localStorage.setItem('__wo_settings', JSON.stringify(s));
             banner.remove();
         };
@@ -1292,6 +1397,24 @@
 
     }
 
+    // ── Syntax-check, cache, and switch to a downloaded build ──
+    // Failures here must never touch localStorage/eval — the currently
+    // running version has to keep working regardless of what went wrong.
+    function rawInstall(code, label) {
+        try {
+            new Function(code);
+        } catch (e) {
+            setStatus('Update (' + label + ') has syntax error — aborted, still running v' + TOOL_VERSION);
+            return;
+        }
+        localStorage.setItem('__wo_tool_src', code);
+        setStatus('Update installed (' + label + ')! Reloading...');
+        setTimeout(function() {
+            teardown();
+            eval(code);
+        }, 800);
+    }
+
     // ── Install update from GitHub ──
     function installUpdate(newVersion, codeUrl) {
         setStatus('Downloading v' + newVersion + '...');
@@ -1299,25 +1422,13 @@
         xhr.open('GET', codeUrl, true);
         xhr.onload = function() {
             if (xhr.status !== 200) {
-                setStatus('Update download failed (HTTP ' + xhr.status + ').');
+                setStatus('Update download failed (HTTP ' + xhr.status + ') — still running v' + TOOL_VERSION);
                 return;
             }
-            var code = xhr.responseText;
-            try {
-                new Function(code);
-            } catch (e) {
-                setStatus('Update has syntax error — aborted.');
-                return;
-            }
-            localStorage.setItem('__wo_tool_src', code);
-            setStatus('Update installed! Reloading...');
-            setTimeout(function() {
-                teardown();
-                eval(code);
-            }, 800);
+            rawInstall(xhr.responseText, 'v' + newVersion);
         };
         xhr.onerror = function() {
-            setStatus('Network error during update.');
+            setStatus('Network error during update — still running v' + TOOL_VERSION);
         };
         xhr.send();
     }
@@ -4149,16 +4260,77 @@
                 saveSettingsCfg(st);
             };
 
-            // Debug button (moved from panel)
-            var dbgDiv = document.createElement('div');
-            dbgDiv.style.cssText = 'border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:10px;';
-            dbgDiv.innerHTML = '<b>Debug</b><br><button id="__st_debug" style="margin-top:6px;">Run Debug Dump (check DevTools console)</button>';
-            content.appendChild(dbgDiv);
-            dbgDiv.querySelector('#__st_debug').onclick = function() {
-                window.__woDebugTables();
-                window.__woDebugCache();
-                alert('Check DevTools console for debug dump.');
-            };
+            // ── Update Channel (hidden unless unlocked via window.__woEnableBeta()/__woEnableDev() in the console) ──
+            var devTier = getDevTier();
+            if (devTier) {
+                var chDiv = document.createElement('div');
+                chDiv.style.cssText = 'border:1px solid #7ec8e3;border-radius:6px;padding:10px;margin-bottom:10px;';
+                var chOptions = ['stable', 'beta'];
+                if (devTier === 'dev') chOptions.push('dev');
+                var curChannel = st.channel || 'stable';
+                if (curChannel === 'dev' && devTier !== 'dev') curChannel = 'stable';
+                if (chOptions.indexOf(curChannel) === -1) curChannel = 'stable';
+                chDiv.innerHTML = '<b style="color:#7ec8e3;">⚙ Update Channel</b> <span style="color:#555;font-size:10px;">(' + devTier + ' mode unlocked)</span>' +
+                    '<div style="margin-top:8px;">' +
+                    '<label style="color:#aaa;font-size:11px;">Channel:</label><br>' +
+                    '<select id="__st_channel" style="background:#222;color:#eee;border:1px solid #444;padding:3px 6px;border-radius:3px;font-size:11px;margin-top:2px;">' +
+                    chOptions.map(function(c) {
+                        return '<option value="' + c + '"' + (c === curChannel ? ' selected' : '') + '>' + c + '</option>';
+                    }).join('') +
+                    '</select>' +
+                    '</div>' +
+                    '<div style="margin-top:8px;">' +
+                    '<label style="color:#aaa;font-size:11px;">Pin specific version (overrides channel; blank = follow channel):</label><br>' +
+                    '<select id="__st_pin" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:3px 6px;border-radius:3px;font-size:11px;margin-top:4px;"><option value="">— follow channel —</option></select>' +
+                    '</div>' +
+                    '<div style="margin-top:8px;color:#555;font-size:10px;">window.__woLockDev() in the console re-hides this and resets to stable.</div>';
+                content.appendChild(chDiv);
+
+                chDiv.querySelector('#__st_channel').onchange = function(e) {
+                    st.channel = e.target.value;
+                    saveSettingsCfg(st);
+                    setStatus('Channel set to ' + st.channel + ' — checking for update...');
+                    checkForUpdate();
+                };
+
+                var pinSel = chDiv.querySelector('#__st_pin');
+                var xhrV = new XMLHttpRequest();
+                xhrV.open('GET', REPO_RAW_BASE + '/main/version.json', true);
+                xhrV.onload = function() {
+                    if (xhrV.status !== 200) return;
+                    try {
+                        var remoteV = JSON.parse(xhrV.responseText);
+                        (remoteV.versions || []).forEach(function(v) {
+                            var opt = document.createElement('option');
+                            opt.value = v.version;
+                            opt.textContent = v.version;
+                            if (st.pinnedVersion === v.version) opt.selected = true;
+                            pinSel.appendChild(opt);
+                        });
+                    } catch (e) {}
+                };
+                xhrV.send();
+
+                pinSel.onchange = function(e) {
+                    st.pinnedVersion = e.target.value;
+                    saveSettingsCfg(st);
+                    setStatus(st.pinnedVersion ? 'Pinned to v' + st.pinnedVersion + ' — checking...' : 'Unpinned — following channel');
+                    checkForUpdate();
+                };
+            }
+
+            // Debug button (dev tier only — moved from panel)
+            if (devTier === 'dev') {
+                var dbgDiv = document.createElement('div');
+                dbgDiv.style.cssText = 'border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:10px;';
+                dbgDiv.innerHTML = '<b>Debug</b><br><button id="__st_debug" style="margin-top:6px;">Run Debug Dump (check DevTools console)</button>';
+                content.appendChild(dbgDiv);
+                dbgDiv.querySelector('#__st_debug').onclick = function() {
+                    window.__woDebugTables();
+                    window.__woDebugCache();
+                    alert('Check DevTools console for debug dump.');
+                };
+            }
 
             // Save settings on any change
             function saveSettings() {
