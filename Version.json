@@ -1,0 +1,35 @@
+{
+  "latest": "0.9.0",
+  "versions": [
+    {
+      "version": "0.9.0",
+      "changes": [
+        "Added post-scan actions — fill fields automatically after each tab is scanned",
+        "Added auto-backup to local file (Chrome/Edge)",
+        "Added startup config restore if localStorage is wiped",
+        "Added cross-browser config sync via linked backup file",
+        "Added GitHub update check with cumulative changelog",
+        "Fixed warn message condition parsing (field keys with :: no longer break conditions)",
+        "Added Core variable logic",
+        "Added TT (uppercase only) and training (case-insensitive) keyword support"
+      ]
+    },
+    {
+      "version": "0.8.0",
+      "changes": [
+        "Added Variables feature — define computed values using field/table data",
+        "Variables can be shown inline in group field rows",
+        "Added variable display in group header messages",
+        "Fixed sel.onchange missing bug in Setup > Groups field row editor"
+      ]
+    },
+    {
+      "version": "0.7.0",
+      "changes": [
+        "Added Row Detail Fields — collect data from expanded row panels during scan",
+        "Added dismissible dialog support for Downtime scan step",
+        "Added varFields section in groups for variable display"
+      ]
+    }
+  ]
+}
