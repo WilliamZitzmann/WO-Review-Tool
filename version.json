@@ -7,7 +7,7 @@
         "Added post-scan actions — fill fields automatically after each tab is scanned",
         "Added auto-backup to local file (Chrome/Edge)",
         "Added startup config restore if localStorage is wiped",
-        "Added cross-browser config sync via linked backup file",
+        "Added cross-browser config sync via linked backup file"
       ]
     },
     {
@@ -20,11 +20,8 @@
       ]
     },
     {
-      "version": "0.7.0",
+      "version": "0.14.2",
       "changes": [
-        "Added Row Detail Fields — collect data from expanded row panels during scan",
-        "Added dismissible dialog support for Downtime scan step",
-        "Added varFields section in groups for variable display"
       ]
     }
   ]
