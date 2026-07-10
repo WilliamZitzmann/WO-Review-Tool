@@ -1,21 +1,17 @@
 {
-  "latest": "0.14.3",
+  "latest": "0.14.5",
   "versions": [
     {
-      "version": "0.14.3",
+      "version": "0.14.5",
       "changes": [
         "Added post-scan actions — fill fields automatically after each tab is scanned",
         "Added auto-backup to local file (Chrome/Edge)",
         "Added startup config restore if localStorage is wiped",
         "Added cross-browser config sync via linked backup file",
-        "Added GitHub update check with cumulative changelog",
-        "Fixed warn message condition parsing (field keys with :: no longer break conditions)",
-        "Added Core variable logic",
-        "Added TT (uppercase only) and training (case-insensitive) keyword support"
       ]
     },
     {
-      "version": "0.8.0",
+      "version": "0.14.4",
       "changes": [
         "Added Variables feature — define computed values using field/table data",
         "Variables can be shown inline in group field rows",
