@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.14.4';
+    var TOOL_VERSION = '0.14.5';
     var DEFAULT_CFG = {
         groups: [{
             id: 'g_core',
