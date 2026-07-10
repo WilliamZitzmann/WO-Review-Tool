@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.15.2';
+    var TOOL_VERSION = '0.16.0';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -913,44 +913,158 @@
         localStorage.setItem('__wo_config_saved_at', b.savedAt || new Date().toISOString());
     }
 
-    // ── Seed the GitHub-hosted default config on a brand-new install ──
-    // Only runs when no local config exists at all (nothing was restored from
-    // a linked backup file) — never overwrites a config the user already has.
-    function seedDefaultConfigIfMissing() {
-        if (localStorage.getItem(RKEY)) return Promise.resolve(false);
+    // ── Config profiles ──
+    // A profile is a portable, named config subset (rules/scan/fields/state/vars
+    // + config-level settings) — deliberately NOT the same thing as a full backup.
+    // buildBackupBlob()/applyBackup() remain the full-device backup/restore tools
+    // (everything, including src and device settings). Profiles only ever carry
+    // the keys below; applying one MERGES into __wo_settings rather than replacing
+    // it, so switching profiles can never silently reset your update channel,
+    // auto-update/backup preferences, or hotkey.
+    var PROFILES_KEY = '__wo_profiles';
+    var ACTIVE_PROFILE_KEY = '__wo_active_profile_id';
+    var PROFILE_SETTINGS_KEYS = ['msgPrefix', 'msgSuffix', 'msgDelim', 'ruleMessages', 'ruleReturnCfg', 'autoScan'];
+
+    function getProfiles() {
+        try {
+            return JSON.parse(localStorage.getItem(PROFILES_KEY) || '{}');
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function saveProfiles(p) {
+        localStorage.setItem(PROFILES_KEY, JSON.stringify(p));
+    }
+
+    function getActiveProfileId() {
+        return localStorage.getItem(ACTIVE_PROFILE_KEY) || '';
+    }
+
+    // Snapshot the live config into a portable profile blob (config-level only).
+    function snapshotProfile(meta) {
+        var fullSettings = {};
+        try {
+            fullSettings = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+        } catch (e) {}
+        var settings = {};
+        PROFILE_SETTINGS_KEYS.forEach(function(k) {
+            if (fullSettings[k] !== undefined) settings[k] = fullSettings[k];
+        });
+        return {
+            id: meta.id,
+            name: meta.name,
+            description: meta.description || '',
+            configVersion: meta.configVersion || 1,
+            rules: getCfg(),
+            scan: getScan(),
+            fields: JSON.parse(localStorage.getItem(FKEY) || '{}'),
+            state: getGS(),
+            vars: getVars(),
+            settings: settings,
+            savedAt: new Date().toISOString()
+        };
+    }
+
+    // Apply a profile blob to the live config. Settings are MERGED (only the
+    // config-level keys are written) so device-level state (channel, pinned
+    // version, auto-update/backup prefs, hotkey) is never touched by a profile.
+    function applyProfile(p) {
+        if (!p) return;
+        if (p.rules) localStorage.setItem(RKEY, JSON.stringify(p.rules));
+        if (p.scan) localStorage.setItem(SKEY, JSON.stringify(p.scan));
+        if (p.fields) localStorage.setItem(FKEY, JSON.stringify(p.fields));
+        if (p.state) localStorage.setItem(GSTATE, JSON.stringify(p.state));
+        if (p.vars) localStorage.setItem(VKEY, JSON.stringify(p.vars));
+        var st = {};
+        try {
+            st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+        } catch (e) {}
+        PROFILE_SETTINGS_KEYS.forEach(function(k) {
+            if (p.settings && p.settings[k] !== undefined) st[k] = p.settings[k];
+        });
+        localStorage.setItem('__wo_settings', JSON.stringify(st));
+        localStorage.setItem('__wo_config_saved_at', p.savedAt || new Date().toISOString());
+        autoSaveToFile();
+    }
+
+    // Switch to a locally-saved profile. Persists the currently active profile's
+    // live edits back into its own slot first, so switching away never loses work.
+    function switchProfile(id) {
+        var profiles = getProfiles();
+        var curId = getActiveProfileId();
+        if (curId && profiles[curId]) {
+            profiles[curId] = snapshotProfile(profiles[curId]);
+            saveProfiles(profiles);
+        }
+        var target = profiles[id];
+        if (!target) return false;
+        applyProfile(target);
+        localStorage.setItem(ACTIVE_PROFILE_KEY, id);
+        return true;
+    }
+
+    // Register a profile locally (from a GitHub fetch or a manual save) without
+    // switching to it.
+    function registerProfile(p) {
+        var profiles = getProfiles();
+        profiles[p.id] = p;
+        saveProfiles(profiles);
+    }
+
+    // ── GitHub-hosted preset fetch (configs/index.json + configs/<id>.json) ──
+    function fetchProfileIndex() {
         return new Promise(function(resolve) {
             var xhr = new XMLHttpRequest();
-            xhr.open('GET', REPO_RAW_BASE + '/main/config.json', true);
+            xhr.open('GET', REPO_RAW_BASE + '/main/configs/index.json', true);
             xhr.onload = function() {
                 if (xhr.status !== 200) {
-                    resolve(false);
+                    resolve([]);
                     return;
                 }
                 try {
-                    var b = JSON.parse(xhr.responseText);
-                    // Deliberately exclude b.src: config.json may carry an old code
-                    // snapshot from whenever it was last exported. Code version is
-                    // owned by the update-channel system, never by a config seed —
-                    // applying it here could silently downgrade a fresh install.
-                    applyBackup({
-                        rules: b.rules,
-                        scan: b.scan,
-                        fields: b.fields,
-                        state: b.state,
-                        vars: b.vars,
-                        settings: b.settings,
-                        savedAt: b.savedAt
-                    });
-                    setStatus('✅ Loaded default config from GitHub');
-                    resolve(true);
+                    resolve(JSON.parse(xhr.responseText) || []);
                 } catch (e) {
-                    resolve(false);
+                    resolve([]);
                 }
             };
             xhr.onerror = function() {
-                resolve(false);
+                resolve([]);
             };
             xhr.send();
+        });
+    }
+
+    function fetchProfile(id) {
+        return new Promise(function(resolve) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', REPO_RAW_BASE + '/main/configs/' + id + '.json', true);
+            xhr.onload = function() {
+                if (xhr.status !== 200) {
+                    resolve(null);
+                    return;
+                }
+                try {
+                    resolve(JSON.parse(xhr.responseText));
+                } catch (e) {
+                    resolve(null);
+                }
+            };
+            xhr.onerror = function() {
+                resolve(null);
+            };
+            xhr.send();
+        });
+    }
+
+    // Download a GitHub preset, register it locally, and switch to it.
+    function installProfileFromGitHub(id) {
+        return fetchProfile(id).then(function(p) {
+            if (!p) return false;
+            registerProfile(p);
+            applyProfile(p);
+            localStorage.setItem(ACTIVE_PROFILE_KEY, p.id);
+            return true;
         });
     }
 
@@ -1157,13 +1271,14 @@
     // ── Startup restore (called before first render) ──
     function startupRestore() {
         var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+        // On a truly fresh install (no config at all yet) the backup-setup nag is
+        // deferred to right after the first-run installer instead of firing here,
+        // so the two don't race/overlap.
+        var hasConfig = !!localStorage.getItem(RKEY);
         if (!st.autoBackup) {
-            if (!st.backupPromptDismissed) {
-                var msg = !localStorage.getItem(RKEY) ?
-                    'No config found. Set up a backup file to save and protect your configuration.' :
-                    'Auto-backup is not configured. Set up a backup file to protect your config if browser data is cleared.';
+            if (!st.backupPromptDismissed && hasConfig) {
                 setTimeout(function() {
-                    showBackupSetupPrompt(msg);
+                    showBackupSetupPrompt('Auto-backup is not configured. Set up a backup file to protect your config if browser data is cleared.');
                 }, 1000);
             }
             return Promise.resolve();
@@ -1176,12 +1291,8 @@
             return idbGet(db, 'fileHandle').then(function(handle) {
                 if (!handle) {
                     setStatus('⚠ No backup file linked');
-                    if (!localStorage.getItem(RKEY)) {
-                        showBackupSetupPrompt('No backup file configured. Set one up to protect your config if browser data is cleared.');
-                    } else {
-                        if (!st.backupPromptDismissed) {
-                            showBackupSetupPrompt('Auto-backup is enabled but no file is linked. Please set a backup file location.');
-                        }
+                    if (hasConfig && !st.backupPromptDismissed) {
+                        showBackupSetupPrompt('Auto-backup is enabled but no file is linked. Please set a backup file location.');
                     }
                     return;
                 }
@@ -1278,6 +1389,24 @@
         return 'locked';
     };
 
+    // ── Dev/test affordances for exercising the first-run flow without the
+    // manual localStorage/IndexedDB wipe dance every time. ──
+    window.__woShowInstaller = function() {
+        showInstaller();
+        return 'Showing installer.';
+    };
+
+    window.__woReset = function() {
+        Object.keys(localStorage).filter(function(k) {
+            return k.indexOf('__wo_') === 0;
+        }).forEach(function(k) {
+            localStorage.removeItem(k);
+        });
+        if (window.indexedDB) indexedDB.deleteDatabase('__wo_tool_db');
+        console.log('[WO Tool] Wiped. Reload the page and click the bookmarklet to test a fresh install.');
+        return 'wiped';
+    };
+
     // A semver pre-release suffix (e.g. "0.15.1-beta1") marks a beta/dev build.
     // Plain releases ("0.15.0") are available to everyone; pre-releases require unlock.
     function isPrerelease(v) {
@@ -1317,6 +1446,11 @@
         };
     }
 
+    function dismissUpdateBanner() {
+        var b = document.getElementById('__wo_update_banner');
+        if (b) b.remove();
+    }
+
     // ── Update check from GitHub ──
     function checkForUpdate() {
         var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
@@ -1343,12 +1477,18 @@
                 }
 
                 if (target.version === TOOL_VERSION) {
-                    setStatus('Running the latest ' + target.channel + ' version (v' + TOOL_VERSION + ')');
+                    dismissUpdateBanner();
+                    setStatus(target.pinned ?
+                        '📌 Pinned to v' + TOOL_VERSION :
+                        'Running the latest ' + target.channel + ' version (v' + TOOL_VERSION + ')');
                     return;
                 }
 
                 if (target.pinned) {
                     // Explicit user pin/rollback — install immediately, no prompt.
+                    // No banner ever shows while pinned; a stale one from before the
+                    // pin was set must not linger and offer a conflicting install.
+                    dismissUpdateBanner();
                     setStatus('🔄 Installing pinned v' + target.version + '...');
                     installUpdate(target.version, target.codeUrl);
                     return;
@@ -1467,6 +1607,14 @@
         localStorage.setItem('__wo_tool_src', code);
         setStatus('Update installed (' + label + ')! Reloading...');
         setTimeout(function() {
+            // Any open Setup/installer modal must not survive a hot-reload — its
+            // handlers close over the OLD instance and go stale/disconnected once
+            // a fresh instance boots, which is what made the tool feel "stuck"
+            // after an in-place update.
+            var setupModal = document.getElementById('__wo_setup_modal');
+            if (setupModal) setupModal.remove();
+            var installerModal = document.getElementById('__wo_installer_modal');
+            if (installerModal) installerModal.remove();
             teardown();
             eval(code);
         }, 800);
@@ -1481,6 +1629,18 @@
             if (xhr.status !== 200) {
                 setStatus('Update download failed (HTTP ' + xhr.status + ') — still running v' + TOOL_VERSION);
                 return;
+            }
+            // Reconcile an active pin to whatever's actually being installed. This
+            // is the single choke point every install path (banner, pinned auto-
+            // install, future affordances) goes through — without it, a pinned
+            // user who explicitly installs a different version gets silently
+            // reverted back to the old pin on the very next automatic check.
+            // Only touches the pin if one was already active; unpinned users stay
+            // unpinned.
+            var pinSt = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+            if (pinSt.pinnedVersion && pinSt.pinnedVersion !== newVersion) {
+                pinSt.pinnedVersion = newVersion;
+                localStorage.setItem('__wo_settings', JSON.stringify(pinSt));
             }
             rawInstall(xhr.responseText, 'v' + newVersion);
         };
@@ -3301,6 +3461,105 @@
     }
 
 
+    // ── First-run installer: shown once when no local config exists at all. ──
+    // Lets a brand-new install pick a starting profile (and, if unlocked, an
+    // update channel) instead of silently falling back to a hardcoded default.
+    // Resolves once the user installs a profile or explicitly skips — never
+    // blocks forever, since Skip always works even offline.
+    function showInstaller() {
+        return new Promise(function(resolve) {
+            var old = document.getElementById('__wo_installer_modal');
+            if (old) old.remove();
+
+            var devTier = getDevTier();
+            var chOptions = ['stable'];
+            if (devTier === 'beta' || devTier === 'dev') chOptions.push('beta');
+            if (devTier === 'dev') chOptions.push('dev');
+
+            var modal = document.createElement('div');
+            modal.id = '__wo_installer_modal';
+            modal.style.cssText = 'position:fixed;top:8%;left:50%;transform:translateX(-50%);width:90%;max-width:520px;background:#111;color:#eee;z-index:9999999;padding:18px;border-radius:8px;box-shadow:0 6px 30px rgba(0,0,0,.7);font-family:Segoe UI,Arial,sans-serif;font-size:12px;max-height:82vh;overflow:auto;';
+
+            modal.innerHTML =
+                '<div style="font-size:16px;font-weight:bold;color:#7ec8e3;margin-bottom:4px;">Welcome to WO Review Tool</div>' +
+                '<div style="color:#888;margin-bottom:16px;">First-time setup — pick a starting configuration below.</div>' +
+                '<div style="border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:12px;">' +
+                '<b>Version</b>' +
+                '<div style="margin-top:6px;color:#aaa;">Running v' + TOOL_VERSION + ' (stable)</div>' +
+                (chOptions.length > 1 ?
+                    '<div style="margin-top:8px;"><label style="color:#aaa;">Channel:</label><br>' +
+                    '<select id="__inst_channel" style="background:#222;color:#eee;border:1px solid #444;padding:3px 6px;border-radius:3px;margin-top:2px;">' +
+                    chOptions.map(function(c) {
+                        return '<option value="' + c + '">' + c + '</option>';
+                    }).join('') +
+                    '</select><div style="color:#555;font-size:10px;margin-top:4px;">Takes effect on the update check right after setup.</div></div>' :
+                    '<div style="color:#555;font-size:10px;margin-top:4px;">Stable is the only channel available. Unlock beta/dev in Setup &gt; Settings later if needed.</div>') +
+                '</div>' +
+                '<div style="border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:12px;">' +
+                '<b>Starting configuration</b>' +
+                '<div id="__inst_profiles" style="margin-top:8px;color:#888;">Loading available presets…</div>' +
+                '</div>' +
+                '<div style="display:flex;gap:8px;align-items:center;">' +
+                '<button id="__inst_go" style="background:#2ecc71;color:#000;font-weight:bold;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;" disabled>Install</button>' +
+                '<button id="__inst_skip" style="background:none;border:1px solid #444;color:#aaa;padding:6px 12px;border-radius:4px;cursor:pointer;">Skip (use basic defaults)</button>' +
+                '<span id="__inst_status" style="color:#888;"></span>' +
+                '</div>';
+            document.body.appendChild(modal);
+
+            var chSel = modal.querySelector('#__inst_channel');
+            if (chSel) {
+                chSel.onchange = function(e) {
+                    var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+                    st.channel = e.target.value;
+                    saveSettingsCfg(st);
+                };
+            }
+
+            var selectedProfileId = '';
+            var profilesDiv = modal.querySelector('#__inst_profiles');
+            var goBtn = modal.querySelector('#__inst_go');
+
+            fetchProfileIndex().then(function(list) {
+                if (!list || !list.length) {
+                    profilesDiv.innerHTML = '<div style="color:#e74c3c;">Could not load presets (offline?). You can skip and start from basic defaults, or load one later in Setup &gt; Profiles.</div>';
+                    return;
+                }
+                profilesDiv.innerHTML = list.map(function(p, i) {
+                    return '<label style="display:block;padding:6px;border:1px solid #333;border-radius:4px;margin-bottom:6px;cursor:pointer;">' +
+                        '<input type="radio" name="__inst_profile" value="' + p.id + '" ' + (i === 0 ? 'checked' : '') + '> ' +
+                        '<b>' + p.name + '</b><br>' +
+                        '<span style="color:#888;margin-left:20px;">' + (p.description || '') + '</span>' +
+                        '</label>';
+                }).join('');
+                selectedProfileId = list[0].id;
+                profilesDiv.querySelectorAll('input[name="__inst_profile"]').forEach(function(r) {
+                    r.onchange = function(e) {
+                        selectedProfileId = e.target.value;
+                    };
+                });
+                goBtn.disabled = false;
+            });
+
+            function finish() {
+                modal.remove();
+                resolve();
+            }
+
+            goBtn.onclick = function() {
+                if (!selectedProfileId) return;
+                var statusEl = modal.querySelector('#__inst_status');
+                statusEl.textContent = 'Installing...';
+                goBtn.disabled = true;
+                installProfileFromGitHub(selectedProfileId).then(function(ok) {
+                    statusEl.textContent = ok ? 'Done!' : 'Could not install — starting with basic defaults.';
+                    setTimeout(finish, ok ? 300 : 1200);
+                });
+            };
+
+            modal.querySelector('#__inst_skip').onclick = finish;
+        });
+    }
+
     function openSetup() {
         var old = document.getElementById('__wo_setup_modal');
         if (old) old.remove();
@@ -3312,7 +3571,7 @@
         var modal = document.createElement('div');
         modal.id = '__wo_setup_modal';
         modal.style.cssText = 'position:fixed;top:3%;left:10%;width:75%;height:92%;background:#111;color:#eee;z-index:9999999;padding:10px;border-radius:8px;box-shadow:0 6px 30px rgba(0,0,0,.7);display:flex;flex-direction:column;font-family:Segoe UI,Arial,sans-serif;font-size:12px;';
-        modal.innerHTML = '<div id="__s_titlebar" style="display:flex;justify-content:space-between;cursor:move;user-select:none;margin-bottom:4px;"><b>Setup</b><button id="__s_close">Close</button></div><div style="margin:6px 0;"> <button id="__s_rules">Rules</button> <button id="__s_groups">Groups &amp; Display</button> <button id="__s_vars">Variables</button> <button id="__s_scan">Scan</button> <button id="__s_settings">Settings</button> <button id="__s_update">Update</button> <button id="__s_guide" style="background:#2a4a6a;color:#7ec8e3;">Guide</button> <button id="__s_exp">Export</button> <button id="__s_imp">Import</button> <button id="__s_save" style="float:right;background:#2ecc71;color:#000;">Save &amp; Apply</button></div><div id="__s_content" style="flex:1;overflow:auto;border-top:1px solid #333;padding-top:8px;"></div>';
+        modal.innerHTML = '<div id="__s_titlebar" style="display:flex;justify-content:space-between;cursor:move;user-select:none;margin-bottom:4px;"><b>Setup</b><button id="__s_close">Close</button></div><div style="margin:6px 0;"> <button id="__s_rules">Rules</button> <button id="__s_groups">Groups &amp; Display</button> <button id="__s_vars">Variables</button> <button id="__s_scan">Scan</button> <button id="__s_profiles">Profiles</button> <button id="__s_settings">Settings</button> <button id="__s_update">Update</button> <button id="__s_guide" style="background:#2a4a6a;color:#7ec8e3;">Guide</button> <button id="__s_exp">Export</button> <button id="__s_imp">Import</button> <button id="__s_save" style="float:right;background:#2ecc71;color:#000;">Save &amp; Apply</button></div><div id="__s_content" style="flex:1;overflow:auto;border-top:1px solid #333;padding-top:8px;"></div>';
         document.body.appendChild(modal);
 
         // drag logic
@@ -4473,6 +4732,7 @@
             updSettDiv.querySelector('#__st_channel').onchange = function(e) {
                 st.channel = e.target.value;
                 saveSettingsCfg(st);
+                dismissUpdateBanner();
                 setStatus('Channel set to ' + st.channel + ' — checking for update...');
                 checkForUpdate();
             };
@@ -4500,6 +4760,7 @@
             pinSel.onchange = function(e) {
                 st.pinnedVersion = e.target.value;
                 saveSettingsCfg(st);
+                dismissUpdateBanner();
                 setStatus(st.pinnedVersion ? 'Pinned to v' + st.pinnedVersion + ' — checking...' : 'Unpinned — following channel');
                 checkForUpdate();
             };
@@ -4602,6 +4863,14 @@
                     return;
                 }
                 try {
+                    // A manual paste isn't any specific tagged version — if a pin was
+                    // active, clear it rather than leave it pointing at a tag that
+                    // would silently overwrite this paste on the next update check.
+                    var pinSt = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+                    if (pinSt.pinnedVersion) {
+                        pinSt.pinnedVersion = '';
+                        localStorage.setItem('__wo_settings', JSON.stringify(pinSt));
+                    }
                     localStorage.setItem('__wo_tool_src', code);
                     updStatusEl.style.color = '#2ecc71';
                     updStatusEl.textContent = 'Saved. Reloading...';
@@ -4623,12 +4892,121 @@
             window.open('https://wo-review-tool-guide.netlify.app/', '_blank');
         }
 
+        // ── PROFILES TAB ──
+        function profilesTab() {
+            content.innerHTML = '';
+
+            var activeId = getActiveProfileId();
+            var profiles = getProfiles();
+
+            // ── Local profiles ──
+            var localDiv = document.createElement('div');
+            localDiv.style.cssText = 'border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:10px;';
+            var localHtml = '<b>Local Profiles</b><div style="margin-top:8px;">';
+            var ids = Object.keys(profiles);
+            if (!ids.length) {
+                localHtml += '<div style="color:#888;">No saved profiles yet — save the current config as one below, or import a preset.</div>';
+            } else {
+                ids.forEach(function(id) {
+                    var p = profiles[id];
+                    var isActive = id === activeId;
+                    localHtml += '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px;border:1px solid ' + (isActive ? '#2ecc71' : '#333') + ';border-radius:4px;margin-bottom:6px;">' +
+                        '<div><b>' + (p.name || id) + '</b>' + (isActive ? ' <span style="color:#2ecc71;font-size:10px;">(active)</span>' : '') +
+                        '<br><span style="color:#888;font-size:10px;">' + (p.description || '') + '</span></div>' +
+                        '<div style="display:flex;gap:4px;">' +
+                        '<button class="__pf_switch" data-id="' + id + '" style="font-size:11px;" ' + (isActive ? 'disabled' : '') + '>Switch</button>' +
+                        '<button class="__pf_delete" data-id="' + id + '" style="font-size:11px;background:#5a2020;color:#fff;" ' + (isActive ? 'disabled' : '') + '>Delete</button>' +
+                        '</div></div>';
+                });
+            }
+            localHtml += '</div>' +
+                '<div style="margin-top:8px;">' +
+                '<button id="__pf_save_new" style="background:#2980b9;color:#fff;border:none;padding:4px 10px;cursor:pointer;border-radius:4px;font-size:11px;">Save Current As New Profile</button>' +
+                '</div>';
+            localDiv.innerHTML = localHtml;
+            content.appendChild(localDiv);
+
+            localDiv.querySelectorAll('.__pf_switch').forEach(function(btn) {
+                btn.onclick = function() {
+                    var id = btn.getAttribute('data-id');
+                    if (!confirm('Switch to "' + (profiles[id].name || id) + '"? Your current config will be saved back to its own profile first.')) return;
+                    switchProfile(id);
+                    alert('Switched to "' + (profiles[id].name || id) + '".');
+                    modal.remove();
+                    render();
+                };
+            });
+            localDiv.querySelectorAll('.__pf_delete').forEach(function(btn) {
+                btn.onclick = function() {
+                    var id = btn.getAttribute('data-id');
+                    if (!confirm('Delete profile "' + (profiles[id].name || id) + '"? This cannot be undone.')) return;
+                    var p2 = getProfiles();
+                    delete p2[id];
+                    saveProfiles(p2);
+                    profilesTab();
+                };
+            });
+            localDiv.querySelector('#__pf_save_new').onclick = function() {
+                var name = prompt('Name for this profile:');
+                if (!name) return;
+                var id = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || ('profile-' + new Date().toISOString());
+                var desc = prompt('Short description (optional):') || '';
+                var snap = snapshotProfile({
+                    id: id,
+                    name: name.trim(),
+                    description: desc
+                });
+                registerProfile(snap);
+                localStorage.setItem(ACTIVE_PROFILE_KEY, id);
+                alert('Saved as "' + name.trim() + '".');
+                profilesTab();
+            };
+
+            // ── GitHub presets ──
+            var ghDiv = document.createElement('div');
+            ghDiv.style.cssText = 'border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:10px;';
+            ghDiv.innerHTML = '<b>Import Preset from GitHub</b><div id="__pf_gh_list" style="margin-top:8px;color:#888;">Loading…</div>';
+            content.appendChild(ghDiv);
+
+            fetchProfileIndex().then(function(list) {
+                var listDiv = ghDiv.querySelector('#__pf_gh_list');
+                if (!list || !list.length) {
+                    listDiv.innerHTML = '<div style="color:#e74c3c;">Could not load presets (offline?).</div>';
+                    return;
+                }
+                listDiv.innerHTML = list.map(function(p) {
+                    var already = !!profiles[p.id];
+                    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px;border:1px solid #333;border-radius:4px;margin-bottom:6px;">' +
+                        '<div><b>' + p.name + '</b><br><span style="color:#888;font-size:10px;">' + (p.description || '') + '</span></div>' +
+                        '<button class="__pf_import" data-id="' + p.id + '" style="font-size:11px;">' + (already ? 'Re-import &amp; Switch' : 'Import &amp; Switch') + '</button>' +
+                        '</div>';
+                }).join('');
+                listDiv.querySelectorAll('.__pf_import').forEach(function(btn) {
+                    btn.onclick = function() {
+                        var id = btn.getAttribute('data-id');
+                        btn.disabled = true;
+                        btn.textContent = 'Importing...';
+                        installProfileFromGitHub(id).then(function(ok) {
+                            if (ok) {
+                                alert('Imported and switched.');
+                                modal.remove();
+                                render();
+                            } else {
+                                btn.disabled = false;
+                                btn.textContent = 'Failed — retry';
+                            }
+                        });
+                    };
+                });
+            });
+        }
 
         modal.querySelector('#__s_guide').onclick = guideTab;
         modal.querySelector('#__s_rules').onclick = rulesTab;
         modal.querySelector('#__s_vars').onclick = varsTab;
         modal.querySelector('#__s_groups').onclick = groupsTab;
         modal.querySelector('#__s_scan').onclick = scanTab;
+        modal.querySelector('#__s_profiles').onclick = profilesTab;
         modal.querySelector('#__s_settings').onclick = settingsTab;
         modal.querySelector('#__s_update').onclick = updateTab;
         rulesTab();
@@ -4724,9 +5102,24 @@
     // mergeSnapshot(extractSnapshotFull());
 
     startupRestore().then(function() {
-        return seedDefaultConfigIfMissing();
-    }).then(function(seeded) {
-        if (seeded) applyHotkey(); // config just arrived — (re)attach hotkey listener from it
+        // A fresh install (nothing restored from a linked backup file) gets an
+        // interactive installer instead of a silent default. Anything already
+        // restored (RKEY present) skips straight through.
+        if (!localStorage.getItem(RKEY)) {
+            return showInstaller().then(function() {
+                applyHotkey(); // config just arrived — (re)attach hotkey listener from it
+                // Backup-setup nag was suppressed in startupRestore() for fresh
+                // installs specifically so it wouldn't race the installer — surface
+                // it now that setup is done, if still relevant.
+                var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+                if (!st.autoBackup && !st.backupPromptDismissed) {
+                    setTimeout(function() {
+                        showBackupSetupPrompt('No backup protection yet — set up a backup file to protect your new config.');
+                    }, 500);
+                }
+            });
+        }
+    }).then(function() {
         render();
         checkAutoScan();
         startWOWatcher();

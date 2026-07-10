@@ -1,4 +1,8 @@
 {
+  "id": "default",
+  "name": "Default",
+  "description": "Starting-point configuration",
+  "configVersion": 1,
   "rules": {
     "groups": [
       {
@@ -933,7 +937,6 @@
     "msgSuffix": "- wz",
     "msgDelim": ". ",
     "ruleMessages": {},
-    "rescanHotkey": "Ctrl+Shift+S",
     "ruleReturnCfg": {
       "r_lot": {
         "fail": "custom",
@@ -976,11 +979,6 @@
         "custom": "{{(function(){var ms=[];if(!(F('Work Type')||'').trim())ms.push('work type');if(!(F('Priority')||'').trim())ms.push('priority');if(!(F('Work Group')||'').trim())ms.push('work group');if(!(F('Lead')||'').trim())ms.push('lead');if(!(F('Owner')||'').trim())ms.push('owner');return ms.length?'no '+ms.join(', '):'';})()}}"
       }
     },
-    "backupPromptDismissed": false,
-    "autoBackup": true,
-    "autoScan": false,
-    "updateDisabled": false,
-    "skippedVersion": ""
-  },
-  "savedAt": "2026-07-10T20:38:42.216Z"
+    "autoScan": false
+  }
 }

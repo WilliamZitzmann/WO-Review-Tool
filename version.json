@@ -1,10 +1,24 @@
 {
-  "latest": "0.15.2",
+  "latest": "0.16.0",
   "channels": {
-    "stable": "0.15.2",
-    "beta": "0.15.2"
+    "stable": "0.16.0",
+    "beta": "0.16.0"
   },
   "versions": [
+    {
+      "version": "0.16.0",
+      "changes": [
+        "Fixed: pinning to a version while an update banner was showing could install it, then get silently reverted back to the old pin on the next check — any explicit install now reconciles the pin instead of fighting it",
+        "Fixed: re-pinning to a newer version after pinning down to an older one now works reliably (previously could appear permanently stuck)",
+        "The update banner no longer lingers after a pin/channel change — it's dismissed immediately, and never shown at all while a pin is active (just a status line, e.g. \"Pinned to v0.15.0\")",
+        "Fixed: the Setup window could survive a code hot-reload and go stale/disconnected, making the tool feel unresponsive after an update — it now always closes cleanly first",
+        "Added a first-run installer shown on brand-new installs — pick a starting config profile (and channel, if unlocked) instead of a silent default",
+        "Added config profiles: named, portable config subsets (rules/scan/fields/vars) that can be saved, switched, and imported from GitHub — Setup > Profiles",
+        "Config is now split into configs/default.json and configs/maintenance.json (was a single root config.json), each fetchable independently as a preset",
+        "Profile switching merges only config-level settings (message templates, rule return messages, auto-scan) — it never touches device-level settings like update channel, pinned version, auto-backup, or hotkey",
+        "Added window.__woShowInstaller()/__woReset() console helpers for exercising the first-run flow without manually wiping storage"
+      ]
+    },
     {
       "version": "0.15.2",
       "changes": [
