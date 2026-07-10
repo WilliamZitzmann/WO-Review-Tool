@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.16.0';
+    var TOOL_VERSION = '0.16.1';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -857,6 +857,8 @@
             vars: getVars(),
             settings: JSON.parse(localStorage.getItem('__wo_settings') || '{}'),
             src: localStorage.getItem('__wo_tool_src') || '',
+            profiles: getProfiles(),
+            activeProfileId: getActiveProfileId(),
             savedAt: new Date().toISOString(),
             version: TOOL_VERSION
         }, null, 2);
@@ -910,6 +912,8 @@
         if (b.vars) localStorage.setItem(VKEY, JSON.stringify(b.vars));
         if (b.settings) localStorage.setItem('__wo_settings', JSON.stringify(b.settings));
         if (b.src) localStorage.setItem('__wo_tool_src', b.src); // ← ADD THIS
+        if (b.profiles) localStorage.setItem(PROFILES_KEY, JSON.stringify(b.profiles));
+        if (b.activeProfileId) localStorage.setItem(ACTIVE_PROFILE_KEY, b.activeProfileId);
         localStorage.setItem('__wo_config_saved_at', b.savedAt || new Date().toISOString());
     }
 
@@ -935,6 +939,8 @@
 
     function saveProfiles(p) {
         localStorage.setItem(PROFILES_KEY, JSON.stringify(p));
+        localStorage.setItem('__wo_config_saved_at', new Date().toISOString());
+        autoSaveToFile();
     }
 
     function getActiveProfileId() {
@@ -999,8 +1005,11 @@
         }
         var target = profiles[id];
         if (!target) return false;
-        applyProfile(target);
+        // Set the active pointer BEFORE applyProfile's own auto-save fires, so a
+        // linked PC backup file reflects the new active profile immediately
+        // rather than lagging one switch behind.
         localStorage.setItem(ACTIVE_PROFILE_KEY, id);
+        applyProfile(target);
         return true;
     }
 
@@ -1062,8 +1071,8 @@
         return fetchProfile(id).then(function(p) {
             if (!p) return false;
             registerProfile(p);
+            localStorage.setItem(ACTIVE_PROFILE_KEY, p.id); // before applyProfile's auto-save fires
             applyProfile(p);
-            localStorage.setItem(ACTIVE_PROFILE_KEY, p.id);
             return true;
         });
     }
@@ -4907,21 +4916,31 @@
             if (!ids.length) {
                 localHtml += '<div style="color:#888;">No saved profiles yet — save the current config as one below, or import a preset.</div>';
             } else {
+                var onlyOne = ids.length === 1;
                 ids.forEach(function(id) {
                     var p = profiles[id];
                     var isActive = id === activeId;
+                    // Can't delete the active profile, and can't delete your last
+                    // remaining one either way — disable clearly, don't just rely on
+                    // the disabled attribute's default (subtle) look.
+                    var deleteBlocked = isActive || onlyOne;
+                    var deleteReason = isActive ?
+                        'Switch to another profile first' :
+                        'This is your only saved profile';
                     localHtml += '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px;border:1px solid ' + (isActive ? '#2ecc71' : '#333') + ';border-radius:4px;margin-bottom:6px;">' +
                         '<div><b>' + (p.name || id) + '</b>' + (isActive ? ' <span style="color:#2ecc71;font-size:10px;">(active)</span>' : '') +
                         '<br><span style="color:#888;font-size:10px;">' + (p.description || '') + '</span></div>' +
                         '<div style="display:flex;gap:4px;">' +
                         '<button class="__pf_switch" data-id="' + id + '" style="font-size:11px;" ' + (isActive ? 'disabled' : '') + '>Switch</button>' +
-                        '<button class="__pf_delete" data-id="' + id + '" style="font-size:11px;background:#5a2020;color:#fff;" ' + (isActive ? 'disabled' : '') + '>Delete</button>' +
+                        '<button class="__pf_delete" data-id="' + id + '" style="font-size:11px;background:#5a2020;color:#fff;' + (deleteBlocked ? 'opacity:0.35;cursor:not-allowed;' : '') + '" ' +
+                        (deleteBlocked ? 'disabled title="Can\'t delete — ' + deleteReason + '"' : '') + '>Delete</button>' +
                         '</div></div>';
                 });
             }
             localHtml += '</div>' +
-                '<div style="margin-top:8px;">' +
+                '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">' +
                 '<button id="__pf_save_new" style="background:#2980b9;color:#fff;border:none;padding:4px 10px;cursor:pointer;border-radius:4px;font-size:11px;">Save Current As New Profile</button>' +
+                '<button id="__pf_blank" style="background:#555;color:#fff;border:none;padding:4px 10px;cursor:pointer;border-radius:4px;font-size:11px;">Start Blank Profile</button>' +
                 '</div>';
             localDiv.innerHTML = localHtml;
             content.appendChild(localDiv);
@@ -4956,10 +4975,44 @@
                     name: name.trim(),
                     description: desc
                 });
-                registerProfile(snap);
+                // Set active BEFORE registerProfile's own auto-save fires, so a
+                // linked PC backup file reflects the new active profile right away.
                 localStorage.setItem(ACTIVE_PROFILE_KEY, id);
+                registerProfile(snap);
                 alert('Saved as "' + name.trim() + '".');
                 profilesTab();
+            };
+
+            localDiv.querySelector('#__pf_blank').onclick = function() {
+                var name = prompt('Name for the new blank profile:');
+                if (!name) return;
+                var id = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || ('profile-' + new Date().toISOString());
+                var desc = prompt('Short description (optional):') || '';
+                var blank = {
+                    id: id,
+                    name: name.trim(),
+                    description: desc,
+                    configVersion: 1,
+                    rules: {
+                        groups: [],
+                        rules: []
+                    },
+                    scan: {
+                        woTabId: DEFAULT_SCAN.woTabId,
+                        scans: []
+                    },
+                    fields: {},
+                    state: {},
+                    vars: [],
+                    settings: {},
+                    savedAt: new Date().toISOString()
+                };
+                if (!confirm('Switch to a blank "' + name.trim() + '" profile now? Your current live config will be saved back to its own profile first.')) return;
+                registerProfile(blank);
+                switchProfile(id); // preserves the outgoing profile's live edits, same as any switch
+                alert('Started blank profile "' + name.trim() + '". Build it out in Rules/Groups/Scan/Variables.');
+                modal.remove();
+                render();
             };
 
             // ── GitHub presets ──

@@ -1,10 +1,18 @@
 {
-  "latest": "0.16.0",
+  "latest": "0.16.1",
   "channels": {
-    "stable": "0.16.0",
-    "beta": "0.16.0"
+    "stable": "0.16.1",
+    "beta": "0.16.1"
   },
   "versions": [
+    {
+      "version": "0.16.1",
+      "changes": [
+        "Fixed: a linked PC backup file now saves ALL local config profiles, not just whichever one is currently active — switching profiles or restoring on a new machine brings everything back",
+        "Added \"Start Blank Profile\" in Setup > Profiles, to build a config from scratch as a new named profile instead of only ever cloning the current one",
+        "The Delete button in Setup > Profiles is now clearly greyed out (with a tooltip explaining why) instead of just being unresponsive when it's disabled"
+      ]
+    },
     {
       "version": "0.16.0",
       "changes": [
