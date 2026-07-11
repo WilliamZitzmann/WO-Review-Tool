@@ -1,10 +1,21 @@
 {
-  "latest": "0.20.6",
+  "latest": "0.20.7",
   "channels": {
-    "stable": "0.20.6",
-    "beta": "0.20.6"
+    "stable": "0.20.7",
+    "beta": "0.20.7"
   },
   "versions": [
+    {
+      "version": "0.20.7",
+      "changes": [
+        "Changing the update Channel or Version in Setup > Settings no longer applies instantly (which could trigger an immediate install/reload) — it now stages the change like every other Setup tab and only takes effect when you click Save & Apply",
+        "Added a rule status summary bar under the status line — a quick pass/fail/warn/error count across every rule, since scrolling can hide most groups from view at once. On by default; a toggle in Setup > Settings > Display turns it off",
+        "The status line text is now a visible amber/yellow instead of muted gray",
+        "The hide-group icon and the tooltip icon are now hidden until you hover the group header, then appear in gray; hovering the icon itself now highlights white (previously hovering the hide icon turned it red)",
+        "\"Will's WO\" in the panel title is now bold white",
+        "Reduced the indent on rule messages in the expanded tile view — it was calibrated to align under a status dot that's no longer there"
+      ]
+    },
     {
       "version": "0.20.6",
       "changes": [

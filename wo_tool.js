@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.6';
+    var TOOL_VERSION = '0.20.7';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -2691,7 +2691,7 @@
         gs[gid].hiddenCols = cols;
         saveGS(gs);
     }
-    var panel, bodyEl, footerAreaEl, statusEl;
+    var panel, bodyEl, footerAreaEl, statusEl, summaryEl;
 
     function setStatus(t) {
         if (statusEl) statusEl.textContent = t;
@@ -3008,7 +3008,7 @@
             "#__wo_dock .wo-mono{font-family:Consolas,'Cascadia Mono',monospace;font-variant-numeric:tabular-nums;}" +
             "#__wo_dock .wo-head{background:var(--wo-surface-2);padding:10px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--wo-border);gap:8px;}" +
             "#__wo_dock .wo-head-title{display:flex;flex-direction:column;line-height:1.2;min-width:0;}" +
-            "#__wo_dock .wo-head-title b{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
+            "#__wo_dock .wo-head-title b{font-size:13px;font-weight:800;color:#ffffff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
             "#__wo_dock .wo-head-title span{font-size:11px;color:var(--wo-muted);font-weight:400;}" +
             "#__wo_dock .wo-head-ver{color:var(--wo-muted);font-size:9.5px;font-family:Consolas,monospace;flex-shrink:0;}" +
             "#__wo_dock .wo-head-actions{display:flex;gap:6px;flex-shrink:0;}" +
@@ -3026,8 +3026,9 @@
             "#__wo_dock .wo-th-title b{white-space:nowrap;}" +
             "#__wo_dock .wo-th-actions{display:flex;align-items:center;gap:2px;flex-shrink:0;margin-left:auto;}" +
             "#__wo_dock .wo-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;display:inline-block;}" +
-            "#__wo_dock .__wo_tx{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);opacity:.5;cursor:pointer;flex-shrink:0;}" +
-            "#__wo_dock .__wo_tx:hover,#__wo_dock .__wo_tx:focus-visible{opacity:1;background:var(--wo-field);color:var(--wo-fail);}" +
+            "#__wo_dock .__wo_tx{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);opacity:0;cursor:pointer;flex-shrink:0;}" +
+            "#__wo_dock .__wo_th:hover .__wo_tx,#__wo_dock .__wo_tx:focus-visible{opacity:1;}" +
+            "#__wo_dock .__wo_tx:hover,#__wo_dock .__wo_tx:focus-visible{color:#fff;background:var(--wo-field);}" +
             "#__wo_dock .__wo_tx:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
             "#__wo_dock .wo-card.is-collapsed .__wo_tb,#__wo_dock .wo-card.is-collapsed .__wo_banner{display:none;}" +
             "#__wo_dock .__wo_banner{padding:7px 10px;font-size:11px;color:var(--wo-accent);background:var(--wo-field);border-bottom:1px solid var(--wo-border);}" +
@@ -3036,7 +3037,7 @@
             "#__wo_dock .wo-rule-top{display:flex;align-items:center;gap:7px;}" +
             "#__wo_dock .wo-rule-label{flex:1;color:var(--wo-text);font-size:11.5px;}" +
             "#__wo_dock .wo-rule-status{font-size:11px;font-weight:700;}" +
-            "#__wo_dock .wo-rule-msg{font-size:10.5px;padding-left:17px;opacity:.92;}" +
+            "#__wo_dock .wo-rule-msg{font-size:10.5px;padding-left:8px;opacity:.92;}" +
             "#__wo_dock .wo-fieldstack{display:flex;flex-direction:column;gap:7px;}" +
             "#__wo_dock .wo-fieldrow{display:flex;flex-direction:row;flex-wrap:nowrap;gap:7px;}" +
             "#__wo_dock .wo-field{min-width:0;}" +
@@ -3057,8 +3058,9 @@
             "#__wo_dock table.wo-table td{padding:6px 8px;border-bottom:1px solid var(--wo-border);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
             "#__wo_dock table.wo-table tr:last-child td{border-bottom:none;}" +
             "#__wo_dock .wo-header-msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;font-size:10.5px;font-weight:400;}" +
-            "#__wo_dock .__wo_tip_icon{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:var(--wo-r-ctl);color:var(--wo-muted);cursor:default;flex-shrink:0;}" +
-            "#__wo_dock .__wo_tip_icon:hover{color:var(--wo-text);background:var(--wo-field);}" +
+            "#__wo_dock .__wo_tip_icon{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:var(--wo-r-ctl);color:var(--wo-muted);cursor:default;flex-shrink:0;opacity:0;}" +
+            "#__wo_dock .__wo_th:hover .__wo_tip_icon{opacity:1;}" +
+            "#__wo_dock .__wo_tip_icon:hover{color:#fff;background:var(--wo-field);opacity:1;}" +
             "#__wo_dock .wo-prescan{background:var(--wo-field);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);padding:8px 10px;font-size:11.5px;color:var(--wo-accent);text-align:center;margin-bottom:8px;}" +
             "#__wo_dock .wo-notice{border-radius:var(--wo-r-card);padding:9px 11px;font-size:11.5px;border:1px solid var(--wo-border);background:var(--wo-surface);margin-bottom:6px;}" +
             "#__wo_dock .wo-notice-title{font-weight:700;margin-bottom:4px;}" +
@@ -3128,7 +3130,8 @@
             '<button id="__wo_exit" class="wo-btn wo-btn-danger">Exit</button>' +
             '</div>' +
             '</div>' +
-            '<div id="__wo_status" style="padding:6px 12px;color:#9aa4af;font-size:11px;min-height:15px;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
+            '<div id="__wo_status" style="padding:6px 12px;color:#e3b341;font-size:11px;min-height:15px;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
+            '<div id="__wo_summary" style="padding:0 12px 6px;font-size:11px;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
             '<div id="__wo_scanlog" style="padding:0 12px 6px;font-size:10.5px;color:#9aa4af;max-height:80px;overflow-y:auto!important;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
             // Deliberately NOT display:flex here. That was the actual root
             // cause of the squishing bug across every prior attempt: it
@@ -3144,6 +3147,7 @@
         bodyEl = panel.querySelector('#__wo_groups');
         footerAreaEl = panel.querySelector('#__wo_footer_area');
         statusEl = panel.querySelector('#__wo_status');
+        summaryEl = panel.querySelector('#__wo_summary');
         panel.querySelector('#__wo_rescan').onclick = function() {
             runScan(render);
         };
@@ -3239,6 +3243,42 @@
 
         // ── Pre-scan state ──
         var preScan = !hasScanned; // ← all Latin characters
+
+        // ── Rule status summary bar — an at-a-glance count of pass/fail/
+        // warn/error across every rule, since scrolling through groups can
+        // hide most of them from view at once. Settings > Display can hide
+        // this (st.hideSummaryBar). ──
+        var summarySt = {};
+        try {
+            summarySt = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+        } catch (e) {}
+        if (summarySt.hideSummaryBar) {
+            summaryEl.style.display = 'none';
+        } else {
+            summaryEl.style.display = '';
+            if (preScan) {
+                summaryEl.innerHTML = '';
+            } else {
+                var summaryCounts = {
+                    pass: 0,
+                    fail: 0,
+                    warn: 0,
+                    error: 0
+                };
+                Object.keys(results).forEach(function(id) {
+                    var s = results[id].status;
+                    if (summaryCounts.hasOwnProperty(s)) summaryCounts[s]++;
+                });
+                var summaryParts = [];
+                if (summaryCounts.pass) summaryParts.push('<span style="color:#3fb950;">' + summaryCounts.pass + ' ✓</span>');
+                if (summaryCounts.fail) summaryParts.push('<span style="color:#f85149;">' + summaryCounts.fail + ' ✗</span>');
+                if (summaryCounts.warn) summaryParts.push('<span style="color:#d29922;">' + summaryCounts.warn + ' ⚠</span>');
+                if (summaryCounts.error) summaryParts.push('<span style="color:#bc8cff;">' + summaryCounts.error + ' !</span>');
+                summaryEl.innerHTML = summaryParts.length ?
+                    summaryParts.join(' <span style="color:#30363d;">|</span> ') :
+                    '<span style="color:#9aa4af;">—</span>';
+            }
+        }
         if (preScan) {
             var banner = document.createElement('div');
             banner.className = 'wo-prescan';
@@ -4019,6 +4059,11 @@
         var opts = fieldKeyOptions();
         var cfg = JSON.parse(JSON.stringify(getCfg()));
         var scan = JSON.parse(JSON.stringify(getScan()));
+        // Hoisted to modal scope (not re-read per tab visit) so a staged
+        // channel/version change in Settings survives switching to another
+        // tab and back, and is only actually persisted on Save & Apply —
+        // settingsTab() reads/writes this same object via closure.
+        var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
 
         // --- make modal draggable ---
         var modal = document.createElement('div');
@@ -4080,9 +4125,11 @@
         modal.querySelector('#__s_save').onclick = function() {
             saveCfg(cfg);
             saveScan(scan);
+            saveSettingsCfg(st);
             applyHotkey();
             modal.remove();
             render();
+            checkForUpdate();
         };
 
         modal.querySelector('#__s_exp').onclick = function() {
@@ -4942,7 +4989,9 @@
 
         // ── SETTINGS TAB ──
         function settingsTab() {
-            var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+            // `st` is declared once at openSetup() scope (not here) so a
+            // staged channel/version change survives switching tabs and
+            // back — see the comment there.
             content.innerHTML = '';
 
             // Quick Return / Copy Message — prefix/suffix/delimiter are global;
@@ -5017,6 +5066,25 @@
             autoScanDiv.querySelector('#__st_autoscan').onchange = function(e) {
                 st.autoScan = e.target.checked;
                 saveSettingsCfg(st);
+            };
+
+            // ── Display ──
+            var displayDiv = document.createElement('div');
+            displayDiv.style.cssText = 'border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:10px;';
+            displayDiv.innerHTML = '<b>Display</b>' +
+                '<div style="margin-top:8px;">' +
+                '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
+                '<input type="checkbox" id="__st_hide_summary" ' + (st.hideSummaryBar ? '' : 'checked') + '>' +
+                '<span style="color:#aaa;font-size:11px;">Show pass/fail/warn/error counts under the status line</span>' +
+                '</label>' +
+                '<div style="color:#555;font-size:10px;margin-top:4px;">A quick at-a-glance summary across every rule, useful since scrolling can hide most groups from view at once.</div>' +
+                '</div>';
+            content.appendChild(displayDiv);
+
+            displayDiv.querySelector('#__st_hide_summary').onchange = function(e) {
+                st.hideSummaryBar = !e.target.checked;
+                saveSettingsCfg(st);
+                render();
             };
 
             var devTier = getDevTier();
@@ -5147,11 +5215,16 @@
             content.appendChild(updSettDiv);
 
             updSettDiv.querySelector('#__st_channel').onchange = function(e) {
+                // Stage only — e.stopPropagation() keeps this from also
+                // reaching the generic content 'input' listener below
+                // (saveSettings()), which would otherwise persist this
+                // immediately anyway. Actually applying a channel/version
+                // change used to trigger an instant install/reload the
+                // moment you touched the dropdown; now it waits for
+                // Save & Apply, same as every other Setup tab.
+                e.stopPropagation();
                 st.channel = e.target.value;
-                saveSettingsCfg(st);
-                dismissUpdateBanner();
-                setStatus('Channel set to ' + st.channel + ' — checking for update...');
-                checkForUpdate();
+                setStatus('Channel set to ' + st.channel + ' — click Save & Apply to check for updates.');
             };
 
             var pinSel = updSettDiv.querySelector('#__st_pin');
@@ -5201,13 +5274,11 @@
             xhrV.send();
 
             pinSel.onchange = function(e) {
+                e.stopPropagation(); // stage only — see the channel handler's comment above
                 st.pinnedVersion = e.target.value;
-                saveSettingsCfg(st);
-                dismissUpdateBanner();
                 setStatus(st.pinnedVersion ?
-                    (isFloatingMinorPin(st.pinnedVersion) ? 'Pinned to ' + st.pinnedVersion + '.x — checking...' : 'Pinned to v' + st.pinnedVersion + ' — checking...') :
-                    'Unpinned — following channel');
-                checkForUpdate();
+                    'Version set to ' + st.pinnedVersion + ' — click Save & Apply to check for updates.' :
+                    'Unpinned — click Save & Apply to follow the channel.');
             };
 
             updSettDiv.querySelector('#__st_upd_disable').onchange = function(e) {
