@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.17';
+    var TOOL_VERSION = '0.20.18';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -3227,6 +3227,7 @@
             "#__wo_dock .wo-icon-check{color:var(--wo-pass);}" +
             "#__wo_dock .wo-action-row{display:flex;gap:7px;margin:8px 0 4px;}" +
             "#__wo_dock .wo-btn-block{flex:1;padding:9px;font-size:12.5px;text-align:center;}" +
+            "#__wo_dock .wo-btn-block.wo-btn-icon{display:inline-flex;align-items:center;justify-content:center;gap:7px;}" +
             "#__wo_dock .wo-btn-pass{background:var(--wo-pass);color:#04210c;border-color:var(--wo-pass);}" +
             "#__wo_dock .wo-btn-fail{background:var(--wo-fail);color:#2b0705;border-color:var(--wo-fail);}" +
             "#__wo_dock .wo-showall{width:100%;margin-top:4px;text-align:center;}" +
@@ -3842,8 +3843,21 @@
 
         var returnBtn = document.createElement('button');
         returnBtn.type = 'button';
-        returnBtn.textContent = '↩ Return';
-        returnBtn.className = 'wo-btn wo-btn-danger wo-btn-block';
+        // Route icon supplied by the user (route.txt) — a small node/branch
+        // diagram with a checkmark, already stroke-only so it's unaffected
+        // by the fill-vs-host-CSS paint bug documented on the other icons.
+        returnBtn.innerHTML =
+            '<svg width="15" height="15" viewBox="0 0 320 320" fill="none" aria-hidden="true">' +
+            '<line x1="65" y1="50" x2="95" y2="50" stroke="currentColor" stroke-width="10" stroke-linecap="round"/>' +
+            '<line x1="100" y1="60" x2="60" y2="100" stroke="currentColor" stroke-width="10" stroke-linecap="round"/>' +
+            '<line x1="65" y1="110" x2="80" y2="110" stroke="currentColor" stroke-width="10" stroke-linecap="round"/>' +
+            '<circle cx="50" cy="50" r="15" stroke="currentColor" stroke-width="10"/>' +
+            '<circle cx="110" cy="50" r="15" stroke="currentColor" stroke-width="10"/>' +
+            '<circle cx="50" cy="110" r="15" stroke="currentColor" stroke-width="10"/>' +
+            '<circle cx="110" cy="110" r="25" stroke="currentColor" stroke-width="5"/>' +
+            '<path d="M100 110L108 118L122 101" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>' +
+            '</svg><span>Route</span>';
+        returnBtn.className = 'wo-btn wo-btn-danger wo-btn-block wo-btn-icon';
         returnBtn.onclick = function() {
             if (!confirm('Return this Work Order?\n\nThe return message will be filled into the Memo field.')) return;
             routeWorkflow('return');
@@ -4284,9 +4298,15 @@
             "#__wo_setup_modal .wo-tab-btn.wo-tab-mode-icon{padding-left:9px;padding-right:9px;gap:0;}" +
             "#__wo_setup_modal .wo-tab-btn.wo-tab-mode-word .wo-tab-icon{display:none;}" +
             "#__wo_setup_modal .wo-tab-btn.is-active{z-index:2;color:var(--wo-text);background:var(--wo-surface);}" +
-            "#__wo_setup_modal .wo-tab-btn.is-active::before,#__wo_setup_modal .wo-tab-btn.is-active::after{content:'';position:absolute;bottom:0;width:11px;height:11px;}" +
-            "#__wo_setup_modal .wo-tab-btn.is-active::before{left:-11px;background:radial-gradient(circle at top left,transparent 11px,var(--wo-surface) 11.5px);}" +
-            "#__wo_setup_modal .wo-tab-btn.is-active::after{right:-11px;background:radial-gradient(circle at top right,transparent 11px,var(--wo-surface) 11.5px);}" +
+            // top/transform reset explicitly: the tab-separator rule above
+            // only defines a ::after (not a ::before), and without this the
+            // right-side curve alone inherited its top:50%/translateY(-50%)
+            // once the separator rule stopped being fully overridden here —
+            // pulling just that one corner up instead of anchoring to the
+            // bottom like the left corner already did.
+            "#__wo_setup_modal .wo-tab-btn.is-active::before,#__wo_setup_modal .wo-tab-btn.is-active::after{content:'';position:absolute;top:auto;transform:none;bottom:0;width:13px;height:13px;}" +
+            "#__wo_setup_modal .wo-tab-btn.is-active::before{left:-13px;background:radial-gradient(circle at top left,transparent 13px,var(--wo-surface) 13.5px);}" +
+            "#__wo_setup_modal .wo-tab-btn.is-active::after{right:-13px;background:radial-gradient(circle at top right,transparent 13px,var(--wo-surface) 13.5px);}" +
             "#__wo_setup_modal .wo-modal-content{flex:1;min-height:0;overflow:auto;padding:10px 10px 8px;background:var(--wo-surface);border-radius:0 6px 8px 8px;margin:0 -10px -10px;}" +
             "#__wo_setup_modal .wo-modal-content{scrollbar-width:thin;scrollbar-color:#30363d #0d1117;}" +
             "#__wo_setup_modal .wo-modal-content::-webkit-scrollbar{width:8px;}" +
@@ -4385,10 +4405,11 @@
             vars: '<path d="M5.6 2.8C4.1 2.8 3.7 3.6 3.7 4.6V6.4C3.7 7.1 3.4 7.5 2.6 7.7V8.3C3.4 8.5 3.7 8.9 3.7 9.6V11.4C3.7 12.4 4.1 13.2 5.6 13.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M10.4 2.8C11.9 2.8 12.3 3.6 12.3 4.6V6.4C12.3 7.1 12.6 7.5 13.4 7.7V8.3C12.6 8.5 12.3 8.9 12.3 9.6V11.4C12.3 12.4 11.9 13.2 10.4 13.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>',
             scan: '<path d="M2.5 5.5V3.5C2.5 2.9 2.9 2.5 3.5 2.5H5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M10.5 2.5H12.5C13.1 2.5 13.5 2.9 13.5 3.5V5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M13.5 10.5V12.5C13.5 13.1 13.1 13.5 12.5 13.5H10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M5.5 13.5H3.5C2.9 13.5 2.5 13.1 2.5 12.5V10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="8" r="1.6" stroke="currentColor" stroke-width="1.3"/>',
             profiles: '<circle cx="8" cy="5.3" r="2.3" stroke="currentColor" stroke-width="1.3"/><path d="M3 13.2C3.6 10.6 5.5 9.3 8 9.3C10.5 9.3 12.4 10.6 13 13.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
-            // A proper gear silhouette (single zigzag outline path + inner
-            // ring), not filled — see the comment on the rule kebab icon
-            // for why every icon here is stroke-only.
-            settings: '<path d="M8 2.3L9 3.9L10.8 3.4L11 5.3L12.8 6L12.3 7.8L13.7 9L12.3 10.2L12.8 12L11 12.7L10.8 14.6L9 14.1L8 15.7L7 14.1L5.2 14.6L5 12.7L3.2 12L3.7 10.2L2.3 9L3.7 7.8L3.2 6L5 5.3L5.2 3.4L7 3.9Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><circle cx="8" cy="8" r="2.3" stroke="currentColor" stroke-width="1.2"/>',
+            // 8-tooth flat-topped gear (Chrome/Material "settings" glyph
+            // shape) traced as one outline path, not filled — see the
+            // comment on the rule kebab icon for why every icon here is
+            // stroke-only.
+            settings: '<path d="M12.57 6.9L14.24 6.56L14.24 9.44L12.57 9.1L12.01 10.46L13.43 11.39L11.39 13.43L10.46 12.01L9.1 12.57L9.44 14.24L6.56 14.24L6.9 12.57L5.54 12.01L4.61 13.43L2.57 11.39L3.99 10.46L3.43 9.1L1.76 9.44L1.76 6.56L3.43 6.9L3.99 5.54L2.57 4.61L4.61 2.57L5.54 3.99L6.9 3.43L6.56 1.76L9.44 1.76L9.1 3.43L10.46 3.99L11.39 2.57L13.43 4.61L12.01 5.54Z" stroke="currentColor" stroke-width="0.9" stroke-linejoin="round"/><circle cx="8" cy="8" r="2.4" stroke="currentColor" stroke-width="1.2"/>',
             update: '<path d="M12.8 5.2A5 5 0 1 0 13.5 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M12.8 2.5V5.2H10.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
             guide: '<path d="M2.5 3.5C2.5 3 2.9 2.7 3.4 2.8C5 3 6.5 3.6 8 4.6C9.5 3.6 11 3 12.6 2.8C13.1 2.7 13.5 3 13.5 3.5V11.5C13.5 12 13.1 12.3 12.6 12.4C11 12.6 9.5 13.2 8 14.2C6.5 13.2 5 12.6 3.4 12.4C2.9 12.3 2.5 12 2.5 11.5V3.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 4.6V14.2" stroke="currentColor" stroke-width="1.2"/>',
             exp: '<path d="M8 10V2.5M8 2.5L5.5 5M8 2.5L10.5 5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.5 10V12.5C2.5 13.1 2.9 13.5 3.5 13.5H12.5C13.1 13.5 13.5 13.1 13.5 12.5V10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -4765,7 +4786,11 @@
         // Setup reproduces it; a plain (non-snapped) close/reopen leaves
         // this null and the modal opens at its normal default rect.
         var currentSnap = st.setupSnap || null;
-        var MODAL_MIN_W = 420,
+        // 360 is the narrowest the tab bar can actually use once every tab
+        // is shrunk to icon-only (measured: ~330px of tabs/dividers + 20px
+        // modal padding + slack) — anything higher just strands dead space
+        // between the tab groups that resizing can never close.
+        var MODAL_MIN_W = 360,
             MODAL_MIN_H = 320;
 
         function getMainPanelWidth() {

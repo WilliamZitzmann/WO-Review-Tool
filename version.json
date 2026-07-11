@@ -1,10 +1,19 @@
 {
-  "latest": "0.20.17",
+  "latest": "0.20.18",
   "channels": {
-    "stable": "0.20.17",
-    "beta": "0.20.17"
+    "stable": "0.20.18",
+    "beta": "0.20.18"
   },
   "versions": [
+    {
+      "version": "0.20.18",
+      "changes": [
+        "Return button is now Route, using a new node/route icon instead of the unicode arrow",
+        "Settings icon replaced with an 8-tooth flat-topped gear (Chrome/Material \"settings\" glyph shape) instead of the previous zigzag design",
+        "Fixed the active Setup tab's rounded corner-merge effect: the right corner was sitting higher than the left because it was inheriting leftover position styling from the tab-separator rule; both corners now align exactly, with a slightly larger radius",
+        "Lowered the Setup window's minimum width (420px to 360px) - the higher floor left a dead gap between the tab groups once every tab shrinks to icon-only, and blocked narrowing the window any further than that"
+      ]
+    },
     {
       "version": "0.20.17",
       "changes": [
