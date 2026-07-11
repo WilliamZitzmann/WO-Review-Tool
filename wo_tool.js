@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.12';
+    var TOOL_VERSION = '0.20.13';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -3022,9 +3022,10 @@
     // text is recomputed fresh on every hover instead of being frozen at
     // whatever it was when attachTooltip() was first called — needed for
     // things like the Scan button, whose hotkey can change after the fact.
-    function attachTooltip(el, textOrFn) {
+    function attachTooltip(el, textOrFn, onlyIfTruncated) {
         if (!el) return;
         el.addEventListener('mouseenter', function() {
+            if (onlyIfTruncated && el.scrollWidth <= el.clientWidth) return;
             var text = typeof textOrFn === 'function' ? textOrFn() : textOrFn;
             if (!text) return;
             var old = document.getElementById('__wo_tip_float');
@@ -3086,7 +3087,15 @@
     function injectPanelStyles() {
         if (document.getElementById('__wo_panel_style')) return;
         var css = "" +
-            "#__wo_dock,#__wo_dock *{box-sizing:border-box;}" +
+            // Host pages (esp. IBM Maximo/Carbon) ship their own aggressive,
+            // broadly-targeted CSS for plain elements (button/input/svg/div)
+            // that otherwise bleeds through our rules by cascade order or
+            // specificity, making the panel look different per domain.
+            // `all:revert` clears every authored (host-page) declaration on
+            // our own elements back to the browser's UA baseline BEFORE any
+            // of our own rules below apply — it does not affect inline
+            // styles (panel positioning) or CSS custom properties.
+            "#__wo_dock,#__wo_dock *{all:revert;box-sizing:border-box;}" +
             "#__wo_dock{--wo-bg:#0d1117;--wo-surface:#161b22;--wo-surface-2:#1f2630;--wo-field:#1f2630;--wo-border:#30363d;--wo-text:#f0f3f6;--wo-muted:#9aa4af;--wo-accent:#58a6ff;--wo-on-accent:#04101f;--wo-pass:#3fb950;--wo-fail:#f85149;--wo-warn:#d29922;--wo-r-panel:8px;--wo-r-card:6px;--wo-r-ctl:6px;font-family:'Segoe UI Semibold','Segoe UI',system-ui,sans-serif;}" +
             // Collapse handle: position:absolute against #__wo_dock's own
             // box (a fixed-position element establishes a containing block
@@ -3128,10 +3137,10 @@
             // place — a real chicken-and-egg accessibility trap).
             "#__wo_dock .wo-th-actions{position:relative;display:flex;align-items:center;flex-shrink:0;margin-left:auto;min-height:22px;}" +
             "#__wo_dock .wo-group-badge{display:inline-flex;align-items:center;justify-content:center;min-width:36px;height:18px;padding:0 6px;border-radius:4px;font-size:9px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;box-sizing:border-box;color:#0d1117;transition:opacity .1s;}" +
-            "#__wo_dock .wo-th-icons{display:flex;align-items:center;justify-content:center;gap:2px;position:absolute;right:0;top:50%;transform:translateY(-50%);min-width:36px;box-sizing:border-box;padding:1px 4px;border-radius:999px;background:var(--wo-border);opacity:0;pointer-events:none;transition:opacity .1s;}" +
+            "#__wo_dock .wo-th-icons{display:flex;align-items:center;justify-content:center;gap:2px;position:absolute;right:0;top:50%;transform:translateY(-50%);min-width:36px;height:18px;box-sizing:border-box;padding:0 3px;border-radius:999px;background:var(--wo-border);opacity:0;pointer-events:none;transition:opacity .1s;}" +
             "#__wo_dock .__wo_th:hover .wo-th-icons,#__wo_dock .wo-th-actions:focus-within .wo-th-icons{opacity:1;pointer-events:auto;}" +
             "#__wo_dock .__wo_th:hover .wo-group-badge,#__wo_dock .wo-th-actions:focus-within .wo-group-badge{opacity:0;}" +
-            "#__wo_dock .__wo_tx{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);cursor:pointer;flex-shrink:0;}" +
+            "#__wo_dock .__wo_tx{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;padding:0;border:1px solid transparent;border-radius:3px;background:transparent;color:var(--wo-muted);cursor:pointer;flex-shrink:0;}" +
             "#__wo_dock .__wo_tx:hover,#__wo_dock .__wo_tx:focus-visible{color:#fff;background:var(--wo-field);}" +
             "#__wo_dock .__wo_tx:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
             "#__wo_dock .wo-card.is-collapsed .__wo_tb,#__wo_dock .wo-card.is-collapsed .__wo_banner{display:none;}" +
@@ -3162,7 +3171,7 @@
             "#__wo_dock table.wo-table td{padding:6px 8px;border-bottom:1px solid var(--wo-border);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
             "#__wo_dock table.wo-table tr:last-child td{border-bottom:none;}" +
             "#__wo_dock .wo-header-msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;font-size:10.5px;font-weight:400;}" +
-            "#__wo_dock .__wo_tip_icon{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:var(--wo-r-ctl);color:var(--wo-muted);cursor:default;flex-shrink:0;}" +
+            "#__wo_dock .__wo_tip_icon{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:3px;color:var(--wo-muted);cursor:default;flex-shrink:0;}" +
             "#__wo_dock .__wo_tip_icon:hover{color:#fff;background:var(--wo-field);}" +
             "#__wo_dock .wo-prescan{background:var(--wo-field);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);padding:8px 10px;font-size:11.5px;color:var(--wo-accent);text-align:center;margin-bottom:8px;}" +
             "#__wo_dock .wo-notice{border-radius:var(--wo-r-card);padding:9px 11px;font-size:11.5px;border:1px solid var(--wo-border);background:var(--wo-surface);margin-bottom:6px;}" +
@@ -3433,7 +3442,7 @@
             var tipHtml = '';
             if (group.tooltip) {
                 tipHtml = '<span class="__wo_tip_icon" data-tip="' + group.tooltip.replace(/"/g, '&quot;') + '">' +
-                    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+                    '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
                     '<circle cx="8" cy="8" r="6.3" stroke="currentColor" stroke-width="1.3"/>' +
                     '<line x1="8" y1="7.1" x2="8" y2="11.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' +
                     '<circle cx="8" cy="4.9" r="0.9" fill="currentColor"/>' +
@@ -3658,7 +3667,7 @@
                 '<span class="wo-th-actions">' + badgeHtml +
                 '<span class="wo-th-icons">' + tipHtml +
                 '<button class="__wo_tx" type="button" aria-label="Hide this group">' +
-                '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+                '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
                 '<path d="M1.5 8.4C3 5.6 5.4 3.6 8 3.6C10.6 3.6 13 5.6 14.5 8.4C13 11.2 10.6 13.2 8 13.2C5.4 13.2 3 11.2 1.5 8.4Z" stroke="currentColor" stroke-width="1.3"/>' +
                 '<circle cx="8" cy="8.4" r="1.9" stroke="currentColor" stroke-width="1.3"/>' +
                 '<path d="M2.5 2.5L13.5 14.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' +
@@ -3672,7 +3681,7 @@
 
             attachTooltip(tile.querySelector('.__wo_tip_icon'), group.tooltip);
             attachTooltip(tile.querySelector('.__wo_tx'), 'Hide this group');
-            if (hmText) attachTooltip(tile.querySelector('.wo-header-msg'), hmText);
+            if (hmText) attachTooltip(tile.querySelector('.wo-header-msg'), hmText, true);
             var colBtn = tile.querySelector('.__wo_col_toggle_btn');
             var colPanel = tile.querySelector('.__wo_col_panel');
             if (colBtn && colPanel) {
@@ -4188,7 +4197,11 @@
     function injectSetupStyles() {
         if (document.getElementById('__wo_setup_style')) return;
         var css = "" +
-            "#__wo_setup_modal,#__wo_setup_modal *{box-sizing:border-box;}" +
+            // See the matching comment in injectPanelStyles() — isolates us
+            // from host-page CSS (button/input/svg resets, aggressive
+            // Carbon/Dojo-style rules on IBM Maximo) that otherwise makes
+            // the modal render differently per domain.
+            "#__wo_setup_modal,#__wo_setup_modal *{all:revert;box-sizing:border-box;}" +
             "#__wo_setup_modal{--wo-bg:#0d1117;--wo-surface:#161b22;--wo-surface-2:#1f2630;--wo-field:#1f2630;--wo-border:#30363d;--wo-text:#f0f3f6;--wo-muted:#9aa4af;--wo-accent:#58a6ff;--wo-on-accent:#04101f;--wo-pass:#3fb950;--wo-fail:#f85149;--wo-warn:#d29922;--wo-r-panel:10px;--wo-r-card:6px;--wo-r-ctl:6px;font-family:'Segoe UI',system-ui,sans-serif;background:var(--wo-bg);color:var(--wo-text);}" +
             "#__wo_setup_modal .wo-mono{font-family:Consolas,'Cascadia Mono',monospace;}" +
             // Title bar
@@ -4205,7 +4218,7 @@
             // A thin divider separates adjacent SIBLING tabs, except on
             // either side of the active tab, where the tab's own
             // background already does the separating.
-            "#__wo_setup_modal .wo-modal-tabs{position:relative;display:flex;align-items:flex-end;flex-wrap:wrap;gap:14px;padding:8px 4px 0;}" +
+            "#__wo_setup_modal .wo-modal-tabs{position:relative;display:flex;align-items:flex-end;flex-wrap:wrap;gap:8px;padding:8px 4px 0;}" +
             "#__wo_setup_modal .wo-modal-tabs::after{content:'';position:absolute;left:4px;right:4px;bottom:0;height:1px;background:var(--wo-border);z-index:0;}" +
             "#__wo_setup_modal .wo-tab-group{display:flex;align-items:flex-end;position:relative;z-index:1;}" +
             "#__wo_setup_modal .wo-tab-group-end{margin-left:auto;}" +
@@ -4220,9 +4233,9 @@
             "#__wo_setup_modal .wo-tab-btn.wo-tab-mode-word .wo-tab-icon{display:none;}" +
             "#__wo_setup_modal .wo-tab-btn.is-active,#__wo_setup_modal .wo-tab-btn:has(+ .wo-tab-btn.is-active){border-right-color:transparent;}" +
             "#__wo_setup_modal .wo-tab-btn.is-active{z-index:2;color:var(--wo-text);background:var(--wo-surface);}" +
-            "#__wo_setup_modal .wo-tab-btn.is-active::before,#__wo_setup_modal .wo-tab-btn.is-active::after{content:'';position:absolute;bottom:0;width:7px;height:7px;}" +
-            "#__wo_setup_modal .wo-tab-btn.is-active::before{left:-7px;background:radial-gradient(circle at top left,transparent 7px,var(--wo-surface) 7.5px);}" +
-            "#__wo_setup_modal .wo-tab-btn.is-active::after{right:-7px;background:radial-gradient(circle at top right,transparent 7px,var(--wo-surface) 7.5px);}" +
+            "#__wo_setup_modal .wo-tab-btn.is-active::before,#__wo_setup_modal .wo-tab-btn.is-active::after{content:'';position:absolute;bottom:0;width:11px;height:11px;}" +
+            "#__wo_setup_modal .wo-tab-btn.is-active::before{left:-11px;background:radial-gradient(circle at top left,transparent 11px,var(--wo-surface) 11.5px);}" +
+            "#__wo_setup_modal .wo-tab-btn.is-active::after{right:-11px;background:radial-gradient(circle at top right,transparent 11px,var(--wo-surface) 11.5px);}" +
             "#__wo_setup_modal .wo-modal-content{flex:1;min-height:0;overflow:auto;padding:10px 10px 8px;background:var(--wo-surface);border-radius:0 6px 8px 8px;margin:0 -10px -10px;}" +
             "#__wo_setup_modal .wo-modal-content{scrollbar-width:thin;scrollbar-color:#30363d #0d1117;}" +
             "#__wo_setup_modal .wo-modal-content::-webkit-scrollbar{width:8px;}" +
@@ -4247,18 +4260,25 @@
             // visible gap of empty padding above/below the header row for
             // no reason. This way a collapsed card hugs its header tightly.
             "#__wo_setup_modal .wo-card{border:1px solid var(--wo-border);border-radius:var(--wo-r-card);margin-bottom:9px;background:var(--wo-surface);overflow:hidden;}" +
-            "#__wo_setup_modal .wo-card-head{display:flex;align-items:center;gap:6px;padding:8px 10px;cursor:pointer;user-select:none;}" +
+            "#__wo_setup_modal .wo-card-head{display:flex;align-items:center;gap:6px;padding:6px 10px;min-height:30px;cursor:pointer;user-select:none;background:var(--wo-surface-2);}" +
             "#__wo_setup_modal .wo-card-head:hover{background:var(--wo-field);}" +
             "#__wo_setup_modal .wo-card>[data-coll-body]{padding:0 10px 10px;}" +
             "#__wo_setup_modal .wo-card-arrow{font-size:9px;color:var(--wo-muted);min-width:9px;}" +
             "#__wo_setup_modal .wo-rule-title{flex:1;min-width:0;font-weight:700;font-size:12px;color:var(--wo-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}" +
             "#__wo_setup_modal .wo-rule-title-input{flex:1;min-width:0;font:inherit;font-weight:700;font-size:12px;background:var(--wo-field);border:1px solid var(--wo-accent);border-radius:var(--wo-r-ctl);padding:4px 7px;color:var(--wo-text);}" +
             "#__wo_setup_modal .wo-kebab-wrap{position:relative;flex-shrink:0;margin-left:auto;}" +
-            "#__wo_setup_modal .wo-kebab-btn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);cursor:pointer;}" +
+            "#__wo_setup_modal .wo-kebab-btn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);cursor:pointer;flex-shrink:0;}" +
             "#__wo_setup_modal .wo-kebab-btn:hover,#__wo_setup_modal .wo-kebab-btn:focus-visible{color:var(--wo-text);background:var(--wo-border);}" +
-            "#__wo_setup_modal .wo-kebab-menu{position:absolute;right:0;top:calc(100% + 4px);min-width:150px;background:var(--wo-surface-2);border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);box-shadow:0 6px 18px rgba(0,0,0,.45);padding:4px;z-index:20;}" +
-            "#__wo_setup_modal .wo-kebab-item{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border:none;background:none;color:var(--wo-text);font:inherit;font-size:11.5px;text-align:left;border-radius:var(--wo-r-ctl);cursor:pointer;}" +
+            // Positioning (top/left/right) is always set inline at creation
+            // time (see the kebab/tab-context-menu JS) — this rule is purely
+            // visual chrome, shared by the rule kebab menu and the tab
+            // display-mode context menu.
+            "#__wo_setup_modal .wo-kebab-menu{display:flex;flex-direction:column;gap:1px;min-width:160px;background:var(--wo-surface-2);border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);box-shadow:0 8px 24px rgba(0,0,0,.5);padding:4px;z-index:20;}" +
+            "#__wo_setup_modal .wo-kebab-item{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border:none;background:none;color:var(--wo-text);font:inherit;font-size:11.5px;text-align:left;border-radius:calc(var(--wo-r-ctl) - 2px);cursor:pointer;transition:background .08s;}" +
+            "#__wo_setup_modal .wo-kebab-item svg{flex-shrink:0;}" +
             "#__wo_setup_modal .wo-kebab-item:hover{background:var(--wo-field);}" +
+            "#__wo_setup_modal .wo-kebab-item-active{color:var(--wo-accent);}" +
+            "#__wo_setup_modal .wo-kebab-check{margin-left:auto;flex-shrink:0;color:var(--wo-accent);}" +
             "#__wo_setup_modal .wo-kebab-item-danger{color:var(--wo-fail);}" +
             "#__wo_setup_modal label{color:var(--wo-muted);}" +
             "#__wo_setup_modal .wo-resize-handle{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;color:var(--wo-muted);z-index:5;}" +
@@ -4295,7 +4315,7 @@
             vars: '<path d="M5.6 2.8C4.1 2.8 3.7 3.6 3.7 4.6V6.4C3.7 7.1 3.4 7.5 2.6 7.7V8.3C3.4 8.5 3.7 8.9 3.7 9.6V11.4C3.7 12.4 4.1 13.2 5.6 13.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M10.4 2.8C11.9 2.8 12.3 3.6 12.3 4.6V6.4C12.3 7.1 12.6 7.5 13.4 7.7V8.3C12.6 8.5 12.3 8.9 12.3 9.6V11.4C12.3 12.4 11.9 13.2 10.4 13.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>',
             scan: '<path d="M2.5 5.5V3.5C2.5 2.9 2.9 2.5 3.5 2.5H5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M10.5 2.5H12.5C13.1 2.5 13.5 2.9 13.5 3.5V5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M13.5 10.5V12.5C13.5 13.1 13.1 13.5 12.5 13.5H10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M5.5 13.5H3.5C2.9 13.5 2.5 13.1 2.5 12.5V10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="8" r="1.6" stroke="currentColor" stroke-width="1.3"/>',
             profiles: '<circle cx="8" cy="5.3" r="2.3" stroke="currentColor" stroke-width="1.3"/><path d="M3 13.2C3.6 10.6 5.5 9.3 8 9.3C10.5 9.3 12.4 10.6 13 13.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
-            settings: '<circle cx="8" cy="8" r="2.1" stroke="currentColor" stroke-width="1.3"/><path d="M8 2.5V4M8 12V13.5M13.5 8H12M4 8H2.5M11.7 4.3L10.6 5.4M5.4 10.6L4.3 11.7M11.7 11.7L10.6 10.6M5.4 5.4L4.3 4.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
+            settings: '<circle cx="8" cy="8" r="4" stroke="currentColor" stroke-width="1.1"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/><rect x="7.25" y="1.6" width="1.5" height="2.2" rx="0.5" fill="currentColor"/><rect x="7.25" y="1.6" width="1.5" height="2.2" rx="0.5" fill="currentColor" transform="rotate(60 8 8)"/><rect x="7.25" y="1.6" width="1.5" height="2.2" rx="0.5" fill="currentColor" transform="rotate(120 8 8)"/><rect x="7.25" y="1.6" width="1.5" height="2.2" rx="0.5" fill="currentColor" transform="rotate(180 8 8)"/><rect x="7.25" y="1.6" width="1.5" height="2.2" rx="0.5" fill="currentColor" transform="rotate(240 8 8)"/><rect x="7.25" y="1.6" width="1.5" height="2.2" rx="0.5" fill="currentColor" transform="rotate(300 8 8)"/>',
             update: '<path d="M12.8 5.2A5 5 0 1 0 13.5 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M12.8 2.5V5.2H10.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
             guide: '<path d="M2.5 3.5C2.5 3 2.9 2.7 3.4 2.8C5 3 6.5 3.6 8 4.6C9.5 3.6 11 3 12.6 2.8C13.1 2.7 13.5 3 13.5 3.5V11.5C13.5 12 13.1 12.3 12.6 12.4C11 12.6 9.5 13.2 8 14.2C6.5 13.2 5 12.6 3.4 12.4C2.9 12.3 2.5 12 2.5 11.5V3.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 4.6V14.2" stroke="currentColor" stroke-width="1.2"/>',
             exp: '<path d="M8 10V2.5M8 2.5L5.5 5M8 2.5L10.5 5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.5 10V12.5C2.5 13.1 2.9 13.5 3.5 13.5H12.5C13.1 13.5 13.5 13.1 13.5 12.5V10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -4350,7 +4370,9 @@
         document.body.appendChild(modal);
         attachTooltip(modal.querySelector('#__s_resize'), 'Drag to resize');
         modal.querySelectorAll('.wo-tab-btn[data-tab-key]').forEach(function(b) {
-            attachTooltip(b, b.getAttribute('data-tab-label'));
+            attachTooltip(b, function() {
+                return b.classList.contains('wo-tab-mode-icon') ? b.getAttribute('data-tab-label') : '';
+            });
         });
 
         // Right-click a tab to pick how it's displayed: icon only, word
@@ -4393,9 +4415,9 @@
             var key = btn.getAttribute('data-tab-key');
             var current = tabModes[key] || 'both';
             var options = [
-                ['icon', 'Icon'],
-                ['word', 'Word'],
-                ['both', 'Icon + Word']
+                ['icon', 'Icon', '<rect x="3" y="3" width="10" height="10" rx="2.2" stroke="currentColor" stroke-width="1.3"/>'],
+                ['word', 'Word', '<path d="M3 5H13M3 8H13M3 11H9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>'],
+                ['both', 'Icon + Word', '<rect x="2" y="4.3" width="6.4" height="6.4" rx="1.4" stroke="currentColor" stroke-width="1.2"/><path d="M10.5 5.3H14M10.5 8H14M10.5 10.7H12.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>']
             ];
             var menu = document.createElement('div');
             menu.className = 'wo-kebab-menu';
@@ -4404,9 +4426,12 @@
             menu.style.left = e.clientX + 'px';
             menu.style.top = e.clientY + 'px';
             menu.innerHTML = options.map(function(o) {
-                return '<button type="button" class="wo-kebab-item" data-mode="' + o[0] + '">' +
-                    '<span style="width:12px;display:inline-block;">' + (current === o[0] ? '✓' : '') + '</span>' +
-                    '<span>' + o[1] + '</span></button>';
+                var isActive = current === o[0];
+                return '<button type="button" class="wo-kebab-item' + (isActive ? ' wo-kebab-item-active' : '') + '" data-mode="' + o[0] + '">' +
+                    '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">' + o[2] + '</svg>' +
+                    '<span>' + o[1] + '</span>' +
+                    (isActive ? '<svg class="wo-kebab-check" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5L6.5 12L13 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '') +
+                    '</button>';
             }).join('');
             modal.appendChild(menu);
             var r = menu.getBoundingClientRect();

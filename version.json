@@ -1,10 +1,23 @@
 {
-  "latest": "0.20.12",
+  "latest": "0.20.13",
   "channels": {
-    "stable": "0.20.12",
-    "beta": "0.20.12"
+    "stable": "0.20.13",
+    "beta": "0.20.13"
   },
   "versions": [
+    {
+      "version": "0.20.13",
+      "changes": [
+        "Fixed a real bug from live testing: the Rules tab's new kebab menu was invisible on a collapsed rule (the default state) because it was clipped by the card's overflow:hidden — it now positions itself outside the card, like the tab display-mode menu already did",
+        "Added a CSS isolation reset for both the docked panel and Setup modal — host pages (especially IBM Maximo/Carbon) were bleeding their own button/input/svg styling through ours, which is the likely cause of several per-domain rendering differences reported (ancient-looking menus, missing Chrome-tab shape, resize handle in the wrong corner). Please re-test on the domains where things looked wrong before I chase remaining cosmetic issues individually.",
+        "Rule headers in the Rules tab now use a distinct background from the body, matching how group headers look on the main panel",
+        "Settings tab icon is now an actual gear/cog shape",
+        "Main panel: the grey hover pill (tooltip/hide icon) is now exactly the same size as the status badge it replaces, instead of being taller",
+        "Tooltips no longer show for text that's already fully visible — only when it's actually cut off (header messages), or when a Setup tab is shrunk to icon-only",
+        "Setup tab display-mode menu (Icon/Word/Icon+Word) and the Rules kebab menu are visually polished — vertical list, per-option icons, and a checkmark on the active display mode",
+        "Chrome-style tab corner curve is bigger/more visible; reduced the gap between tab groups"
+      ]
+    },
     {
       "version": "0.20.12",
       "changes": [
