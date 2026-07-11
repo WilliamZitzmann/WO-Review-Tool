@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.0';
+    var TOOL_VERSION = '0.20.1';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -3019,24 +3019,19 @@
             "#__wo_dock .wo-btn-danger{color:var(--wo-fail);border-color:var(--wo-fail);}" +
             "#__wo_dock #__wo_status{padding:6px 12px;color:var(--wo-muted);font-size:11px;min-height:15px;font-family:Consolas,monospace;}" +
             "#__wo_dock #__wo_scanlog{padding:0 12px 6px;font-size:10.5px;color:var(--wo-muted);max-height:80px;overflow:auto;font-family:Consolas,monospace;}" +
-            "#__wo_dock #__wo_body{flex:1;overflow:auto;padding:8px;display:flex;flex-direction:column;gap:8px;background:var(--wo-bg);color:var(--wo-text);}" +
+            "#__wo_dock #__wo_body{flex:1;min-height:0;overflow:auto;padding:8px;display:flex;flex-direction:column;gap:8px;background:var(--wo-bg);color:var(--wo-text);}" +
             "#__wo_dock .wo-card{background:var(--wo-surface);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);overflow:hidden;}" +
-            "#__wo_dock .__wo_th{background:var(--wo-surface-2);padding:8px 10px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;gap:8px;}" +
+            "#__wo_dock .__wo_th{background:var(--wo-surface-2);padding:6px 10px;min-height:32px;display:flex;align-items:center;gap:8px;cursor:pointer;}" +
             "#__wo_dock .__wo_th:hover{background:var(--wo-field);}" +
-            "#__wo_dock .wo-th-title{display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;font-weight:700;font-size:12px;}" +
-            "#__wo_dock .wo-th-title b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
+            "#__wo_dock .__wo_th:focus-visible{outline:2px solid var(--wo-accent);outline-offset:-2px;}" +
+            "#__wo_dock .wo-th-title{display:flex;align-items:center;gap:6px;flex-shrink:0;font-weight:700;font-size:12px;}" +
+            "#__wo_dock .wo-th-title b{white-space:nowrap;}" +
             "#__wo_dock .wo-th-actions{display:flex;align-items:center;gap:2px;flex-shrink:0;}" +
             "#__wo_dock .wo-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;display:inline-block;}" +
-            "#__wo_dock .__wo_tc{background:transparent;border:1px solid transparent;color:var(--wo-muted);width:24px;height:24px;border-radius:var(--wo-r-ctl);cursor:pointer;font-size:10px;flex-shrink:0;}" +
-            "#__wo_dock .__wo_tc:hover{color:var(--wo-text);}" +
-            "#__wo_dock .__wo_tc:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
             "#__wo_dock .__wo_tx{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);opacity:.5;cursor:pointer;flex-shrink:0;}" +
             "#__wo_dock .__wo_tx:hover,#__wo_dock .__wo_tx:focus-visible{opacity:1;background:var(--wo-field);color:var(--wo-fail);}" +
             "#__wo_dock .__wo_tx:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
             "#__wo_dock .wo-card.is-collapsed .__wo_tb,#__wo_dock .wo-card.is-collapsed .__wo_banner{display:none;}" +
-            "#__wo_dock .wo-chevron{display:inline-block;transition:transform .12s ease;flex-shrink:0;}" +
-            "#__wo_dock .wo-card.is-collapsed .wo-chevron{transform:rotate(-90deg);}" +
-            "@media (prefers-reduced-motion:reduce){#__wo_dock .wo-chevron{transition:none;}}" +
             "#__wo_dock .__wo_banner{padding:7px 10px;font-size:11px;color:var(--wo-accent);background:var(--wo-field);border-bottom:1px solid var(--wo-border);}" +
             "#__wo_dock .__wo_tb{padding:10px;display:flex;flex-direction:column;gap:8px;}" +
             "#__wo_dock .wo-rule{display:flex;flex-direction:column;gap:3px;padding:8px 9px;border-radius:var(--wo-r-ctl);background:var(--wo-surface-2);border-left:4px solid var(--wo-border);}" +
@@ -3063,8 +3058,9 @@
             "#__wo_dock table.wo-table th{text-align:left;padding:6px 8px;white-space:nowrap;color:var(--wo-muted);font-size:10px;text-transform:uppercase;letter-spacing:.03em;background:var(--wo-surface-2);border-bottom:1px solid var(--wo-border);}" +
             "#__wo_dock table.wo-table td{padding:6px 8px;border-bottom:1px solid var(--wo-border);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
             "#__wo_dock table.wo-table tr:last-child td{border-bottom:none;}" +
-            "#__wo_dock .wo-header-msg{margin-left:6px;font-size:10.5px;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px;display:inline-block;vertical-align:middle;}" +
-            "#__wo_dock .__wo_tip_icon{color:var(--wo-muted);font-size:12px;cursor:default;}" +
+            "#__wo_dock .wo-header-msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;font-size:10.5px;font-weight:400;}" +
+            "#__wo_dock .__wo_tip_icon{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:var(--wo-r-ctl);color:var(--wo-muted);cursor:default;flex-shrink:0;}" +
+            "#__wo_dock .__wo_tip_icon:hover{color:var(--wo-text);background:var(--wo-field);}" +
             "#__wo_dock .wo-prescan{background:var(--wo-field);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);padding:8px 10px;font-size:11.5px;color:var(--wo-accent);text-align:center;}" +
             "#__wo_dock .wo-notice{border-radius:var(--wo-r-card);padding:9px 11px;font-size:11.5px;border:1px solid var(--wo-border);background:var(--wo-surface);margin-bottom:6px;}" +
             "#__wo_dock .wo-notice-title{font-weight:700;margin-bottom:4px;}" +
@@ -3098,7 +3094,7 @@
         injectPanelStyles();
         panel = document.createElement('div');
         panel.id = '__wo_dock';
-        panel.style.cssText = 'position:fixed;top:0;right:0;width:' + PANEL_W + 'px;height:100vh;z-index:999999;font-size:12px;display:flex;flex-direction:column;box-shadow:-4px 0 14px rgba(0,0,0,.5);';
+        panel.style.cssText = 'position:fixed;top:0;right:0;width:' + PANEL_W + 'px;height:100vh;overflow:hidden;z-index:999999;font-size:12px;display:flex;flex-direction:column;box-shadow:-4px 0 14px rgba(0,0,0,.5);';
         panel.innerHTML =
             '<div class="wo-head">' +
             '<div class="wo-head-title"><b>Will\'s WO</b><span>Review Tool</span></div>' +
@@ -3242,7 +3238,12 @@
             }
             var tipHtml = '';
             if (group.tooltip) {
-                tipHtml = '<span class="__wo_tip_icon" data-tip="' + group.tooltip.replace(/"/g, '&quot;') + '">ⓘ</span>';
+                tipHtml = '<span class="__wo_tip_icon" data-tip="' + group.tooltip.replace(/"/g, '&quot;') + '">' +
+                    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+                    '<circle cx="8" cy="8" r="6.3" stroke="currentColor" stroke-width="1.3"/>' +
+                    '<line x1="8" y1="7.1" x2="8" y2="11.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' +
+                    '<circle cx="8" cy="4.9" r="0.9" fill="currentColor"/>' +
+                    '</svg></span>';
             }
 
             var bannerHtml = '';
@@ -3264,8 +3265,10 @@
                     if (s === 'pass') {
                         var passLong = resolveMsgList(rule.pass && rule.pass.long, cache);
                         if (passLong.length) {
+                            // Bullets below already say what's going on — the
+                            // colored left rail is the status indicator here,
+                            // no need for a redundant "Passed" label too.
                             subMsgs = passLong;
-                            statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">✓ Passed</span>';
                         } else {
                             var passShort = (rule.pass && rule.pass.short) ? resolveMsg(rule.pass.short, cache) : '';
                             statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">' + (passShort ? '✓ ' + String(passShort).replace(/</g, '&lt;') : '✓ OK') + '</span>';
@@ -3274,7 +3277,6 @@
                         var failLong = resolveMsgList(rule.fail && rule.fail.long, cache);
                         if (failLong.length) {
                             subMsgs = failLong;
-                            statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">✗ Failed</span>';
                         } else {
                             statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">✗ ' + String(res.detail).replace(/</g, '&lt;') + '</span>';
                         }
@@ -3282,7 +3284,6 @@
                         var warnLong = resolveMsgList(rule.warn && rule.warn.long, cache);
                         if (warnLong.length) {
                             subMsgs = warnLong;
-                            statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">⚠ Warning</span>';
                         } else {
                             statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">⚠ ' + String(res.detail).replace(/</g, '&lt;') + '</span>';
                         }
@@ -3298,7 +3299,7 @@
                         return '<div class="wo-rule-msg" style="color:' + subColor + ';">• ' + String(m).replace(/</g, '&lt;') + '</div>';
                     }).join('');
 
-                    rulesHtml += '<div class="wo-rule" style="border-left-color:' + color + ';">' + '<div class="wo-rule-top">' + '<span class="wo-dot" style="background:' + color + ';"></span>' + '<span class="wo-rule-label">' + String(res.label).replace(/</g, '&lt;') + '</span>' + statusLabel + '</div>' + subHtml + '</div>';
+                    rulesHtml += '<div class="wo-rule" style="border-left-color:' + color + ';">' + '<div class="wo-rule-top">' + '<span class="wo-rule-label">' + String(res.label).replace(/</g, '&lt;') + '</span>' + statusLabel + '</div>' + subHtml + '</div>';
                 });
             }
             var bodyHtml = '';
@@ -3451,10 +3452,10 @@
                     headerMsgHtml = '<span class="wo-header-msg" style="color:' + hmColor + ';" title="' + String(hmText).replace(/"/g, '&quot;') + '">' + String(hmText).replace(/</g, '&lt;') + '</span>';
                 }
             }
-            tile.innerHTML = '<div class="__wo_th" draggable="true">' +
-                '<span class="wo-th-title">' + dots + '<b>' + String(group.title).replace(/</g, '&lt;') + '</b>' + headerMsgHtml + '</span>' +
+            tile.innerHTML = '<div class="__wo_th" role="button" tabindex="0" draggable="true" aria-expanded="' + (!collapsed) + '" aria-label="Toggle ' + String(group.title).replace(/"/g, '&quot;') + ' details">' +
+                '<span class="wo-th-title">' + dots + '<b>' + String(group.title).replace(/</g, '&lt;') + '</b></span>' +
+                headerMsgHtml +
                 '<span class="wo-th-actions">' + tipHtml +
-                '<button class="__wo_tc" type="button" aria-expanded="' + (!collapsed) + '" aria-label="Toggle group details" title="Toggle details"><span class="wo-chevron">\u25BE</span></button>' +
                 '<button class="__wo_tx" type="button" title="Hide this group" aria-label="Hide this group">' +
                 '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
                 '<path d="M1.5 8.4C3 5.6 5.4 3.6 8 3.6C10.6 3.6 13 5.6 14.5 8.4C13 11.2 10.6 13.2 8 13.2C5.4 13.2 3 11.2 1.5 8.4Z" stroke="currentColor" stroke-width="1.3"/>' +
@@ -3507,26 +3508,22 @@
                 });
             }
 
-            // Collapse toggle is shared by the dedicated button (always
-            // keyboard-operable, unchanged hook/behavior) and a click
-            // anywhere else on the header (mouse-only convenience \u2014 the
-            // button remains the sole accessible control, so no ARIA role
-            // is needed on the header div itself).
-            var tcBtn = tile.querySelector('.__wo_tc');
+            // The header itself is now the sole collapse control (the old
+            // separate arrow button was removed as redundant) \u2014 it needs
+            // proper button semantics (role/tabindex/aria-expanded, plus a
+            // keydown handler) to stay keyboard- and screen-reader-accessible
+            // now that there's no native <button> to fall back on.
+            var head = tile.querySelector('.__wo_th');
 
             function toggleGroupCollapse() {
                 var nowCollapsed = !tile.classList.contains('is-collapsed');
                 tile.classList.toggle('is-collapsed', nowCollapsed);
-                tcBtn.setAttribute('aria-expanded', String(!nowCollapsed));
+                head.setAttribute('aria-expanded', String(!nowCollapsed));
                 var g2 = getGS();
                 if (!g2[group.id]) g2[group.id] = {};
                 g2[group.id].collapsed = nowCollapsed;
                 saveGS(g2);
             }
-            tcBtn.onclick = function(e) {
-                e.stopPropagation();
-                toggleGroupCollapse();
-            };
             tile.querySelector('.__wo_tx').onclick = function(e) {
                 e.stopPropagation();
                 var g2 = getGS();
@@ -3535,15 +3532,21 @@
                 saveGS(g2);
                 render();
             };
-            var head = tile.querySelector('.__wo_th');
             var headerJustDragged = false;
             head.addEventListener('click', function(e) {
                 if (headerJustDragged) {
                     headerJustDragged = false;
                     return;
                 }
-                if (e.target.closest('.__wo_tx') || e.target.closest('.__wo_tc') || e.target.closest('.__wo_tip_icon')) return;
+                if (e.target.closest('.__wo_tx') || e.target.closest('.__wo_tip_icon')) return;
                 toggleGroupCollapse();
+            });
+            head.addEventListener('keydown', function(e) {
+                if (e.target !== head) return; // ignore keydowns bubbling up from the hide button etc.
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleGroupCollapse();
+                }
             });
             head.addEventListener('dragstart', function(e) {
                 headerJustDragged = true;

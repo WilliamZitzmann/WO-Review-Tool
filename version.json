@@ -1,10 +1,21 @@
 {
-  "latest": "0.20.0",
+  "latest": "0.20.1",
   "channels": {
-    "stable": "0.20.0",
-    "beta": "0.20.0"
+    "stable": "0.20.1",
+    "beta": "0.20.1"
   },
   "versions": [
+    {
+      "version": "0.20.1",
+      "changes": [
+        "Fixed a real layout bug: the panel body was missing a flex min-height, so once content overflowed it grew/squished instead of scrolling — expanding rows no longer clips the status area or loses the scrollbar",
+        "Group headers are now a consistent height whether collapsed or expanded, and content is vertically centered correctly in both states",
+        "Removed the separate collapse arrow button — the whole header is now the collapse control (still fully keyboard-accessible: Tab to it, Enter/Space to toggle)",
+        "The header's inline rule message now pins to the right and gets all the space left over after the title, instead of crowding the title on the left — the title itself is never truncated",
+        "Replaced the tooltip ⓘ glyph with a properly sized/centered icon",
+        "Removed the redundant colored dot and \"Passed\"/\"Failed\"/\"Warning\" label inside each rule row where a message is already shown below it — the colored left edge of the row is the status indicator; kept the label in the few cases where it's the only information (no configured message)"
+      ]
+    },
     {
       "version": "0.20.0",
       "changes": [
