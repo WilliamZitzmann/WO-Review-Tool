@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.8';
+    var TOOL_VERSION = '0.20.9';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -4109,9 +4109,64 @@
         });
     }
 
+    // ── "Signal" visual system for the Setup modal ──
+    // Same palette as the docked panel (injectPanelStyles()), scoped under
+    // #__wo_setup_modal instead of #__wo_dock — deliberately a SEPARATE
+    // stylesheet/scope rather than sharing one, since the modal and the
+    // panel are different DOM subtrees that can be open independently and
+    // neither should be able to leak into the other. Covers the modal shell
+    // (title bar, tab bar, content area) and generic form-control patterns
+    // (button/input/textarea/select) shared by every tab; each tab's own
+    // specific markup is converted separately, tab by tab, since this is a
+    // large surface and — like the docked panel redesign — needs to ship in
+    // reviewable pieces rather than one unverifiable megachange.
+    function injectSetupStyles() {
+        if (document.getElementById('__wo_setup_style')) return;
+        var css = "" +
+            "#__wo_setup_modal,#__wo_setup_modal *{box-sizing:border-box;}" +
+            "#__wo_setup_modal{--wo-bg:#0d1117;--wo-surface:#161b22;--wo-surface-2:#1f2630;--wo-field:#1f2630;--wo-border:#30363d;--wo-text:#f0f3f6;--wo-muted:#9aa4af;--wo-accent:#58a6ff;--wo-on-accent:#04101f;--wo-pass:#3fb950;--wo-fail:#f85149;--wo-warn:#d29922;--wo-r-panel:10px;--wo-r-card:6px;--wo-r-ctl:6px;font-family:'Segoe UI',system-ui,sans-serif;background:var(--wo-bg);color:var(--wo-text);}" +
+            "#__wo_setup_modal .wo-mono{font-family:Consolas,'Cascadia Mono',monospace;}" +
+            // Title bar
+            "#__wo_setup_modal .wo-modal-titlebar{display:flex;justify-content:space-between;align-items:center;cursor:move;user-select:none;padding:10px 12px;background:var(--wo-surface-2);border-radius:var(--wo-r-panel) var(--wo-r-panel) 0 0;border-bottom:1px solid var(--wo-border);margin:-10px -10px 0;}" +
+            "#__wo_setup_modal .wo-modal-title{font-size:13px;font-weight:800;color:#fff;}" +
+            "#__wo_setup_modal .wo-modal-title-actions{display:flex;align-items:center;gap:8px;}" +
+            // Tab bar — grouped into content tabs / management tabs / utility
+            // actions instead of one flat undifferentiated row of 11 buttons.
+            "#__wo_setup_modal .wo-modal-tabs{display:flex;align-items:center;flex-wrap:wrap;gap:14px;padding:8px 4px;border-bottom:1px solid var(--wo-border);margin-bottom:8px;}" +
+            "#__wo_setup_modal .wo-tab-group{display:flex;align-items:center;gap:2px;}" +
+            "#__wo_setup_modal .wo-tab-group-end{margin-left:auto;}" +
+            "#__wo_setup_modal .wo-tab-btn{font:inherit;font-weight:600;font-size:11.5px;padding:6px 11px;border-radius:var(--wo-r-ctl);border:1px solid transparent;background:transparent;color:var(--wo-muted);cursor:pointer;}" +
+            "#__wo_setup_modal .wo-tab-btn:hover{color:var(--wo-text);background:var(--wo-field);}" +
+            "#__wo_setup_modal .wo-tab-btn.is-active{color:var(--wo-on-accent);background:var(--wo-accent);}" +
+            "#__wo_setup_modal .wo-tab-btn:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
+            "#__wo_setup_modal .wo-tab-btn-ghost{font-weight:400;color:var(--wo-muted);font-size:11px;}" +
+            "#__wo_setup_modal .wo-modal-content{flex:1;min-height:0;overflow:auto;padding:2px 4px 8px;}" +
+            // Generic form controls — buttons/inputs/textareas/selects used
+            // throughout every tab's own markup.
+            "#__wo_setup_modal .wo-btn{font:inherit;font-weight:700;font-size:11.5px;padding:6px 12px;border-radius:var(--wo-r-ctl);border:1px solid var(--wo-border);background:var(--wo-surface-2);color:var(--wo-text);cursor:pointer;}" +
+            "#__wo_setup_modal .wo-btn:hover{border-color:var(--wo-accent);}" +
+            "#__wo_setup_modal .wo-btn:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
+            "#__wo_setup_modal .wo-btn-primary{background:var(--wo-accent);color:var(--wo-on-accent);border-color:var(--wo-accent);}" +
+            "#__wo_setup_modal .wo-btn-danger{color:var(--wo-fail);border-color:var(--wo-fail);}" +
+            "#__wo_setup_modal .wo-btn-ghost{background:none;border:1px solid transparent;color:var(--wo-muted);cursor:pointer;font:inherit;font-size:11px;padding:6px 8px;border-radius:var(--wo-r-ctl);}" +
+            "#__wo_setup_modal .wo-btn-ghost:hover{color:var(--wo-text);background:var(--wo-field);}" +
+            "#__wo_setup_modal input[type=text],#__wo_setup_modal input[type=number],#__wo_setup_modal textarea,#__wo_setup_modal select{font:inherit;font-size:11.5px;background:var(--wo-field);color:var(--wo-text);border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:5px 7px;}" +
+            "#__wo_setup_modal input[type=text]:focus,#__wo_setup_modal input[type=number]:focus,#__wo_setup_modal textarea:focus,#__wo_setup_modal select:focus{outline:2px solid var(--wo-accent);outline-offset:-1px;border-color:var(--wo-accent);}" +
+            "#__wo_setup_modal textarea.wo-code{font-family:Consolas,'Cascadia Mono',monospace;background:#010409;color:#7ee787;border-color:var(--wo-border);}" +
+            "#__wo_setup_modal .wo-card{border:1px solid var(--wo-border);border-radius:var(--wo-r-card);padding:9px;margin-bottom:9px;background:var(--wo-surface);}" +
+            "#__wo_setup_modal .wo-card-head{display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer;user-select:none;}" +
+            "#__wo_setup_modal .wo-card-arrow{font-size:9px;color:var(--wo-muted);min-width:9px;}" +
+            "#__wo_setup_modal label{color:var(--wo-muted);}";
+        var styleEl = document.createElement('style');
+        styleEl.id = '__wo_setup_style';
+        styleEl.textContent = css;
+        document.head.appendChild(styleEl);
+    }
+
     function openSetup() {
         var old = document.getElementById('__wo_setup_modal');
         if (old) old.remove();
+        injectSetupStyles();
         var opts = fieldKeyOptions();
         var cfg = JSON.parse(JSON.stringify(getCfg()));
         var scan = JSON.parse(JSON.stringify(getScan()));
@@ -4124,9 +4179,47 @@
         // --- make modal draggable ---
         var modal = document.createElement('div');
         modal.id = '__wo_setup_modal';
-        modal.style.cssText = 'position:fixed;top:3%;left:10%;width:75%;height:92%;background:#111;color:#eee;z-index:9999999;padding:10px;border-radius:8px;box-shadow:0 6px 30px rgba(0,0,0,.7);display:flex;flex-direction:column;font-family:Segoe UI,Arial,sans-serif;font-size:12px;';
-        modal.innerHTML = '<div id="__s_titlebar" style="display:flex;justify-content:space-between;cursor:move;user-select:none;margin-bottom:4px;"><b>Setup</b><button id="__s_close">Close</button></div><div style="margin:6px 0;"> <button id="__s_rules">Rules</button> <button id="__s_groups">Groups &amp; Display</button> <button id="__s_vars">Variables</button> <button id="__s_scan">Scan</button> <button id="__s_profiles">Profiles</button> <button id="__s_settings">Settings</button> <button id="__s_update">Update</button> <button id="__s_guide" style="background:#2a4a6a;color:#7ec8e3;">Guide</button> <button id="__s_exp">Export</button> <button id="__s_imp">Import</button> <button id="__s_save" style="float:right;background:#2ecc71;color:#000;">Save &amp; Apply</button></div><div id="__s_content" style="flex:1;overflow:auto;border-top:1px solid #333;padding-top:8px;"></div>';
+        modal.style.cssText = 'position:fixed;top:3%;left:10%;width:75%;height:92%;z-index:9999999;padding:10px;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);display:flex;flex-direction:column;font-size:12px;';
+        // Tabs are grouped instead of one flat row of 11: content tabs you
+        // actually configure, management tabs, then Guide/Export/Import as
+        // lighter-weight utility actions pushed to the end. Save & Apply
+        // moved into the title bar so it's not lost among 10 other buttons.
+        modal.innerHTML =
+            '<div class="wo-modal-titlebar" id="__s_titlebar">' +
+            '<span class="wo-modal-title">Setup</span>' +
+            '<span class="wo-modal-title-actions">' +
+            '<button id="__s_save" class="wo-btn wo-btn-primary">Save &amp; Apply</button>' +
+            '<button id="__s_close" class="wo-btn-ghost" title="Close" aria-label="Close">✕</button>' +
+            '</span>' +
+            '</div>' +
+            '<div class="wo-modal-tabs">' +
+            '<div class="wo-tab-group">' +
+            '<button id="__s_rules" class="wo-tab-btn">Rules</button>' +
+            '<button id="__s_groups" class="wo-tab-btn">Groups &amp; Display</button>' +
+            '<button id="__s_vars" class="wo-tab-btn">Variables</button>' +
+            '<button id="__s_scan" class="wo-tab-btn">Scan</button>' +
+            '</div>' +
+            '<div class="wo-tab-group">' +
+            '<button id="__s_profiles" class="wo-tab-btn">Profiles</button>' +
+            '<button id="__s_settings" class="wo-tab-btn">Settings</button>' +
+            '<button id="__s_update" class="wo-tab-btn">Update</button>' +
+            '</div>' +
+            '<div class="wo-tab-group wo-tab-group-end">' +
+            '<button id="__s_guide" class="wo-tab-btn wo-tab-btn-ghost">Guide</button>' +
+            '<button id="__s_exp" class="wo-tab-btn wo-tab-btn-ghost">Export</button>' +
+            '<button id="__s_imp" class="wo-tab-btn wo-tab-btn-ghost">Import</button>' +
+            '</div>' +
+            '</div>' +
+            '<div id="__s_content" class="wo-modal-content"></div>';
         document.body.appendChild(modal);
+
+        // Highlights which tab is active — the old flat button row never
+        // indicated this at all.
+        function activateTab(id) {
+            modal.querySelectorAll('.wo-tab-btn').forEach(function(b) {
+                b.classList.toggle('is-active', b.id === id);
+            });
+        }
 
         // drag logic
         (function() {
@@ -4220,7 +4313,7 @@
         };
 
         function formulaBox(obj, prop) {
-            return '<textarea data-f style="width:100%;height:80px;font-family:monospace;font-size:11px;background:#000;color:#0f0;margin-top:4px;">' + String(obj[prop]).replace(/</g, '&lt;') + '</textarea>';
+            return '<textarea data-f class="wo-code" style="width:100%;height:80px;margin-top:6px;">' + String(obj[prop]).replace(/</g, '&lt;') + '</textarea>';
         }
         // ── VARIABLES TAB ──
         function varsTab() {
@@ -4323,25 +4416,28 @@
         function msgSection(rule, key, label, color, includeReturn) {
             var side = rule[key];
             var sec = document.createElement('div');
-            sec.style.cssText = 'border:1px solid ' + color + ';border-radius:5px;padding:6px;margin-top:6px;';
+            sec.className = 'wo-card';
+            sec.style.cssText = 'border-left:3px solid ' + color + ';margin-top:8px;margin-bottom:0;';
             sec.innerHTML =
-                '<div data-coll-header style="display:flex;align-items:center;gap:6px;cursor:pointer;">' +
-                '<span data-coll-arrow style="font-size:10px;color:#aaa;min-width:10px;">▶</span>' +
+                '<div data-coll-header class="wo-card-head">' +
+                '<span data-coll-arrow class="wo-card-arrow">▶</span>' +
                 '<b style="color:' + color + ';font-size:11px;">' + label + '</b>' +
                 '</div>' +
-                '<div data-coll-body style="margin-top:6px;">' +
-                '<label style="color:#aaa;font-size:10px;">Short (one line, shown in the group header):</label><br>' +
-                '<input type="text" data-short value="' + String(side.short || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#333;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;margin-top:2px;">' +
-                '<div style="margin-top:6px;color:#aaa;font-size:10px;">Long — one or more messages, each with its own optional condition. Every matching entry is shown as a bullet list.</div>' +
-                '<div data-long-list style="margin-top:4px;"></div>' +
-                '<button data-add-long type="button" style="font-size:10px;margin-top:2px;">+ Add message</button>' +
+                '<div data-coll-body style="margin-top:7px;">' +
+                '<label style="font-size:10px;">Short (one line, shown in the group header):</label><br>' +
+                '<input type="text" data-short value="' + String(side.short || '').replace(/"/g, '&quot;') + '" style="width:100%;margin-top:2px;">' +
+                '<div style="margin-top:8px;color:var(--wo-muted);font-size:10px;">Long — one or more messages, each with its own optional condition. Every matching entry is shown as a bullet list.</div>' +
+                '<div data-long-list style="margin-top:5px;display:flex;flex-direction:column;gap:5px;"></div>' +
+                '<button data-add-long type="button" class="wo-btn-ghost" style="margin-top:4px;">+ Add message</button>' +
                 (includeReturn ?
-                    ('<div style="margin-top:8px;border-top:1px solid #333;padding-top:6px;">' +
-                        '<label style="color:#aaa;font-size:10px;">Include in return message:</label><br>' +
+                    ('<div style="margin-top:9px;border-top:1px solid var(--wo-border);padding-top:8px;">' +
+                        '<label style="font-size:10px;">Include in return message:</label>' +
+                        '<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:10px;">' +
                         RETURN_MODES.map(function(m) {
-                            return '<label style="margin-right:8px;font-size:10px;color:#ccc;"><input type="radio" name="__ret_' + rule.id + '_' + key + '" data-ret-mode value="' + m[0] + '" ' + ((side.returnMode || 'none') === m[0] ? 'checked' : '') + '> ' + m[1] + '</label>';
+                            return '<label style="font-size:10px;color:var(--wo-text);display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="radio" name="__ret_' + rule.id + '_' + key + '" data-ret-mode value="' + m[0] + '" ' + ((side.returnMode || 'none') === m[0] ? 'checked' : '') + '> ' + m[1] + '</label>';
                         }).join('') +
-                        '<div style="margin-top:4px;"><input type="text" data-ret-custom placeholder="Custom text (supports {{expr}})" value="' + String(side.returnCustom || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;"></div>' +
+                        '</div>' +
+                        '<input type="text" data-ret-custom placeholder="Custom text (supports {{expr}})" value="' + String(side.returnCustom || '').replace(/"/g, '&quot;') + '" style="width:100%;margin-top:6px;">' +
                         '</div>') : '') +
                 '</div>';
 
@@ -4356,11 +4452,11 @@
                 wrap.innerHTML = '';
                 (side.long || []).forEach(function(entry, i) {
                     var row = document.createElement('div');
-                    row.style.cssText = 'display:flex;gap:4px;align-items:center;margin-bottom:4px;';
+                    row.style.cssText = 'display:flex;gap:5px;align-items:center;';
                     row.innerHTML =
-                        '<input type="text" placeholder="Condition (optional)" data-cond value="' + String(entry.condition || '').replace(/"/g, '&quot;') + '" style="flex:1;min-width:0;background:#000;color:#7ec8e3;font-family:monospace;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:10px;">' +
-                        '<input type="text" placeholder="Message (supports {{expr}})" data-msg value="' + String(entry.msg || '').replace(/"/g, '&quot;') + '" style="flex:2;min-width:0;background:#333;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;">' +
-                        '<button data-rm-entry type="button" style="color:#e74c3c;flex-shrink:0;">✕</button>';
+                        '<input type="text" placeholder="Condition (optional)" data-cond value="' + String(entry.condition || '').replace(/"/g, '&quot;') + '" class="wo-mono" style="flex:1;min-width:0;font-size:10px;color:var(--wo-accent);">' +
+                        '<input type="text" placeholder="Message (supports {{expr}})" data-msg value="' + String(entry.msg || '').replace(/"/g, '&quot;') + '" style="flex:2;min-width:0;">' +
+                        '<button data-rm-entry type="button" class="wo-btn-ghost" style="color:var(--wo-fail);flex-shrink:0;padding:4px 7px;">✕</button>';
                     row.querySelector('[data-cond]').oninput = function(e) {
                         entry.condition = e.target.value;
                     };
@@ -4401,22 +4497,22 @@
             content.innerHTML = '';
             cfg.rules.forEach(function(rule, idx) {
                 var box = document.createElement('div');
-                box.style.cssText = 'border:1px solid #333;border-radius:6px;padding:8px;margin-bottom:8px;';
+                box.className = 'wo-card';
                 var fo = opts.fields.map(function(f) {
                     return '<option value="' + f.replace(/"/g, '&quot;') + '">' + f + '</option>';
                 }).join('');
                 box.innerHTML =
-                    '<div data-coll-header style="display:flex;align-items:center;gap:6px;padding:4px 0;">' +
-                    '<span data-coll-arrow style="font-size:10px;color:#aaa;min-width:10px;">▶</span>' +
-                    '<input type="text" value="' + rule.label.replace(/"/g, '&quot;') + '" data-l style="width:65%;background:#222;color:#eee;border:1px solid #333;padding:2px 5px;border-radius:3px;" onclick="event.stopPropagation()"> ' +
-                    '<button data-d style="margin-left:auto;color:#e74c3c;" onclick="event.stopPropagation()">Delete</button>' +
+                    '<div data-coll-header class="wo-card-head">' +
+                    '<span data-coll-arrow class="wo-card-arrow">▶</span>' +
+                    '<input type="text" value="' + rule.label.replace(/"/g, '&quot;') + '" data-l style="flex:1;font-weight:600;" onclick="event.stopPropagation()">' +
+                    '<button data-d type="button" class="wo-btn-ghost" style="color:var(--wo-fail);" onclick="event.stopPropagation()">Delete</button>' +
                     '</div>' +
-                    '<div data-coll-body>' +
-                    '<div style="margin-top:4px;">Insert field: <select data-i><option value="">--</option>' + fo + '</select></div>' +
+                    '<div data-coll-body style="margin-top:7px;">' +
+                    '<div style="margin-bottom:2px;font-size:11px;">Insert field: <select data-i style="max-width:65%;"><option value="">--</option>' + fo + '</select></div>' +
                     formulaBox(rule, 'formula') +
-                    '<div data-msg-sections style="margin-top:6px;"></div>' +
-                    '<div style="margin-top:6px;"><button data-t type="button">Test</button> <span data-r style="margin-left:6px;"></span></div>' +
-                    '<div style="margin-top:4px;color:#777;font-size:10px;">Available: F(field) T(table) rowCount(t) col(t,n) has(t,c,v) hours(str) hoursBetween(a,b) oneOf(v,arr) contains(t,p) matches(t,p) isEmpty(v) notEmpty(v) <b>maxLaborHours(tableTitle,nameCol,hoursCol)</b></div>' +
+                    '<div data-msg-sections></div>' +
+                    '<div style="margin-top:9px;display:flex;align-items:center;gap:9px;"><button data-t type="button" class="wo-btn">Test</button> <span data-r class="wo-mono" style="font-size:10.5px;"></span></div>' +
+                    '<div style="margin-top:7px;color:var(--wo-muted);font-size:10px;line-height:1.5;">Available: F(field) T(table) rowCount(t) col(t,n) has(t,c,v) hours(str) hoursBetween(a,b) oneOf(v,arr) contains(t,p) matches(t,p) isEmpty(v) notEmpty(v) <b>maxLaborHours(tableTitle,nameCol,hoursCol)</b></div>' +
                     '</div>';
 
 
@@ -4424,9 +4520,9 @@
                 makeCollapsible(box, rule.label);
 
                 var msgWrap = box.querySelector('[data-msg-sections]');
-                msgWrap.appendChild(msgSection(rule, 'pass', '✓ Pass', '#2ecc71', false));
-                msgWrap.appendChild(msgSection(rule, 'fail', '✗ Fail — must be fixed', '#e74c3c', true));
-                msgWrap.appendChild(msgSection(rule, 'warn', '⚠ Warn — needs reviewer confirmation', '#FF9800', true));
+                msgWrap.appendChild(msgSection(rule, 'pass', '✓ Pass', '#3fb950', false));
+                msgWrap.appendChild(msgSection(rule, 'fail', '✗ Fail — must be fixed', '#f85149', true));
+                msgWrap.appendChild(msgSection(rule, 'warn', '⚠ Warn — needs reviewer confirmation', '#d29922', true));
 
                 var fa = box.querySelector('[data-f]');
                 box.querySelector('[data-l]').oninput = function(e) {
@@ -4481,6 +4577,8 @@
 
             });
             var b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'wo-btn wo-btn-primary';
             b.textContent = '+ Add Rule';
             b.onclick = function() {
                 cfg.rules.push({
@@ -5632,14 +5730,21 @@
             });
         }
 
-        modal.querySelector('#__s_guide').onclick = guideTab;
-        modal.querySelector('#__s_rules').onclick = rulesTab;
-        modal.querySelector('#__s_vars').onclick = varsTab;
-        modal.querySelector('#__s_groups').onclick = groupsTab;
-        modal.querySelector('#__s_scan').onclick = scanTab;
-        modal.querySelector('#__s_profiles').onclick = profilesTab;
-        modal.querySelector('#__s_settings').onclick = settingsTab;
-        modal.querySelector('#__s_update').onclick = updateTab;
+        function bindTab(id, fn) {
+            modal.querySelector('#' + id).onclick = function() {
+                activateTab(id);
+                fn();
+            };
+        }
+        bindTab('__s_guide', guideTab);
+        bindTab('__s_rules', rulesTab);
+        bindTab('__s_vars', varsTab);
+        bindTab('__s_groups', groupsTab);
+        bindTab('__s_scan', scanTab);
+        bindTab('__s_profiles', profilesTab);
+        bindTab('__s_settings', settingsTab);
+        bindTab('__s_update', updateTab);
+        activateTab('__s_rules');
         rulesTab();
     }
 

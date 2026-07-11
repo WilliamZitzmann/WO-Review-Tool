@@ -1,10 +1,20 @@
 {
-  "latest": "0.20.8",
+  "latest": "0.20.9",
   "channels": {
-    "stable": "0.20.8",
-    "beta": "0.20.8"
+    "stable": "0.20.9",
+    "beta": "0.20.9"
   },
   "versions": [
+    {
+      "version": "0.20.9",
+      "changes": [
+        "Started the Setup window's visual overhaul (phase 2, after the docked panel) — same Signal look, scoped separately so it can't affect the panel. This round: the modal shell (title bar, tabs) and the Rules tab.",
+        "Setup's 11 buttons were one flat undifferentiated row with no indication of which tab was open. Regrouped into content tabs (Rules/Groups/Variables/Scan), management tabs (Profiles/Settings/Update), and lighter-weight utility actions (Guide/Export/Import) — and the active tab is now visibly highlighted.",
+        "Save & Apply moved into the title bar next to Close, instead of a green button lost among the other 10",
+        "Rules tab restyled to match: rule cards, the Pass/Fail/Warn message editor, formula boxes, and buttons all now use the same palette and controls as the docked panel",
+        "Groups, Variables, Scan, Profiles, Settings, Update, and Guide still use the old look for now — converting one tab at a time rather than one large unverifiable change, same approach as the panel redesign."
+      ]
+    },
     {
       "version": "0.20.8",
       "changes": [
