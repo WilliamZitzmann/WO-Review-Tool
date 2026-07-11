@@ -4522,11 +4522,21 @@
 
         var content = modal.querySelector('#__s_content');
         var renamingRuleId = null;
-        modal.addEventListener('click', function() {
-            content.querySelectorAll('.wo-kebab-menu:not([hidden])').forEach(function(m) {
-                m.hidden = true;
-            });
-        });
+        // Rule kebab menus are built fresh on click and position:fixed from
+        // the button's own rect (not absolute-inside-the-card) — a rule
+        // card is overflow:hidden (see .wo-card comment above) so an
+        // absolutely-positioned dropdown anchored inside it gets clipped
+        // away entirely whenever the card is collapsed, which is the
+        // default state. Same pattern as the tab display-mode menu below.
+        var openRuleMenu = null;
+
+        function closeRuleMenu() {
+            if (openRuleMenu) {
+                openRuleMenu.remove();
+                openRuleMenu = null;
+            }
+        }
+        modal.addEventListener('click', closeRuleMenu);
 
         function makeCollapsible(box, headerText, startCollapsed) {
             if (startCollapsed === undefined) startCollapsed = true;
@@ -4791,20 +4801,6 @@
                     '<button data-kebab type="button" class="wo-kebab-btn" aria-label="Rule actions" aria-haspopup="true">' +
                     '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="3" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="8" cy="13" r="1.4"/></svg>' +
                     '</button>' +
-                    '<div data-menu class="wo-kebab-menu" hidden>' +
-                    '<button data-rename type="button" class="wo-kebab-item">' +
-                    '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M11 2.5L13.5 5L5.5 13H3V10.5L11 2.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
-                    '<span>Rename</span>' +
-                    '</button>' +
-                    '<button data-dup type="button" class="wo-kebab-item">' +
-                    '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
-                    '<span>Duplicate</span>' +
-                    '</button>' +
-                    '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger">' +
-                    '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
-                    '<span>Delete</span>' +
-                    '</button>' +
-                    '</div>' +
                     '</span>' +
                     '</div>' +
                     '<div data-coll-body style="margin-top:7px;">' +
@@ -4856,31 +4852,54 @@
                     e.target.value = '';
                 };
                 var kebabBtn = box.querySelector('[data-kebab]');
-                var kebabMenu = box.querySelector('[data-menu]');
                 kebabBtn.onclick = function() {
-                    var willOpen = kebabMenu.hidden;
-                    content.querySelectorAll('.wo-kebab-menu').forEach(function(m) {
-                        m.hidden = true;
-                    });
-                    kebabMenu.hidden = !willOpen;
-                };
-                box.querySelector('[data-rename]').onclick = function() {
-                    kebabMenu.hidden = true;
-                    renamingRuleId = rule.id;
-                    rulesTab();
-                };
-                box.querySelector('[data-dup]').onclick = function() {
-                    kebabMenu.hidden = true;
-                    var copy = JSON.parse(JSON.stringify(rule));
-                    copy.id = 'r_' + Date.now();
-                    copy.label = rule.label + ' (copy)';
-                    cfg.rules.splice(idx + 1, 0, copy);
-                    rulesTab();
-                };
-                box.querySelector('[data-del]').onclick = function() {
-                    kebabMenu.hidden = true;
-                    cfg.rules.splice(idx, 1);
-                    rulesTab();
+                    var wasOpen = !!openRuleMenu;
+                    closeRuleMenu();
+                    if (wasOpen) return;
+                    var menu = document.createElement('div');
+                    menu.className = 'wo-kebab-menu';
+                    menu.innerHTML =
+                        '<button data-rename type="button" class="wo-kebab-item">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M11 2.5L13.5 5L5.5 13H3V10.5L11 2.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
+                        '<span>Rename</span>' +
+                        '</button>' +
+                        '<button data-dup type="button" class="wo-kebab-item">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
+                        '<span>Duplicate</span>' +
+                        '</button>' +
+                        '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
+                        '<span>Delete</span>' +
+                        '</button>';
+                    menu.style.position = 'fixed';
+                    var btnRect = kebabBtn.getBoundingClientRect();
+                    menu.style.top = (btnRect.bottom + 4) + 'px';
+                    menu.style.right = (window.innerWidth - btnRect.right) + 'px';
+                    modal.appendChild(menu);
+                    var mr = menu.getBoundingClientRect();
+                    if (mr.bottom > window.innerHeight) menu.style.top = Math.max(4, btnRect.top - mr.height - 4) + 'px';
+                    menu.querySelector('[data-rename]').onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        renamingRuleId = rule.id;
+                        rulesTab();
+                    };
+                    menu.querySelector('[data-dup]').onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        var copy = JSON.parse(JSON.stringify(rule));
+                        copy.id = 'r_' + Date.now();
+                        copy.label = rule.label + ' (copy)';
+                        cfg.rules.splice(idx + 1, 0, copy);
+                        rulesTab();
+                    };
+                    menu.querySelector('[data-del]').onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        cfg.rules.splice(idx, 1);
+                        rulesTab();
+                    };
+                    openRuleMenu = menu;
                 };
                 box.querySelector('[data-t]').onclick = function() {
                     var res = runFormula(fa.value, cache);
