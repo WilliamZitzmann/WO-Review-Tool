@@ -1,10 +1,16 @@
 {
-  "latest": "0.20.4",
+  "latest": "0.20.5",
   "channels": {
-    "stable": "0.20.4",
-    "beta": "0.20.4"
+    "stable": "0.20.5",
+    "beta": "0.20.5"
   },
   "versions": [
+    {
+      "version": "0.20.5",
+      "changes": [
+        "Found the actual root cause of the scroll/squishing bug (comparing against the pre-redesign code that worked): the scrollable groups container had been changed to display:flex, which turns every group tile into a flex item — and flex items shrink to fit by default instead of the container scrolling past them. Reverted it to plain block layout (what the original working version used), so tiles now overflow and scroll correctly instead of getting squeezed."
+      ]
+    },
     {
       "version": "0.20.4",
       "changes": [

@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.4';
+    var TOOL_VERSION = '0.20.5';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -3018,7 +3018,7 @@
             "#__wo_dock .wo-btn-primary{background:var(--wo-accent);color:var(--wo-on-accent);border-color:var(--wo-accent);}" +
             "#__wo_dock .wo-btn-danger{color:var(--wo-fail);border-color:var(--wo-fail);}" +
             /* #__wo_status/#__wo_scanlog/#__wo_groups/#__wo_footer_area layout is kept fully inline at creation (see buildPanel()) — not duplicated here. */
-            "#__wo_dock .wo-card{background:var(--wo-surface);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);overflow:hidden;}" +
+            "#__wo_dock .wo-card{background:var(--wo-surface);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);overflow:hidden;margin-bottom:8px;}" +
             "#__wo_dock .__wo_th{background:var(--wo-surface-2);padding:6px 10px;min-height:32px;display:flex;align-items:center;gap:8px;cursor:pointer;}" +
             "#__wo_dock .__wo_th:hover{background:var(--wo-field);}" +
             "#__wo_dock .__wo_th:focus-visible{outline:2px solid var(--wo-accent);outline-offset:-2px;}" +
@@ -3059,7 +3059,7 @@
             "#__wo_dock .wo-header-msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;font-size:10.5px;font-weight:400;}" +
             "#__wo_dock .__wo_tip_icon{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:var(--wo-r-ctl);color:var(--wo-muted);cursor:default;flex-shrink:0;}" +
             "#__wo_dock .__wo_tip_icon:hover{color:var(--wo-text);background:var(--wo-field);}" +
-            "#__wo_dock .wo-prescan{background:var(--wo-field);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);padding:8px 10px;font-size:11.5px;color:var(--wo-accent);text-align:center;}" +
+            "#__wo_dock .wo-prescan{background:var(--wo-field);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);padding:8px 10px;font-size:11.5px;color:var(--wo-accent);text-align:center;margin-bottom:8px;}" +
             "#__wo_dock .wo-notice{border-radius:var(--wo-r-card);padding:9px 11px;font-size:11.5px;border:1px solid var(--wo-border);background:var(--wo-surface);margin-bottom:6px;}" +
             "#__wo_dock .wo-notice-title{font-weight:700;margin-bottom:4px;}" +
             "#__wo_dock .wo-notice-body{color:var(--wo-muted);margin-bottom:8px;}" +
@@ -3120,7 +3120,15 @@
             '</div>' +
             '<div id="__wo_status" style="padding:6px 12px;color:#9aa4af;font-size:11px;min-height:15px;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
             '<div id="__wo_scanlog" style="padding:0 12px 6px;font-size:10.5px;color:#9aa4af;max-height:80px;overflow-y:auto!important;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
-            '<div id="__wo_groups" style="flex:1 1 0!important;min-height:0!important;height:0!important;overflow-y:auto!important;padding:8px;display:flex;flex-direction:column;gap:8px;background:#0d1117;color:#f0f3f6;"></div>' +
+            // Deliberately NOT display:flex here. That was the actual root
+            // cause of the squishing bug across every prior attempt: it
+            // turned every child (tile, banner) into a flex item, and flex
+            // items default to flex-shrink:1 — they get squeezed to fit
+            // instead of the container scrolling past them. The pre-overhaul
+            // version was plain block flow (flex:1;overflow:auto, nothing
+            // else) and scrolled correctly; this restores exactly that,
+            // using margin-bottom on the children for spacing instead of gap.
+            '<div id="__wo_groups" style="flex:1 1 0!important;min-height:0!important;height:0!important;overflow-y:auto!important;padding:8px;background:#0d1117;color:#f0f3f6;"></div>' +
             '<div id="__wo_footer_area" style="flex-shrink:0;padding:8px;background:#0d1117;color:#f0f3f6;border-top:1px solid #30363d;"></div>';
         document.body.appendChild(panel);
         bodyEl = panel.querySelector('#__wo_groups');
