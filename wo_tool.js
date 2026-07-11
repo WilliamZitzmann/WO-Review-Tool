@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.11';
+    var TOOL_VERSION = '0.20.12';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -3128,7 +3128,7 @@
             // place — a real chicken-and-egg accessibility trap).
             "#__wo_dock .wo-th-actions{position:relative;display:flex;align-items:center;flex-shrink:0;margin-left:auto;min-height:22px;}" +
             "#__wo_dock .wo-group-badge{display:inline-flex;align-items:center;justify-content:center;min-width:36px;height:18px;padding:0 6px;border-radius:4px;font-size:9px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;box-sizing:border-box;color:#0d1117;transition:opacity .1s;}" +
-            "#__wo_dock .wo-th-icons{display:flex;align-items:center;gap:2px;position:absolute;right:0;top:50%;transform:translateY(-50%);opacity:0;pointer-events:none;transition:opacity .1s;}" +
+            "#__wo_dock .wo-th-icons{display:flex;align-items:center;justify-content:center;gap:2px;position:absolute;right:0;top:50%;transform:translateY(-50%);min-width:36px;box-sizing:border-box;padding:1px 4px;border-radius:999px;background:var(--wo-border);opacity:0;pointer-events:none;transition:opacity .1s;}" +
             "#__wo_dock .__wo_th:hover .wo-th-icons,#__wo_dock .wo-th-actions:focus-within .wo-th-icons{opacity:1;pointer-events:auto;}" +
             "#__wo_dock .__wo_th:hover .wo-group-badge,#__wo_dock .wo-th-actions:focus-within .wo-group-badge{opacity:0;}" +
             "#__wo_dock .__wo_tx{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);cursor:pointer;flex-shrink:0;}" +
@@ -3176,9 +3176,12 @@
             "#__wo_dock .wo-btn-ghost:hover{color:var(--wo-text);}" +
             "#__wo_dock .wo-btn-ghost:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
             "#__wo_dock .wo-qr-wrap{margin-bottom:2px;}" +
-            "#__wo_dock .wo-qr-box{position:relative;background:var(--wo-surface);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);padding:9px 62px 9px 11px;min-height:40px;font-size:11.5px;color:var(--wo-text);word-break:break-word;}" +
+            "#__wo_dock .wo-qr-box{position:relative;background:var(--wo-surface);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);padding:9px 34px 9px 11px;min-height:40px;font-size:11.5px;color:var(--wo-text);word-break:break-word;}" +
             "#__wo_dock .wo-qr-box.wo-empty-text{color:var(--wo-muted);}" +
-            "#__wo_dock .wo-qr-copy{position:absolute;bottom:6px;right:6px;font-size:10.5px;padding:4px 8px;}" +
+            "#__wo_dock .wo-qr-copy{position:absolute;top:6px;right:6px;display:flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border-radius:var(--wo-r-ctl);}" +
+            "#__wo_dock .wo-qr-copy:hover{background:var(--wo-field);color:var(--wo-text);}" +
+            "#__wo_dock .wo-icon-copy,#__wo_dock .wo-icon-check{display:block;}" +
+            "#__wo_dock .wo-icon-check{color:var(--wo-pass);}" +
             "#__wo_dock .wo-action-row{display:flex;gap:7px;margin:8px 0 4px;}" +
             "#__wo_dock .wo-btn-block{flex:1;padding:9px;font-size:12.5px;text-align:center;}" +
             "#__wo_dock .wo-btn-pass{background:var(--wo-pass);color:#04210c;border-color:var(--wo-pass);}" +
@@ -3777,7 +3780,15 @@
             (preScan ?
                 '<i>Scan first to generate return message</i>' :
                 (retMsg ? retMsg.replace(/</g, '&lt;') : '<i>No failed rules — return message will appear here</i>')) +
-            '<button class="__wo_qr_copy wo-btn-ghost wo-qr-copy" type="button" title="Copy to clipboard" aria-label="Copy return message">Copy</button>' +
+            '<button class="__wo_qr_copy wo-btn-ghost wo-qr-copy" type="button" aria-label="Copy return message">' +
+            '<svg class="wo-icon-copy" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+            '<rect x="5.5" y="5.5" width="8" height="8" rx="1.3" stroke="currentColor" stroke-width="1.3"/>' +
+            '<path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/>' +
+            '</svg>' +
+            '<svg class="wo-icon-check" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" style="display:none;">' +
+            '<path d="M3 8.5L6.5 12L13 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>' +
+            '</svg>' +
+            '</button>' +
             '</div>';
 
         footerAreaEl.appendChild(qrWrap);
@@ -3807,7 +3818,9 @@
         actionRow.appendChild(approveBtn);
         footerAreaEl.appendChild(actionRow);
 
-        qrWrap.querySelector('.__wo_qr_copy').onclick = function() {
+        var qrCopyBtn = qrWrap.querySelector('.__wo_qr_copy');
+        attachTooltip(qrCopyBtn, 'Copy to clipboard');
+        qrCopyBtn.onclick = function() {
             var msg = buildReturnMessage();
             if (!msg) {
                 alert('No failed rules to copy.');
@@ -3819,10 +3832,13 @@
             ta.select();
             document.execCommand('copy');
             ta.remove();
-            var btn = qrWrap.querySelector('.__wo_qr_copy');
-            btn.textContent = 'Copied';
+            var copyIcon = qrCopyBtn.querySelector('.wo-icon-copy');
+            var checkIcon = qrCopyBtn.querySelector('.wo-icon-check');
+            copyIcon.style.display = 'none';
+            checkIcon.style.display = '';
             setTimeout(function() {
-                btn.textContent = 'Copy';
+                copyIcon.style.display = '';
+                checkIcon.style.display = 'none';
             }, 1500);
         };
 
@@ -4193,11 +4209,15 @@
             "#__wo_setup_modal .wo-modal-tabs::after{content:'';position:absolute;left:4px;right:4px;bottom:0;height:1px;background:var(--wo-border);z-index:0;}" +
             "#__wo_setup_modal .wo-tab-group{display:flex;align-items:flex-end;position:relative;z-index:1;}" +
             "#__wo_setup_modal .wo-tab-group-end{margin-left:auto;}" +
-            "#__wo_setup_modal .wo-tab-btn{position:relative;font:inherit;font-weight:600;font-size:11.5px;padding:7px 11px 8px;margin-bottom:-1px;border-radius:7px 7px 0 0;border:none;border-right:1px solid var(--wo-border);background:transparent;color:var(--wo-muted);cursor:pointer;}" +
+            "#__wo_setup_modal .wo-tab-btn{position:relative;display:inline-flex;align-items:center;gap:6px;font:inherit;font-weight:600;font-size:11.5px;padding:7px 11px 8px;margin-bottom:-1px;border-radius:7px 7px 0 0;border:none;border-right:1px solid var(--wo-border);background:transparent;color:var(--wo-muted);cursor:pointer;}" +
             "#__wo_setup_modal .wo-tab-btn:last-child{border-right:none;}" +
             "#__wo_setup_modal .wo-tab-btn:hover{color:var(--wo-text);background:var(--wo-field);}" +
             "#__wo_setup_modal .wo-tab-btn:focus-visible{outline:2px solid var(--wo-accent);outline-offset:-1px;z-index:3;}" +
             "#__wo_setup_modal .wo-tab-btn-ghost{font-weight:400;color:var(--wo-muted);font-size:11px;}" +
+            "#__wo_setup_modal .wo-tab-icon{flex-shrink:0;display:block;}" +
+            "#__wo_setup_modal .wo-tab-btn.wo-tab-mode-icon .wo-tab-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;}" +
+            "#__wo_setup_modal .wo-tab-btn.wo-tab-mode-icon{padding-left:9px;padding-right:9px;gap:0;}" +
+            "#__wo_setup_modal .wo-tab-btn.wo-tab-mode-word .wo-tab-icon{display:none;}" +
             "#__wo_setup_modal .wo-tab-btn.is-active,#__wo_setup_modal .wo-tab-btn:has(+ .wo-tab-btn.is-active){border-right-color:transparent;}" +
             "#__wo_setup_modal .wo-tab-btn.is-active{z-index:2;color:var(--wo-text);background:var(--wo-surface);}" +
             "#__wo_setup_modal .wo-tab-btn.is-active::before,#__wo_setup_modal .wo-tab-btn.is-active::after{content:'';position:absolute;bottom:0;width:7px;height:7px;}" +
@@ -4231,6 +4251,15 @@
             "#__wo_setup_modal .wo-card-head:hover{background:var(--wo-field);}" +
             "#__wo_setup_modal .wo-card>[data-coll-body]{padding:0 10px 10px;}" +
             "#__wo_setup_modal .wo-card-arrow{font-size:9px;color:var(--wo-muted);min-width:9px;}" +
+            "#__wo_setup_modal .wo-rule-title{flex:1;min-width:0;font-weight:700;font-size:12px;color:var(--wo-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}" +
+            "#__wo_setup_modal .wo-rule-title-input{flex:1;min-width:0;font:inherit;font-weight:700;font-size:12px;background:var(--wo-field);border:1px solid var(--wo-accent);border-radius:var(--wo-r-ctl);padding:4px 7px;color:var(--wo-text);}" +
+            "#__wo_setup_modal .wo-kebab-wrap{position:relative;flex-shrink:0;margin-left:auto;}" +
+            "#__wo_setup_modal .wo-kebab-btn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);cursor:pointer;}" +
+            "#__wo_setup_modal .wo-kebab-btn:hover,#__wo_setup_modal .wo-kebab-btn:focus-visible{color:var(--wo-text);background:var(--wo-border);}" +
+            "#__wo_setup_modal .wo-kebab-menu{position:absolute;right:0;top:calc(100% + 4px);min-width:150px;background:var(--wo-surface-2);border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);box-shadow:0 6px 18px rgba(0,0,0,.45);padding:4px;z-index:20;}" +
+            "#__wo_setup_modal .wo-kebab-item{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border:none;background:none;color:var(--wo-text);font:inherit;font-size:11.5px;text-align:left;border-radius:var(--wo-r-ctl);cursor:pointer;}" +
+            "#__wo_setup_modal .wo-kebab-item:hover{background:var(--wo-field);}" +
+            "#__wo_setup_modal .wo-kebab-item-danger{color:var(--wo-fail);}" +
             "#__wo_setup_modal label{color:var(--wo-muted);}" +
             "#__wo_setup_modal .wo-resize-handle{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;color:var(--wo-muted);z-index:5;}" +
             "#__wo_setup_modal .wo-resize-handle:hover{color:var(--wo-text);}" +
@@ -4258,6 +4287,31 @@
         var modal = document.createElement('div');
         modal.id = '__wo_setup_modal';
         modal.style.cssText = 'position:fixed;top:3%;left:10%;width:75%;height:92%;z-index:9999999;padding:10px;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);display:flex;flex-direction:column;font-size:12px;';
+        // Minimalist line-icon per tab, keyed by the same id used for the
+        // per-tab display-mode override (icon-only / word-only / both).
+        var TAB_ICONS = {
+            rules: '<path d="M2.6 4.3L3.7 5.4L5.6 3.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M7.6 4.1H13.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M2.6 8.3L3.7 9.4L5.6 7.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M7.6 8.1H13.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M2.6 12.3L3.7 13.4L5.6 11.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M7.6 12.1H13.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
+            groups: '<rect x="2.5" y="2.5" width="7" height="7" rx="1.2" stroke="currentColor" stroke-width="1.3"/><rect x="6.5" y="6.5" width="7" height="7" rx="1.2" stroke="currentColor" stroke-width="1.3"/>',
+            vars: '<path d="M5.6 2.8C4.1 2.8 3.7 3.6 3.7 4.6V6.4C3.7 7.1 3.4 7.5 2.6 7.7V8.3C3.4 8.5 3.7 8.9 3.7 9.6V11.4C3.7 12.4 4.1 13.2 5.6 13.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M10.4 2.8C11.9 2.8 12.3 3.6 12.3 4.6V6.4C12.3 7.1 12.6 7.5 13.4 7.7V8.3C12.6 8.5 12.3 8.9 12.3 9.6V11.4C12.3 12.4 11.9 13.2 10.4 13.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>',
+            scan: '<path d="M2.5 5.5V3.5C2.5 2.9 2.9 2.5 3.5 2.5H5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M10.5 2.5H12.5C13.1 2.5 13.5 2.9 13.5 3.5V5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M13.5 10.5V12.5C13.5 13.1 13.1 13.5 12.5 13.5H10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M5.5 13.5H3.5C2.9 13.5 2.5 13.1 2.5 12.5V10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="8" r="1.6" stroke="currentColor" stroke-width="1.3"/>',
+            profiles: '<circle cx="8" cy="5.3" r="2.3" stroke="currentColor" stroke-width="1.3"/><path d="M3 13.2C3.6 10.6 5.5 9.3 8 9.3C10.5 9.3 12.4 10.6 13 13.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
+            settings: '<circle cx="8" cy="8" r="2.1" stroke="currentColor" stroke-width="1.3"/><path d="M8 2.5V4M8 12V13.5M13.5 8H12M4 8H2.5M11.7 4.3L10.6 5.4M5.4 10.6L4.3 11.7M11.7 11.7L10.6 10.6M5.4 5.4L4.3 4.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
+            update: '<path d="M12.8 5.2A5 5 0 1 0 13.5 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M12.8 2.5V5.2H10.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
+            guide: '<path d="M2.5 3.5C2.5 3 2.9 2.7 3.4 2.8C5 3 6.5 3.6 8 4.6C9.5 3.6 11 3 12.6 2.8C13.1 2.7 13.5 3 13.5 3.5V11.5C13.5 12 13.1 12.3 12.6 12.4C11 12.6 9.5 13.2 8 14.2C6.5 13.2 5 12.6 3.4 12.4C2.9 12.3 2.5 12 2.5 11.5V3.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 4.6V14.2" stroke="currentColor" stroke-width="1.2"/>',
+            exp: '<path d="M8 10V2.5M8 2.5L5.5 5M8 2.5L10.5 5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.5 10V12.5C2.5 13.1 2.9 13.5 3.5 13.5H12.5C13.1 13.5 13.5 13.1 13.5 12.5V10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
+            imp: '<path d="M8 2.5V10M8 10L5.5 7.5M8 10L10.5 7.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.5 10V12.5C2.5 13.1 2.9 13.5 3.5 13.5H12.5C13.1 13.5 13.5 13.1 13.5 12.5V10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>'
+        };
+        var tabModes = st.tabDisplayModes || {};
+        function tabModeClass(key) {
+            var m = tabModes[key];
+            return m === 'icon' ? ' wo-tab-mode-icon' : (m === 'word' ? ' wo-tab-mode-word' : '');
+        }
+        function tabBtn(id, key, label, extraClass) {
+            var esc = String(label).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+            return '<button id="' + id + '" class="wo-tab-btn' + (extraClass ? ' ' + extraClass : '') + tabModeClass(key) + '" data-tab-key="' + key + '" data-tab-label="' + esc.replace(/"/g, '&quot;') + '">' +
+                '<svg class="wo-tab-icon" width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">' + TAB_ICONS[key] + '</svg>' +
+                '<span class="wo-tab-label">' + esc + '</span></button>';
+        }
         // Tabs are grouped instead of one flat row of 11: content tabs you
         // actually configure, management tabs, then Guide/Export/Import as
         // lighter-weight utility actions pushed to the end. Save & Apply
@@ -4272,20 +4326,20 @@
             '</div>' +
             '<div class="wo-modal-tabs">' +
             '<div class="wo-tab-group">' +
-            '<button id="__s_rules" class="wo-tab-btn">Rules</button>' +
-            '<button id="__s_groups" class="wo-tab-btn">Groups &amp; Display</button>' +
-            '<button id="__s_vars" class="wo-tab-btn">Variables</button>' +
-            '<button id="__s_scan" class="wo-tab-btn">Scan</button>' +
+            tabBtn('__s_rules', 'rules', 'Rules') +
+            tabBtn('__s_groups', 'groups', 'Groups & Display') +
+            tabBtn('__s_vars', 'vars', 'Variables') +
+            tabBtn('__s_scan', 'scan', 'Scan') +
             '</div>' +
             '<div class="wo-tab-group">' +
-            '<button id="__s_profiles" class="wo-tab-btn">Profiles</button>' +
-            '<button id="__s_settings" class="wo-tab-btn">Settings</button>' +
-            '<button id="__s_update" class="wo-tab-btn">Update</button>' +
+            tabBtn('__s_profiles', 'profiles', 'Profiles') +
+            tabBtn('__s_settings', 'settings', 'Settings') +
+            tabBtn('__s_update', 'update', 'Update') +
             '</div>' +
             '<div class="wo-tab-group wo-tab-group-end">' +
-            '<button id="__s_guide" class="wo-tab-btn wo-tab-btn-ghost">Guide</button>' +
-            '<button id="__s_exp" class="wo-tab-btn wo-tab-btn-ghost">Export</button>' +
-            '<button id="__s_imp" class="wo-tab-btn wo-tab-btn-ghost">Import</button>' +
+            tabBtn('__s_guide', 'guide', 'Guide', 'wo-tab-btn-ghost') +
+            tabBtn('__s_exp', 'exp', 'Export', 'wo-tab-btn-ghost') +
+            tabBtn('__s_imp', 'imp', 'Import', 'wo-tab-btn-ghost') +
             '</div>' +
             '</div>' +
             '<div id="__s_content" class="wo-modal-content"></div>' +
@@ -4295,6 +4349,79 @@
             '</svg></div>';
         document.body.appendChild(modal);
         attachTooltip(modal.querySelector('#__s_resize'), 'Drag to resize');
+        modal.querySelectorAll('.wo-tab-btn[data-tab-key]').forEach(function(b) {
+            attachTooltip(b, b.getAttribute('data-tab-label'));
+        });
+
+        // Right-click a tab to pick how it's displayed: icon only, word
+        // only, or icon + word. Persisted per-tab straight to localStorage
+        // (not deferred to Save & Apply) since it's a pure UI preference
+        // with no config side effects — deferring it would make the menu
+        // feel broken (pick a mode, nothing visibly happens).
+        function applyTabModeClasses() {
+            modal.querySelectorAll('.wo-tab-btn[data-tab-key]').forEach(function(b) {
+                b.classList.remove('wo-tab-mode-icon', 'wo-tab-mode-word');
+                var m = tabModes[b.getAttribute('data-tab-key')];
+                if (m === 'icon') b.classList.add('wo-tab-mode-icon');
+                else if (m === 'word') b.classList.add('wo-tab-mode-word');
+            });
+        }
+
+        function setTabMode(key, mode) {
+            if (mode === 'both') delete tabModes[key];
+            else tabModes[key] = mode;
+            st.tabDisplayModes = tabModes;
+            var liveSt = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+            liveSt.tabDisplayModes = tabModes;
+            localStorage.setItem('__wo_settings', JSON.stringify(liveSt));
+            applyTabModeClasses();
+        }
+
+        var tabCtxMenu = null;
+
+        function closeTabCtxMenu() {
+            if (tabCtxMenu) {
+                tabCtxMenu.remove();
+                tabCtxMenu = null;
+            }
+        }
+        modal.addEventListener('contextmenu', function(e) {
+            var btn = e.target.closest('.wo-tab-btn[data-tab-key]');
+            if (!btn) return;
+            e.preventDefault();
+            closeTabCtxMenu();
+            var key = btn.getAttribute('data-tab-key');
+            var current = tabModes[key] || 'both';
+            var options = [
+                ['icon', 'Icon'],
+                ['word', 'Word'],
+                ['both', 'Icon + Word']
+            ];
+            var menu = document.createElement('div');
+            menu.className = 'wo-kebab-menu';
+            menu.style.position = 'fixed';
+            menu.style.right = 'auto';
+            menu.style.left = e.clientX + 'px';
+            menu.style.top = e.clientY + 'px';
+            menu.innerHTML = options.map(function(o) {
+                return '<button type="button" class="wo-kebab-item" data-mode="' + o[0] + '">' +
+                    '<span style="width:12px;display:inline-block;">' + (current === o[0] ? '✓' : '') + '</span>' +
+                    '<span>' + o[1] + '</span></button>';
+            }).join('');
+            modal.appendChild(menu);
+            var r = menu.getBoundingClientRect();
+            if (r.right > window.innerWidth) menu.style.left = Math.max(4, window.innerWidth - r.width - 4) + 'px';
+            if (r.bottom > window.innerHeight) menu.style.top = Math.max(4, window.innerHeight - r.height - 4) + 'px';
+            menu.querySelectorAll('[data-mode]').forEach(function(item) {
+                item.onclick = function(ev) {
+                    ev.stopPropagation();
+                    setTabMode(key, item.getAttribute('data-mode'));
+                    closeTabCtxMenu();
+                };
+            });
+            tabCtxMenu = menu;
+        });
+        modal.addEventListener('click', closeTabCtxMenu);
 
         // Resize logic — custom handle (bottom-right corner) rather than
         // native CSS resize:both, for the same reason the drag-to-move uses
@@ -4394,6 +4521,12 @@
         })();
 
         var content = modal.querySelector('#__s_content');
+        var renamingRuleId = null;
+        modal.addEventListener('click', function() {
+            content.querySelectorAll('.wo-kebab-menu:not([hidden])').forEach(function(m) {
+                m.hidden = true;
+            });
+        });
 
         function makeCollapsible(box, headerText, startCollapsed) {
             if (startCollapsed === undefined) startCollapsed = true;
@@ -4413,6 +4546,7 @@
         }
 
         modal.querySelector('#__s_close').onclick = function() {
+            closeTabCtxMenu();
             modal.remove();
         };
         modal.querySelector('#__s_save').onclick = function() {
@@ -4420,6 +4554,7 @@
             saveScan(scan);
             saveSettingsCfg(st);
             applyHotkey();
+            closeTabCtxMenu();
             modal.remove();
             render();
             checkForUpdate();
@@ -4645,11 +4780,32 @@
                 var fo = opts.fields.map(function(f) {
                     return '<option value="' + f.replace(/"/g, '&quot;') + '">' + f + '</option>';
                 }).join('');
+                var isRenaming = renamingRuleId === rule.id;
+                var titleHtml = isRenaming ?
+                    '<input type="text" value="' + rule.label.replace(/"/g, '&quot;') + '" data-l class="wo-rule-title-input" onclick="event.stopPropagation()">' :
+                    '<span class="wo-rule-title">' + String(rule.label).replace(/</g, '&lt;') + '</span>';
                 box.innerHTML =
                     '<div data-coll-header class="wo-card-head">' +
-                    '<span data-coll-arrow class="wo-card-arrow">▶</span>' +
-                    '<input type="text" value="' + rule.label.replace(/"/g, '&quot;') + '" data-l style="flex:1;font-weight:600;" onclick="event.stopPropagation()">' +
-                    '<button data-d type="button" class="wo-btn-ghost" style="color:var(--wo-fail);" onclick="event.stopPropagation()">Delete</button>' +
+                    titleHtml +
+                    '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
+                    '<button data-kebab type="button" class="wo-kebab-btn" aria-label="Rule actions" aria-haspopup="true">' +
+                    '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="3" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="8" cy="13" r="1.4"/></svg>' +
+                    '</button>' +
+                    '<div data-menu class="wo-kebab-menu" hidden>' +
+                    '<button data-rename type="button" class="wo-kebab-item">' +
+                    '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M11 2.5L13.5 5L5.5 13H3V10.5L11 2.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
+                    '<span>Rename</span>' +
+                    '</button>' +
+                    '<button data-dup type="button" class="wo-kebab-item">' +
+                    '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
+                    '<span>Duplicate</span>' +
+                    '</button>' +
+                    '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger">' +
+                    '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
+                    '<span>Delete</span>' +
+                    '</button>' +
+                    '</div>' +
+                    '</span>' +
                     '</div>' +
                     '<div data-coll-body style="margin-top:7px;">' +
                     '<div style="margin-bottom:2px;font-size:11px;">Insert field: <select data-i style="max-width:65%;"><option value="">--</option>' + fo + '</select></div>' +
@@ -4669,9 +4825,24 @@
                 msgWrap.appendChild(msgSection(rule, 'warn', '⚠ Warn — needs reviewer confirmation', '#d29922', true));
 
                 var fa = box.querySelector('[data-f]');
-                box.querySelector('[data-l]').oninput = function(e) {
-                    rule.label = e.target.value;
-                };
+                var titleInput = box.querySelector('[data-l]');
+                if (titleInput) {
+                    titleInput.oninput = function(e) {
+                        rule.label = e.target.value;
+                    };
+                    titleInput.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            titleInput.blur();
+                        }
+                    });
+                    titleInput.addEventListener('blur', function() {
+                        renamingRuleId = null;
+                        rulesTab();
+                    });
+                    titleInput.focus();
+                    titleInput.select();
+                }
                 fa.oninput = function() {
                     rule.formula = fa.value;
                 };
@@ -4684,7 +4855,30 @@
                     rule.formula = fa.value;
                     e.target.value = '';
                 };
-                box.querySelector('[data-d]').onclick = function() {
+                var kebabBtn = box.querySelector('[data-kebab]');
+                var kebabMenu = box.querySelector('[data-menu]');
+                kebabBtn.onclick = function() {
+                    var willOpen = kebabMenu.hidden;
+                    content.querySelectorAll('.wo-kebab-menu').forEach(function(m) {
+                        m.hidden = true;
+                    });
+                    kebabMenu.hidden = !willOpen;
+                };
+                box.querySelector('[data-rename]').onclick = function() {
+                    kebabMenu.hidden = true;
+                    renamingRuleId = rule.id;
+                    rulesTab();
+                };
+                box.querySelector('[data-dup]').onclick = function() {
+                    kebabMenu.hidden = true;
+                    var copy = JSON.parse(JSON.stringify(rule));
+                    copy.id = 'r_' + Date.now();
+                    copy.label = rule.label + ' (copy)';
+                    cfg.rules.splice(idx + 1, 0, copy);
+                    rulesTab();
+                };
+                box.querySelector('[data-del]').onclick = function() {
+                    kebabMenu.hidden = true;
                     cfg.rules.splice(idx, 1);
                     rulesTab();
                 };

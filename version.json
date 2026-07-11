@@ -1,10 +1,21 @@
 {
-  "latest": "0.20.11",
+  "latest": "0.20.12",
   "channels": {
-    "stable": "0.20.11",
-    "beta": "0.20.11"
+    "stable": "0.20.12",
+    "beta": "0.20.12"
   },
   "versions": [
+    {
+      "version": "0.20.12",
+      "changes": [
+        "Return message box: text now uses the full width of the box — the text-only Copy button (which reserved 62px of padding) is now a minimalist icon button that briefly swaps to a checkmark on copy",
+        "Header hover area (tooltip/hide icon): now shows as a grey pill in the same spot the status badge occupies, with the icon(s) evenly centered inside it — a single icon (no tooltip configured) now centers in the pill instead of sitting off to one side",
+        "Rules tab: a collapsed rule no longer looks like a bordered title box nested inside a bigger card — the whole header now expands/collapses like a main-panel group header, with no separate arrow",
+        "Rules tab: replaced the Delete button with a ⋮ menu (Rename / Duplicate / Delete). Clicking a rule's row only expands or collapses it now; Rename is the only way to edit the title, and it opens the title as an editable field in place",
+        "Every Setup tab now has a small SVG icon next to its label",
+        "Right-click any Setup tab to choose how it displays: Icon, Word, or Icon + Word — saved per tab, applies immediately"
+      ]
+    },
     {
       "version": "0.20.11",
       "changes": [
