@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.13';
+    var TOOL_VERSION = '0.20.14';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -4218,11 +4218,11 @@
             // A thin divider separates adjacent SIBLING tabs, except on
             // either side of the active tab, where the tab's own
             // background already does the separating.
-            "#__wo_setup_modal .wo-modal-tabs{position:relative;display:flex;align-items:flex-end;flex-wrap:wrap;gap:8px;padding:8px 4px 0;}" +
+            "#__wo_setup_modal .wo-modal-tabs{position:relative;display:flex;align-items:flex-end;flex-wrap:nowrap;gap:8px;padding:8px 4px 0;}" +
             "#__wo_setup_modal .wo-modal-tabs::after{content:'';position:absolute;left:4px;right:4px;bottom:0;height:1px;background:var(--wo-border);z-index:0;}" +
-            "#__wo_setup_modal .wo-tab-group{display:flex;align-items:flex-end;position:relative;z-index:1;}" +
+            "#__wo_setup_modal .wo-tab-group{display:flex;align-items:flex-end;position:relative;z-index:1;flex-shrink:0;}" +
             "#__wo_setup_modal .wo-tab-group-end{margin-left:auto;}" +
-            "#__wo_setup_modal .wo-tab-btn{position:relative;display:inline-flex;align-items:center;gap:6px;font:inherit;font-weight:600;font-size:11.5px;padding:7px 11px 8px;margin-bottom:-1px;border-radius:7px 7px 0 0;border:none;border-right:1px solid var(--wo-border);background:transparent;color:var(--wo-muted);cursor:pointer;}" +
+            "#__wo_setup_modal .wo-tab-btn{position:relative;display:inline-flex;align-items:center;gap:6px;flex-shrink:0;font:inherit;font-weight:600;font-size:11.5px;padding:7px 11px 8px;margin-bottom:-1px;border-radius:7px 7px 0 0;border:none;border-right:1px solid var(--wo-border);background:transparent;color:var(--wo-muted);cursor:pointer;}" +
             "#__wo_setup_modal .wo-tab-btn:last-child{border-right:none;}" +
             "#__wo_setup_modal .wo-tab-btn:hover{color:var(--wo-text);background:var(--wo-field);}" +
             "#__wo_setup_modal .wo-tab-btn:focus-visible{outline:2px solid var(--wo-accent);outline-offset:-1px;z-index:3;}" +
@@ -4375,11 +4375,16 @@
             });
         });
 
-        // Right-click a tab to pick how it's displayed: icon only, word
-        // only, or icon + word. Persisted per-tab straight to localStorage
-        // (not deferred to Save & Apply) since it's a pure UI preference
-        // with no config side effects — deferring it would make the menu
-        // feel broken (pick a mode, nothing visibly happens).
+        // Right-click a tab to pick how it's displayed: auto (default —
+        // participates in the responsive shrink-to-fit below), icon only,
+        // word only, or icon + word. Persisted per-tab straight to
+        // localStorage (not deferred to Save & Apply) since it's a pure UI
+        // preference with no config side effects — deferring it would make
+        // the menu feel broken (pick a mode, nothing visibly happens).
+        // Icon/Word pins are locked — they never auto-adjust, even if that
+        // means the row overflows. An Icon+Word pin is also locked as a
+        // preference, but the shrink-to-fit pass below still treats it as a
+        // last-resort candidate so the row can always fit.
         function applyTabModeClasses() {
             modal.querySelectorAll('.wo-tab-btn[data-tab-key]').forEach(function(b) {
                 b.classList.remove('wo-tab-mode-icon', 'wo-tab-mode-word');
@@ -4390,14 +4395,61 @@
         }
 
         function setTabMode(key, mode) {
-            if (mode === 'both') delete tabModes[key];
+            if (mode === 'auto') delete tabModes[key];
             else tabModes[key] = mode;
             st.tabDisplayModes = tabModes;
             var liveSt = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
             liveSt.tabDisplayModes = tabModes;
             localStorage.setItem('__wo_settings', JSON.stringify(liveSt));
-            applyTabModeClasses();
+            applyResponsiveTabFit(true);
         }
+
+        // Keeps the whole tab bar on one row as the modal is resized
+        // narrower. Priority = left-to-right tab order (Rules highest,
+        // Import lowest) — the lowest-priority AUTO tab shrinks to
+        // icon-only first, escalating toward higher-priority ones only if
+        // still not enough room. Tabs manually pinned to Icon or Word are
+        // skipped entirely (locked, per explicit user choice, even if that
+        // means overflow). Tabs manually pinned to Icon+Word are only
+        // touched as an absolute last resort, after every auto tab is
+        // already shrunk. Always recomputes from the clean pinned-only
+        // baseline so growing the modal back out correctly un-shrinks tabs.
+        var lastTabFitWidth = -1;
+
+        function applyResponsiveTabFit(force) {
+            var bar = modal.querySelector('.wo-modal-tabs');
+            if (!bar) return;
+            // Shrinking a tab to icon-only changes the bar's content height
+            // (align-items:flex-end means the tallest tab sets it), and a
+            // height change on the observed element re-fires the
+            // ResizeObserver even though nothing about available WIDTH
+            // changed. Re-running unconditionally on every fire would reset
+            // to full width then immediately re-shrink, flipping the height
+            // back — a self-triggering loop. Only recompute when the width
+            // actually changed, or when a pin was just edited (force=true).
+            if (!force && bar.clientWidth === lastTabFitWidth) return;
+            lastTabFitWidth = bar.clientWidth;
+            applyTabModeClasses();
+            var tabs = Array.prototype.slice.call(modal.querySelectorAll('.wo-tab-btn[data-tab-key]'));
+            var autoCandidates = tabs.filter(function(b) {
+                return !tabModes[b.getAttribute('data-tab-key')];
+            }).reverse();
+            var bothPinnedCandidates = tabs.filter(function(b) {
+                return tabModes[b.getAttribute('data-tab-key')] === 'both';
+            }).reverse();
+            var queue = autoCandidates.concat(bothPinnedCandidates);
+            var guard = 0;
+            while (bar.scrollWidth > bar.clientWidth + 1 && queue.length && guard < tabs.length) {
+                var next = queue.shift();
+                next.classList.add('wo-tab-mode-icon');
+                guard++;
+            }
+        }
+        var tabBarResizeObserver = new ResizeObserver(function() {
+            applyResponsiveTabFit();
+        });
+        tabBarResizeObserver.observe(modal.querySelector('.wo-modal-tabs'));
+        applyResponsiveTabFit(true);
 
         var tabCtxMenu = null;
 
@@ -4413,8 +4465,9 @@
             e.preventDefault();
             closeTabCtxMenu();
             var key = btn.getAttribute('data-tab-key');
-            var current = tabModes[key] || 'both';
+            var current = tabModes[key] || 'auto';
             var options = [
+                ['auto', 'Auto', '<path d="M9 3H13V7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 13H3V9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 3L9 7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M3 13L7 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>'],
                 ['icon', 'Icon', '<rect x="3" y="3" width="10" height="10" rx="2.2" stroke="currentColor" stroke-width="1.3"/>'],
                 ['word', 'Word', '<path d="M3 5H13M3 8H13M3 11H9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>'],
                 ['both', 'Icon + Word', '<rect x="2" y="4.3" width="6.4" height="6.4" rx="1.4" stroke="currentColor" stroke-width="1.2"/><path d="M10.5 5.3H14M10.5 8H14M10.5 10.7H12.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>']
@@ -4582,6 +4635,8 @@
 
         modal.querySelector('#__s_close').onclick = function() {
             closeTabCtxMenu();
+            closeRuleMenu();
+            tabBarResizeObserver.disconnect();
             modal.remove();
         };
         modal.querySelector('#__s_save').onclick = function() {
@@ -4590,6 +4645,8 @@
             saveSettingsCfg(st);
             applyHotkey();
             closeTabCtxMenu();
+            closeRuleMenu();
+            tabBarResizeObserver.disconnect();
             modal.remove();
             render();
             checkForUpdate();

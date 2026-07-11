@@ -1,10 +1,17 @@
 {
-  "latest": "0.20.13",
+  "latest": "0.20.14",
   "channels": {
-    "stable": "0.20.13",
-    "beta": "0.20.13"
+    "stable": "0.20.14",
+    "beta": "0.20.14"
   },
   "versions": [
+    {
+      "version": "0.20.14",
+      "changes": [
+        "Setup tabs now always fit on one row. Right-click a tab for a 4th option, Auto (in addition to Icon / Word / Icon + Word) — Auto tabs shrink to icon-only first as the modal narrows, lowest-priority (rightmost) tab first, escalating toward Rules only if still needed. Icon/Word pins are locked and never auto-adjust (even if that causes overflow); an Icon + Word pin is touched only as an absolute last resort.",
+        "This round (v0.20.13-0.20.14) is not yet verified live in a browser from this environment — please test on both Google and IBM Maximo domains, especially: does IBM now render the Setup modal with proper styling (Chrome-style tabs, dark menus, resize handle bottom-right)? Does resizing the modal shrink/grow tabs smoothly with no flicker or console errors? Does the Rules kebab menu open correctly on a collapsed rule?"
+      ]
+    },
     {
       "version": "0.20.13",
       "changes": [
