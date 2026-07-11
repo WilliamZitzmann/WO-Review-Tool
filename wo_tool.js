@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.18.0';
+    var TOOL_VERSION = '0.19.0';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -1481,6 +1481,53 @@
         return false;
     }
 
+    // "0.17.0-beta1" -> {major:0, minor:17, patch:0} — prerelease suffix stripped.
+    function parseVer(v) {
+        var base = (v || '').split('-')[0];
+        var p = base.split('.').map(Number);
+        return {
+            major: p[0] || 0,
+            minor: p[1] || 0,
+            patch: p[2] || 0
+        };
+    }
+
+    function minorKey(v) {
+        var p = parseVer(v);
+        return p.major + '.' + p.minor;
+    }
+
+    function sameMinor(a, b) {
+        return minorKey(a) === minorKey(b);
+    }
+
+    // A pin with exactly two numeric parts ("0.17") is a FLOATING minor pin —
+    // stays on that major.minor line forever but always resolves to the newest
+    // patch published for it. A three-part pin ("0.17.0") is an exact pin:
+    // frozen at that build until the user changes it. This is the escape
+    // hatch for "the newest patch in this line is itself broken, go back one."
+    function isFloatingMinorPin(v) {
+        return /^\d+\.\d+$/.test(v || '');
+    }
+
+    // Newest non-prerelease tagged version whose major.minor matches `minor`.
+    // Prerelease (beta-tagged) builds are never picked up by a floating pin —
+    // floating pins mean "stay on this stable line, always patched," not a
+    // beta feed, regardless of the caller's dev/beta tier.
+    function resolveFloatingMinor(minor, remoteVersions) {
+        var candidates = (remoteVersions || [])
+            .map(function(v) {
+                return v.version;
+            })
+            .filter(function(v) {
+                return !isPrerelease(v) && minorKey(v) === minor;
+            });
+        if (!candidates.length) return '';
+        return candidates.reduce(function(best, v) {
+            return versionGt(v, best) ? v : best;
+        });
+    }
+
     // ── Dev/beta unlock (console-only, deliberately not in Setup UI) ──
     // Stored outside __wo_settings so it never rides along in a shared/exported backup.
     var DEV_UNLOCK_KEY = '__wo_dev_unlock';
@@ -1568,12 +1615,24 @@
         if (pin && isPrerelease(pin) && tier !== 'beta' && tier !== 'dev') pin = '';
 
         var channels = remote.channels || {};
-        var version = pin || channels[channel] || channels.stable || remote.latest;
+        var pinned = !!pin;
+        var version;
+        if (pinned && isFloatingMinorPin(pin)) {
+            // Resolve to the newest patch in that line. If the line has no
+            // entries in the manifest at all (shouldn't normally happen),
+            // fall back to the channel rather than stranding the user on a
+            // pin that resolves to nothing.
+            version = resolveFloatingMinor(pin, remote.versions) || channels[channel] || channels.stable || remote.latest;
+        } else {
+            version = pin || channels[channel] || channels.stable || remote.latest;
+        }
         return {
             channel: channel,
             version: version,
             codeUrl: REPO_RAW_BASE + '/v' + version + '/wo_tool.js',
-            pinned: !!pin
+            pinned: pinned,
+            pinKind: pinned ? (isFloatingMinorPin(pin) ? 'floating' : 'exact') : null,
+            pinRaw: pin
         };
     }
 
@@ -1609,23 +1668,42 @@
 
                 if (target.version === TOOL_VERSION) {
                     dismissUpdateBanner();
+                    var pinnedLabel = target.pinKind === 'floating' ?
+                        '📌 Pinned to ' + target.pinRaw + '.x (v' + TOOL_VERSION + ')' :
+                        '📌 Pinned to v' + TOOL_VERSION;
                     setStatus(target.pinned ?
-                        '📌 Pinned to v' + TOOL_VERSION :
+                        pinnedLabel :
                         'Running the latest ' + target.channel + ' version (v' + TOOL_VERSION + ')');
                     return;
                 }
 
                 if (target.pinned) {
-                    // Explicit user pin/rollback — install immediately, no prompt.
+                    // Explicit user pin/rollback — install immediately, no prompt,
+                    // for BOTH an exact pin and a floating a.b pin (choosing to pin
+                    // at all is the opt-in; a floating pin's whole point is to take
+                    // its line's newest patch without asking each time).
                     // No banner ever shows while pinned; a stale one from before the
                     // pin was set must not linger and offer a conflicting install.
                     dismissUpdateBanner();
-                    setStatus('🔄 Installing pinned v' + target.version + '...');
+                    setStatus(target.pinKind === 'floating' ?
+                        '🔄 Installing v' + target.version + ' (latest ' + target.pinRaw + '.x)...' :
+                        '🔄 Installing pinned v' + target.version + '...');
                     installUpdate(target.version, target.codeUrl);
                     return;
                 }
 
-                if (st.autoUpdate) {
+                // Unpinned: a same-major.minor bump (a bug-fix patch) auto-installs
+                // silently by default — that's the whole point of the patch/minor
+                // split, so a hotfix actually reaches people who never open Setup.
+                // Anyone can opt out via Settings. A minor/major bump (new features,
+                // behavior/schema changes) always prompts unless the separate
+                // "auto-install everything" setting is explicitly turned on.
+                var isPatchOnly = sameMinor(target.version, TOOL_VERSION) && versionGt(target.version, TOOL_VERSION);
+                var patchAutoUpdate = st.autoUpdatePatch !== false;
+                if (isPatchOnly && patchAutoUpdate) {
+                    setStatus('🔄 Installing patch update v' + target.version + '...');
+                    installUpdate(target.version, target.codeUrl);
+                } else if (st.autoUpdate) {
                     setStatus('🔄 Auto-installing update v' + target.version + '...');
                     installUpdate(target.version, target.codeUrl);
                 } else {
@@ -1768,10 +1846,20 @@
             // reverted back to the old pin on the very next automatic check.
             // Only touches the pin if one was already active; unpinned users stay
             // unpinned.
+            //
+            // Exception: a FLOATING minor pin ("0.17") installing a newer patch
+            // in its OWN line ("0.17.1") is that pin doing exactly its job, not
+            // an override — reconciling it to the exact patch would silently
+            // freeze what's supposed to be an always-auto-patched pin after its
+            // very first install, defeating the entire point of choosing it.
             var pinSt = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
             if (pinSt.pinnedVersion && pinSt.pinnedVersion !== newVersion) {
-                pinSt.pinnedVersion = newVersion;
-                localStorage.setItem('__wo_settings', JSON.stringify(pinSt));
+                var pinIsFloatingSameLine = isFloatingMinorPin(pinSt.pinnedVersion) &&
+                    minorKey(pinSt.pinnedVersion) === minorKey(newVersion);
+                if (!pinIsFloatingSameLine) {
+                    pinSt.pinnedVersion = newVersion;
+                    localStorage.setItem('__wo_settings', JSON.stringify(pinSt));
+                }
             }
             rawInstall(xhr.responseText, 'v' + newVersion);
         };
@@ -4805,8 +4893,13 @@
                 '</label></div>' +
                 '<div style="margin-top:6px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
+                '<input type="checkbox" id="__st_upd_auto_patch" ' + (st.autoUpdatePatch !== false ? 'checked' : '') + '>' +
+                '<span style="color:#aaa;font-size:11px;">Auto-install patch fixes silently (same X.Y line — bug fixes only, on by default)</span>' +
+                '</label></div>' +
+                '<div style="margin-top:6px;">' +
+                '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_upd_auto" ' + (st.autoUpdate ? 'checked' : '') + '>' +
-                '<span style="color:#aaa;font-size:11px;">Auto-install updates silently (no prompt)</span>' +
+                '<span style="color:#aaa;font-size:11px;">Also auto-install minor/major updates silently (new features, behavior changes — off by default)</span>' +
                 '</label></div>' +
                 '<div style="margin-top:8px;">' +
                 '<button id="__st_check_now" style="background:#2c2c2c;color:#eee;border:1px solid #444;padding:4px 10px;cursor:pointer;border-radius:4px;font-size:11px;">Check for Updates Now</button>' +
@@ -4831,14 +4924,40 @@
                 if (xhrV.status !== 200) return;
                 try {
                     var remoteV = JSON.parse(xhrV.responseText);
+                    // Group by major.minor, preserving remoteV.versions' existing
+                    // newest-first order. Each line gets a floating "X.Y.x
+                    // (auto-patch)" option — always tracks that line's newest
+                    // patch — plus every exact patch underneath for the "the
+                    // newest patch broke something, freeze at the previous one"
+                    // rollback case.
+                    var lines = [],
+                        byLine = {};
                     (remoteV.versions || []).forEach(function(v) {
                         var isPre = isPrerelease(v.version);
                         if (isPre && devTier !== 'beta' && devTier !== 'dev') return; // beta/dev builds stay hidden
-                        var opt = document.createElement('option');
-                        opt.value = v.version;
-                        opt.textContent = v.version;
-                        if (st.pinnedVersion === v.version) opt.selected = true;
-                        pinSel.appendChild(opt);
+                        var key = minorKey(v.version);
+                        if (!byLine[key]) {
+                            byLine[key] = [];
+                            lines.push(key);
+                        }
+                        byLine[key].push(v.version);
+                    });
+                    lines.forEach(function(key) {
+                        var grp = document.createElement('optgroup');
+                        grp.label = key + '.x';
+                        var floatOpt = document.createElement('option');
+                        floatOpt.value = key;
+                        floatOpt.textContent = key + '.x (auto-patch)';
+                        if (st.pinnedVersion === key) floatOpt.selected = true;
+                        grp.appendChild(floatOpt);
+                        byLine[key].forEach(function(vstr) {
+                            var opt = document.createElement('option');
+                            opt.value = vstr;
+                            opt.textContent = vstr;
+                            if (st.pinnedVersion === vstr) opt.selected = true;
+                            grp.appendChild(opt);
+                        });
+                        pinSel.appendChild(grp);
                     });
                 } catch (e) {}
             };
@@ -4848,12 +4967,18 @@
                 st.pinnedVersion = e.target.value;
                 saveSettingsCfg(st);
                 dismissUpdateBanner();
-                setStatus(st.pinnedVersion ? 'Pinned to v' + st.pinnedVersion + ' — checking...' : 'Unpinned — following channel');
+                setStatus(st.pinnedVersion ?
+                    (isFloatingMinorPin(st.pinnedVersion) ? 'Pinned to ' + st.pinnedVersion + '.x — checking...' : 'Pinned to v' + st.pinnedVersion + ' — checking...') :
+                    'Unpinned — following channel');
                 checkForUpdate();
             };
 
             updSettDiv.querySelector('#__st_upd_disable').onchange = function(e) {
                 st.updateDisabled = e.target.checked;
+                saveSettingsCfg(st);
+            };
+            updSettDiv.querySelector('#__st_upd_auto_patch').onchange = function(e) {
+                st.autoUpdatePatch = e.target.checked;
                 saveSettingsCfg(st);
             };
             updSettDiv.querySelector('#__st_upd_auto').onchange = function(e) {

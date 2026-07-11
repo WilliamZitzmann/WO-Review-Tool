@@ -1,10 +1,18 @@
 {
-  "latest": "0.18.0",
+  "latest": "0.19.0",
   "channels": {
-    "stable": "0.18.0",
-    "beta": "0.18.0"
+    "stable": "0.19.0",
+    "beta": "0.19.0"
   },
   "versions": [
+    {
+      "version": "0.19.0",
+      "changes": [
+        "Patch-level updates (same X.Y line, e.g. 0.19.0 → 0.19.1) now auto-install silently by default — bug fixes reach everyone without needing a Setup visit. Minor/major updates (new features, behavior changes) still always prompt unless a separate, off-by-default setting is turned on. Both are toggleable in Setup > Settings > Updates",
+        "Added floating minor-version pinning: pin to \"0.19.x (auto-patch)\" to stay on a specific feature line forever while always taking its newest patch, instead of freezing at one exact build. Exact-version pinning (e.g. \"0.19.0\") still exists underneath as the rollback escape hatch if a specific patch turns out to be bad",
+        "Fixed a subtle case in the pin-reconciliation logic added in 0.16.0: installing a floating pin's own newest patch no longer silently converts it into an exact pin (which would have frozen it and stopped future patches from reaching it)"
+      ]
+    },
     {
       "version": "0.18.0",
       "changes": [
