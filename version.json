@@ -1,10 +1,17 @@
 {
-  "latest": "0.20.1",
+  "latest": "0.20.2",
   "channels": {
-    "stable": "0.20.1",
-    "beta": "0.20.1"
+    "stable": "0.20.2",
+    "beta": "0.20.2"
   },
   "versions": [
+    {
+      "version": "0.20.2",
+      "changes": [
+        "Fixed a real regression from 0.20.0/0.20.1: the status line and scan log had no background at all, so the Maximo page showed through them (\"transparent status section\")",
+        "Fixed panel body scrolling — expanding multiple groups no longer squishes/cuts off content or hides the return-message box at the bottom. The scroll/background properties on the panel's core structure are now set directly rather than through the shared stylesheet, so they can't be affected by anything on the host page"
+      ]
+    },
     {
       "version": "0.20.1",
       "changes": [
