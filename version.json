@@ -1,10 +1,16 @@
 {
-  "latest": "0.20.7",
+  "latest": "0.20.8",
   "channels": {
-    "stable": "0.20.7",
-    "beta": "0.20.7"
+    "stable": "0.20.8",
+    "beta": "0.20.8"
   },
   "versions": [
+    {
+      "version": "0.20.8",
+      "changes": [
+        "The panel can now be collapsed — a small handle on its left edge shrinks it to a thin strip and gives the screen back to Maximo, click again to expand. Remembered across reloads."
+      ]
+    },
     {
       "version": "0.20.7",
       "changes": [

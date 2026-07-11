@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.7';
+    var TOOL_VERSION = '0.20.8';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -2697,15 +2697,29 @@
         if (statusEl) statusEl.textContent = t;
     }
 
+    // Device-level preference — read fresh each time rather than cached,
+    // since it can change via setPanelCollapsed() at any point in the
+    // session and startup needs the latest value before the panel exists.
+    function getPanelCollapsed() {
+        try {
+            return !!JSON.parse(localStorage.getItem('__wo_settings') || '{}').panelCollapsed;
+        } catch (e) {
+            return false;
+        }
+    }
+
     function pushLayout(on) {
-        document.body.style.marginRight = on ? PANEL_W + 'px' : '';
+        document.body.style.marginRight = on ? (getPanelCollapsed() ? 0 : PANEL_W) + 'px' : '';
         window.dispatchEvent(new Event('resize'));
-        // Poll until the panel has actually taken its width, then fire one more
-        // resize so any content that laid out before the panel was inserted reflows.
+        // Poll until the panel has actually rendered, then fire one more
+        // resize so any content that laid out before the panel was inserted
+        // reflows. Checks offsetHeight, not offsetWidth — a collapsed panel
+        // is deliberately 0-width but is always height:100vh, so width
+        // would never resolve true and this would just run out the clock.
         if (on) {
             poll(function() {
                 var dock = document.getElementById('__wo_dock');
-                return dock && dock.offsetWidth > 0;
+                return dock && dock.offsetHeight > 0;
             }, 1000, function() {
                 window.dispatchEvent(new Event('resize'));
             });
@@ -3000,11 +3014,47 @@
     // feedback stay inline at their call sites, driven by statusColor()).
     // Injected once into <head>, guarded so repeated buildPanel() calls
     // (hot-reload, teardown+reinit) never stack duplicate <style> tags.
+    // Collapses the panel to a 0-width strip with just a small protruding
+    // handle (position:absolute, so it tracks the panel's own left edge —
+    // at width:0 that edge coincides with the fixed right:0 viewport edge,
+    // so the handle ends up sitting right at the screen edge regardless of
+    // collapsed/expanded state). Persisted as a device-level setting so it
+    // survives a reload, same as the hotkey.
+    function setPanelCollapsed(collapsed) {
+        if (!panel) return;
+        panel.classList.toggle('is-collapsed', collapsed);
+        panel.style.width = (collapsed ? 0 : PANEL_W) + 'px';
+        document.body.style.marginRight = (collapsed ? 0 : PANEL_W) + 'px';
+        window.dispatchEvent(new Event('resize'));
+        var btn = panel.querySelector('#__wo_collapse_btn');
+        if (btn) {
+            btn.title = collapsed ? 'Expand panel' : 'Collapse panel';
+            btn.setAttribute('aria-label', btn.title);
+            btn.textContent = collapsed ? '◀' : '▶';
+        }
+        var s = {};
+        try {
+            s = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+        } catch (e) {}
+        s.panelCollapsed = collapsed;
+        localStorage.setItem('__wo_settings', JSON.stringify(s));
+    }
+
     function injectPanelStyles() {
         if (document.getElementById('__wo_panel_style')) return;
         var css = "" +
             "#__wo_dock,#__wo_dock *{box-sizing:border-box;}" +
             "#__wo_dock{--wo-bg:#0d1117;--wo-surface:#161b22;--wo-surface-2:#1f2630;--wo-field:#1f2630;--wo-border:#30363d;--wo-text:#f0f3f6;--wo-muted:#9aa4af;--wo-accent:#58a6ff;--wo-on-accent:#04101f;--wo-pass:#3fb950;--wo-fail:#f85149;--wo-warn:#d29922;--wo-r-panel:8px;--wo-r-card:6px;--wo-r-ctl:6px;font-family:'Segoe UI Semibold','Segoe UI',system-ui,sans-serif;}" +
+            // Collapse handle: position:absolute against #__wo_dock's own
+            // box (a fixed-position element establishes a containing block
+            // for absolute descendants), left:-14px so it protrudes just
+            // outside the panel's left edge — at width:0 (collapsed) that
+            // edge sits at the true screen edge, so the handle stays
+            // visible and clickable in both states without extra logic.
+            "#__wo_dock .wo-collapse-btn{position:absolute;left:-14px;top:50%;transform:translateY(-50%);width:14px;height:52px;padding:0;background:var(--wo-surface-2);border:1px solid var(--wo-border);border-right:none;border-radius:6px 0 0 6px;color:var(--wo-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px;}" +
+            "#__wo_dock .wo-collapse-btn:hover{color:var(--wo-text);background:var(--wo-field);}" +
+            "#__wo_dock .wo-collapse-btn:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
+            "#__wo_dock.is-collapsed>*:not(.wo-collapse-btn){display:none;}" +
             "#__wo_dock .wo-mono{font-family:Consolas,'Cascadia Mono',monospace;font-variant-numeric:tabular-nums;}" +
             "#__wo_dock .wo-head{background:var(--wo-surface-2);padding:10px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--wo-border);gap:8px;}" +
             "#__wo_dock .wo-head-title{display:flex;flex-direction:column;line-height:1.2;min-width:0;}" +
@@ -3104,6 +3154,8 @@
         injectPanelStyles();
         panel = document.createElement('div');
         panel.id = '__wo_dock';
+        var startCollapsed = getPanelCollapsed();
+        panel.className = startCollapsed ? 'is-collapsed' : '';
         // #__wo_status / #__wo_scanlog / #__wo_groups / #__wo_footer_area are
         // singleton structural containers, not repeated components — their
         // layout-critical properties (background, flex sizing, overflow) are
@@ -3119,8 +3171,9 @@
         // reachable without scrolling, no matter how many groups are
         // expanded above, even if the groups region's own scroll behavior
         // is ever fighting something on the host page.
-        panel.style.cssText = 'position:fixed;top:0;right:0;width:' + PANEL_W + 'px;height:100vh;background:#0d1117;z-index:999999;font-size:12px;display:flex;flex-direction:column;box-shadow:-4px 0 14px rgba(0,0,0,.5);';
+        panel.style.cssText = 'position:fixed;top:0;right:0;width:' + (startCollapsed ? 0 : PANEL_W) + 'px;height:100vh;background:#0d1117;z-index:999999;font-size:12px;display:flex;flex-direction:column;box-shadow:-4px 0 14px rgba(0,0,0,.5);';
         panel.innerHTML =
+            '<button id="__wo_collapse_btn" class="wo-collapse-btn" type="button" title="' + (startCollapsed ? 'Expand panel' : 'Collapse panel') + '" aria-label="' + (startCollapsed ? 'Expand panel' : 'Collapse panel') + '">' + (startCollapsed ? '◀' : '▶') + '</button>' +
             '<div class="wo-head">' +
             '<div class="wo-head-title"><b>Will\'s WO</b><span>Review Tool</span></div>' +
             '<div class="wo-head-ver">v' + TOOL_VERSION + '</div>' +
@@ -3154,6 +3207,9 @@
         panel.querySelector('#__wo_setup').onclick = openSetup;
         panel.querySelector('#__wo_exit').onclick = function() {
             if (confirm('Close WO Validation tool?')) teardown();
+        };
+        panel.querySelector('#__wo_collapse_btn').onclick = function() {
+            setPanelCollapsed(!panel.classList.contains('is-collapsed'));
         };
         pushLayout(true);
         // Set rescan button title to show hotkey
