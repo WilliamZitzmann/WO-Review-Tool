@@ -1,10 +1,18 @@
 {
-  "latest": "0.17.0",
+  "latest": "0.18.0",
   "channels": {
-    "stable": "0.17.0",
-    "beta": "0.17.0"
+    "stable": "0.18.0",
+    "beta": "0.18.0"
   },
   "versions": [
+    {
+      "version": "0.18.0",
+      "changes": [
+        "Fixed a real bug: scan-step conditions were evaluated against an empty cache before any tab was read, so any condition checking a Work Order field (e.g. Lot #, Work Type) always resolved false — Approvers and Downtime steps in the default config were never actually running",
+        "Scan conditions are now evaluated one step at a time, right before that step runs, so a later step's condition can see data captured by an earlier step in the same scan (not just what was on-screen when the scan started)",
+        "Added reorder controls (▲▼) to Setup > Scan — scan steps run in the order shown, so if tab C's condition depends on data from tab B, B now needs to come first, and you can now actually arrange that"
+      ]
+    },
     {
       "version": "0.17.0",
       "changes": [

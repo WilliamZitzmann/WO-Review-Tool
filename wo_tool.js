@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.17.0';
+    var TOOL_VERSION = '0.18.0';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -2345,21 +2345,31 @@
         var sew = findSendEventWin();
         var scan = getScan();
         setStatus('Reading WO tab...');
-        // mergeSnapshot(extractSnapshotFull());
-        var targets = scan.scans.filter(function(s) {
-            return formulaBool(s.condition, cache);
-        });
-        scan.scans.forEach(function(s) {
-            if (targets.indexOf(s) < 0) scanLog.push({
-                title: s.title,
-                result: 'skipped (condition false)'
-            });
-        });
+        // Capture whatever's on the currently-open tab (normally the WO tab
+        // itself, since that's where a scan starts) before evaluating any
+        // step's condition — otherwise a condition reading a WO-tab field
+        // (e.g. Work Type, Lot #) sees an empty cache and always resolves
+        // false, silently skipping that step every time.
+        mergeSnapshot(extractSnapshotFull());
         var i = 0;
 
+        // Conditions are evaluated lazily, one step at a time, right before
+        // that step runs — NOT pre-filtered as a batch up front. This lets a
+        // later step's condition see data captured by an EARLIER step in
+        // this same run (e.g. a table read on tab B feeding a condition on
+        // tab C), not just whatever was on-screen when the scan started.
+        // Scan order (Setup > Scan, now reorderable) is what makes this work:
+        // a dependency has to come before whatever reads it.
         function next() {
-            if (i >= targets.length) return finish();
-            var t = targets[i++];
+            if (i >= scan.scans.length) return finish();
+            var t = scan.scans[i++];
+            if (!formulaBool(t.condition, cache)) {
+                scanLog.push({
+                    title: t.title,
+                    result: 'skipped (condition false)'
+                });
+                return next();
+            }
             var t0 = Date.now();
             setStatus('Scanning: ' + t.title + '...');
             if (t.type === 'dialog') {
@@ -4413,7 +4423,11 @@
                     '<span data-coll-arrow style="font-size:10px;color:#aaa;min-width:10px;">▶</span>' +
                     '<input type="text" value="' + s.title.replace(/"/g, '&quot;') + '" data-ti style="width:35%;background:#222;color:#eee;border:1px solid #333;padding:2px 5px;border-radius:3px;" onclick="event.stopPropagation()"> ' +
                     'Type: <select data-ty onclick="event.stopPropagation()"><option value="tab" ' + (s.type === 'tab' ? 'selected' : '') + '>Tab</option><option value="dialog" ' + (s.type === 'dialog' ? 'selected' : '') + '>Dialog</option></select> ' +
-                    '<button data-d style="margin-left:auto;color:#e74c3c;" onclick="event.stopPropagation()">Delete</button>' +
+                    '<span style="margin-left:auto;display:flex;gap:2px;">' +
+                    '<button data-mv-up title="Move up — runs earlier" ' + (idx === 0 ? 'disabled' : '') + ' style="' + (idx === 0 ? 'opacity:0.35;cursor:not-allowed;' : '') + '" onclick="event.stopPropagation()">▲</button>' +
+                    '<button data-mv-dn title="Move down — runs later" ' + (idx === scan.scans.length - 1 ? 'disabled' : '') + ' style="' + (idx === scan.scans.length - 1 ? 'opacity:0.35;cursor:not-allowed;' : '') + '" onclick="event.stopPropagation()">▼</button>' +
+                    '<button data-d style="color:#e74c3c;" onclick="event.stopPropagation()">Delete</button>' +
+                    '</span>' +
                     '</div>' +
                     '<div data-coll-body>' +
                     '<div style="margin-top:4px;">Tab ID / Event: <input type="text" data-id value="' + (s.tabId || s.eventType || '') + '"> Wait for text: <input type="text" data-w value="' + s.waitFor + '"> Wait for table: <input type="text" data-wtb value="' + (s.waitTable || '') + '"></div>' +
@@ -4565,6 +4579,22 @@
                 };
                 box.querySelector('[data-d]').onclick = function() {
                     scan.scans.splice(idx, 1);
+                    scanTab();
+                };
+                var mvUpBtn = box.querySelector('[data-mv-up]');
+                if (mvUpBtn) mvUpBtn.onclick = function() {
+                    if (idx === 0) return;
+                    var tmp = scan.scans[idx - 1];
+                    scan.scans[idx - 1] = scan.scans[idx];
+                    scan.scans[idx] = tmp;
+                    scanTab();
+                };
+                var mvDnBtn = box.querySelector('[data-mv-dn]');
+                if (mvDnBtn) mvDnBtn.onclick = function() {
+                    if (idx === scan.scans.length - 1) return;
+                    var tmp = scan.scans[idx + 1];
+                    scan.scans[idx + 1] = scan.scans[idx];
+                    scan.scans[idx] = tmp;
                     scanTab();
                 };
             });
