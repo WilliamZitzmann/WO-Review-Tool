@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.15';
+    var TOOL_VERSION = '0.20.16';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -3094,8 +3094,28 @@
             // `all:revert` clears every authored (host-page) declaration on
             // our own elements back to the browser's UA baseline BEFORE any
             // of our own rules below apply — it does not affect inline
-            // styles (panel positioning) or CSS custom properties.
-            "#__wo_dock,#__wo_dock *{all:revert;box-sizing:border-box;}" +
+            // styles (panel positioning) or CSS custom properties. SVG
+            // icons and their descendants are excluded from it: confirmed
+            // by an isolated browser test that Chromium computes the
+            // correct cascaded stroke/fill for a reverted presentation
+            // attribute (getComputedStyle agrees) but never actually PAINTS
+            // it — the element renders invisible regardless of what CSS
+            // says it should look like. Every icon in the tool was
+            // invisible for exactly this reason. Icons still need
+            // protecting from host CSS bleed-through, so that's handled by
+            // the plain (non-revert) rules just below instead.
+            "#__wo_dock,#__wo_dock *:not(svg):not(svg *){all:revert;box-sizing:border-box;}" +
+            "#__wo_dock svg{fill:none;color:inherit;}" +
+            "#__wo_dock svg [stroke]{stroke:currentColor;}" +
+            // Deliberately no equivalent `fill:currentColor` rule — confirmed
+            // in a browser that Chromium has a real bug where an SVG `fill`
+            // override doesn't repaint correctly against a competing
+            // host-page rule (getComputedStyle agrees with the override,
+            // the actual paint doesn't), even with !important. `stroke`
+            // doesn't have this problem. Every icon in the tool is drawn
+            // with stroke only (thick-stroked circles/lines standing in for
+            // small filled shapes) for exactly this reason — do the same
+            // for any new icon rather than reaching for `fill="currentColor"`.
             "#__wo_dock{--wo-bg:#0d1117;--wo-surface:#161b22;--wo-surface-2:#1f2630;--wo-field:#1f2630;--wo-border:#30363d;--wo-text:#f0f3f6;--wo-muted:#9aa4af;--wo-accent:#58a6ff;--wo-on-accent:#04101f;--wo-pass:#3fb950;--wo-fail:#f85149;--wo-warn:#d29922;--wo-r-panel:8px;--wo-r-card:6px;--wo-r-ctl:6px;font-family:'Segoe UI Semibold','Segoe UI',system-ui,sans-serif;}" +
             // Collapse handle: position:absolute against #__wo_dock's own
             // box (a fixed-position element establishes a containing block
@@ -3445,7 +3465,7 @@
                     '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
                     '<circle cx="8" cy="8" r="6.3" stroke="currentColor" stroke-width="1.3"/>' +
                     '<line x1="8" y1="7.1" x2="8" y2="11.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' +
-                    '<circle cx="8" cy="4.9" r="0.9" fill="currentColor"/>' +
+                    '<circle cx="8" cy="4.9" r="0.9" stroke="currentColor" stroke-width="2.2"/>' +
                     '</svg></span>';
             }
 
@@ -4197,11 +4217,17 @@
     function injectSetupStyles() {
         if (document.getElementById('__wo_setup_style')) return;
         var css = "" +
-            // See the matching comment in injectPanelStyles() — isolates us
+            // See the matching comments in injectPanelStyles() — isolates us
             // from host-page CSS (button/input/svg resets, aggressive
-            // Carbon/Dojo-style rules on IBM Maximo) that otherwise makes
-            // the modal render differently per domain.
-            "#__wo_setup_modal,#__wo_setup_modal *{all:revert;box-sizing:border-box;}" +
+            // Carbon/Dojo-style rules on IBM Maximo); svg and its descendants
+            // are excluded from the revert (Chromium paints a reverted SVG
+            // presentation attribute incorrectly even though computed style
+            // is right); and no icon here uses `fill="currentColor"` since
+            // that specific override doesn't reliably repaint against a
+            // competing host rule either — every icon is stroke-only.
+            "#__wo_setup_modal,#__wo_setup_modal *:not(svg):not(svg *){all:revert;box-sizing:border-box;}" +
+            "#__wo_setup_modal svg{fill:none;color:inherit;}" +
+            "#__wo_setup_modal svg [stroke]{stroke:currentColor;}" +
             "#__wo_setup_modal{--wo-bg:#0d1117;--wo-surface:#161b22;--wo-surface-2:#1f2630;--wo-field:#1f2630;--wo-border:#30363d;--wo-text:#f0f3f6;--wo-muted:#9aa4af;--wo-accent:#58a6ff;--wo-on-accent:#04101f;--wo-pass:#3fb950;--wo-fail:#f85149;--wo-warn:#d29922;--wo-r-panel:10px;--wo-r-card:6px;--wo-r-ctl:6px;font-family:'Segoe UI',system-ui,sans-serif;background:var(--wo-bg);color:var(--wo-text);}" +
             "#__wo_setup_modal .wo-mono{font-family:Consolas,'Cascadia Mono',monospace;}" +
             // Title bar
@@ -4218,10 +4244,17 @@
             // A thin divider separates adjacent SIBLING tabs, except on
             // either side of the active tab, where the tab's own
             // background already does the separating.
-            "#__wo_setup_modal .wo-modal-tabs{position:relative;display:flex;align-items:flex-end;flex-wrap:nowrap;gap:8px;padding:8px 4px 0;}" +
+            "#__wo_setup_modal .wo-modal-tabs{position:relative;display:flex;align-items:flex-end;flex-wrap:nowrap;padding:8px 4px 0;}" +
             "#__wo_setup_modal .wo-modal-tabs::after{content:'';position:absolute;left:4px;right:4px;bottom:0;height:1px;background:var(--wo-border);z-index:0;}" +
             "#__wo_setup_modal .wo-tab-group{display:flex;align-items:flex-end;position:relative;z-index:1;flex-shrink:0;}" +
-            "#__wo_setup_modal .wo-tab-group-end{margin-left:auto;}" +
+            // A bare flex `gap` between the three tab groups left a floating
+            // stretch of blank space at each boundary (e.g. between Scan and
+            // Profiles) with nothing to explain it, unlike the tight
+            // divider-bordered look tabs have within a group. A matching
+            // divider line at each group boundary reads as intentional
+            // structure instead of a stray gap.
+            "#__wo_setup_modal .wo-tab-group + .wo-tab-group:not(.wo-tab-group-end){margin-left:10px;padding-left:10px;border-left:1px solid var(--wo-border);}" +
+            "#__wo_setup_modal .wo-tab-group-end{margin-left:auto;padding-left:10px;border-left:1px solid var(--wo-border);}" +
             "#__wo_setup_modal .wo-tab-btn{position:relative;display:inline-flex;align-items:center;gap:6px;flex-shrink:0;font:inherit;font-weight:600;font-size:11.5px;padding:7px 11px 8px;margin-bottom:-1px;border-radius:7px 7px 0 0;border:none;border-right:1px solid var(--wo-border);background:transparent;color:var(--wo-muted);cursor:pointer;}" +
             "#__wo_setup_modal .wo-tab-btn:last-child{border-right:none;}" +
             "#__wo_setup_modal .wo-tab-btn:hover{color:var(--wo-text);background:var(--wo-field);}" +
@@ -4273,8 +4306,8 @@
             // time (see the kebab/tab-context-menu JS) — this rule is purely
             // visual chrome, shared by the rule kebab menu and the tab
             // display-mode context menu.
-            "#__wo_setup_modal .wo-kebab-menu{display:flex;flex-direction:column;gap:1px;min-width:160px;background:var(--wo-surface-2);border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);box-shadow:0 8px 24px rgba(0,0,0,.5);padding:4px;z-index:20;}" +
-            "#__wo_setup_modal .wo-kebab-item{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;border:none;background:none;color:var(--wo-text);font:inherit;font-size:11.5px;text-align:left;border-radius:calc(var(--wo-r-ctl) - 2px);cursor:pointer;transition:background .08s;}" +
+            "#__wo_setup_modal .wo-kebab-menu{display:inline-flex;flex-direction:column;gap:1px;background:var(--wo-surface-2);border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);box-shadow:0 8px 24px rgba(0,0,0,.5);padding:4px;z-index:20;}" +
+            "#__wo_setup_modal .wo-kebab-item{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;white-space:nowrap;border:none;background:none;color:var(--wo-text);font:inherit;font-size:11.5px;text-align:left;border-radius:calc(var(--wo-r-ctl) - 2px);cursor:pointer;transition:background .08s;}" +
             "#__wo_setup_modal .wo-kebab-item svg{flex-shrink:0;}" +
             "#__wo_setup_modal .wo-kebab-item:hover{background:var(--wo-field);}" +
             "#__wo_setup_modal .wo-kebab-item-active{color:var(--wo-accent);}" +
@@ -4292,7 +4325,10 @@
 
     function openSetup() {
         var old = document.getElementById('__wo_setup_modal');
-        if (old) old.remove();
+        if (old) {
+            if (old._woCleanup) old._woCleanup();
+            old.remove();
+        }
         injectSetupStyles();
         var opts = fieldKeyOptions();
         var cfg = JSON.parse(JSON.stringify(getCfg()));
@@ -4315,7 +4351,11 @@
             vars: '<path d="M5.6 2.8C4.1 2.8 3.7 3.6 3.7 4.6V6.4C3.7 7.1 3.4 7.5 2.6 7.7V8.3C3.4 8.5 3.7 8.9 3.7 9.6V11.4C3.7 12.4 4.1 13.2 5.6 13.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M10.4 2.8C11.9 2.8 12.3 3.6 12.3 4.6V6.4C12.3 7.1 12.6 7.5 13.4 7.7V8.3C12.6 8.5 12.3 8.9 12.3 9.6V11.4C12.3 12.4 11.9 13.2 10.4 13.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>',
             scan: '<path d="M2.5 5.5V3.5C2.5 2.9 2.9 2.5 3.5 2.5H5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M10.5 2.5H12.5C13.1 2.5 13.5 2.9 13.5 3.5V5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M13.5 10.5V12.5C13.5 13.1 13.1 13.5 12.5 13.5H10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M5.5 13.5H3.5C2.9 13.5 2.5 13.1 2.5 12.5V10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="8" r="1.6" stroke="currentColor" stroke-width="1.3"/>',
             profiles: '<circle cx="8" cy="5.3" r="2.3" stroke="currentColor" stroke-width="1.3"/><path d="M3 13.2C3.6 10.6 5.5 9.3 8 9.3C10.5 9.3 12.4 10.6 13 13.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
-            settings: '<circle cx="8" cy="8" r="4" stroke="currentColor" stroke-width="1.1"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/><rect x="7.25" y="1.6" width="1.5" height="2.2" rx="0.5" fill="currentColor"/><rect x="7.25" y="1.6" width="1.5" height="2.2" rx="0.5" fill="currentColor" transform="rotate(60 8 8)"/><rect x="7.25" y="1.6" width="1.5" height="2.2" rx="0.5" fill="currentColor" transform="rotate(120 8 8)"/><rect x="7.25" y="1.6" width="1.5" height="2.2" rx="0.5" fill="currentColor" transform="rotate(180 8 8)"/><rect x="7.25" y="1.6" width="1.5" height="2.2" rx="0.5" fill="currentColor" transform="rotate(240 8 8)"/><rect x="7.25" y="1.6" width="1.5" height="2.2" rx="0.5" fill="currentColor" transform="rotate(300 8 8)"/>',
+            // Teeth drawn as thick round-capped strokes rather than filled
+            // rects — see the comment on the rule kebab icon: SVG `fill`
+            // doesn't reliably repaint against a competing host-page rule
+            // in this Chromium version, `stroke` does.
+            settings: '<circle cx="8" cy="8" r="4" stroke="currentColor" stroke-width="1.1"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/><path d="M8 1.9L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8 1.9L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" transform="rotate(60 8 8)"/><path d="M8 1.9L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" transform="rotate(120 8 8)"/><path d="M8 1.9L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" transform="rotate(180 8 8)"/><path d="M8 1.9L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" transform="rotate(240 8 8)"/><path d="M8 1.9L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" transform="rotate(300 8 8)"/>',
             update: '<path d="M12.8 5.2A5 5 0 1 0 13.5 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M12.8 2.5V5.2H10.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
             guide: '<path d="M2.5 3.5C2.5 3 2.9 2.7 3.4 2.8C5 3 6.5 3.6 8 4.6C9.5 3.6 11 3 12.6 2.8C13.1 2.7 13.5 3 13.5 3.5V11.5C13.5 12 13.1 12.3 12.6 12.4C11 12.6 9.5 13.2 8 14.2C6.5 13.2 5 12.6 3.4 12.4C2.9 12.3 2.5 12 2.5 11.5V3.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 4.6V14.2" stroke="currentColor" stroke-width="1.2"/>',
             exp: '<path d="M8 10V2.5M8 2.5L5.5 5M8 2.5L10.5 5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.5 10V12.5C2.5 13.1 2.9 13.5 3.5 13.5H12.5C13.1 13.5 13.5 13.1 13.5 12.5V10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -4511,23 +4551,24 @@
                 startH = 0,
                 mx = 0,
                 my = 0;
-            var MIN_W = 420,
-                MIN_H = 320;
             handle.addEventListener('mousedown', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
+                // A manual resize opts back out of whatever snap is active
+                // (a snapped rect is meant to track the zone, not a
+                // hand-picked size).
+                clearSnap();
                 var r = modal.getBoundingClientRect();
                 startW = r.width;
                 startH = r.height;
                 mx = e.clientX;
                 my = e.clientY;
-                document.addEventListener('mousemove', resize);
-                document.addEventListener('mouseup', stopresize);
+                startPointerCapture(resize, null, 'nwse-resize');
             });
 
             function resize(e) {
-                var newW = Math.max(MIN_W, startW + (e.clientX - mx));
-                var newH = Math.max(MIN_H, startH + (e.clientY - my));
+                var newW = Math.max(MODAL_MIN_W, startW + (e.clientX - mx));
+                var newH = Math.max(MODAL_MIN_H, startH + (e.clientY - my));
                 // Clamp to the viewport so resizing can't push the modal's
                 // right/bottom edge past the screen from its current
                 // top/left position.
@@ -4536,11 +4577,6 @@
                 newH = Math.min(newH, window.innerHeight - r.top);
                 modal.style.width = newW + 'px';
                 modal.style.height = newH + 'px';
-            }
-
-            function stopresize() {
-                document.removeEventListener('mousemove', resize);
-                document.removeEventListener('mouseup', stopresize);
             }
         })();
 
@@ -4566,8 +4602,36 @@
                 my = 0,
                 tbW = 0,
                 tbH = 0;
+            var hoverZone = null;
+            var preview = null;
+
+            function showPreview(zone) {
+                var rect = computeSnapRect(zone);
+                if (!preview) {
+                    preview = document.createElement('div');
+                    preview.id = '__wo_snap_preview';
+                    preview.style.cssText = 'position:fixed;z-index:2147483646;background:rgba(88,166,255,.22);border:2px solid rgba(88,166,255,.75);border-radius:8px;pointer-events:none;box-sizing:border-box;';
+                    document.body.appendChild(preview);
+                }
+                preview.style.left = rect.left + 'px';
+                preview.style.top = rect.top + 'px';
+                preview.style.width = rect.width + 'px';
+                preview.style.height = rect.height + 'px';
+            }
+
+            function hidePreview() {
+                if (preview) {
+                    preview.remove();
+                    preview = null;
+                }
+            }
             tb.addEventListener('mousedown', function(e) {
+                // Let the title bar's own Save/Close buttons behave like
+                // normal buttons — the pointer-capture overlay below would
+                // otherwise swallow their mouseup and eat the click.
+                if (e.target.closest('button')) return;
                 e.preventDefault();
+                clearSnap();
                 ox = modal.offsetLeft;
                 oy = modal.offsetTop;
                 mx = e.clientX;
@@ -4575,8 +4639,8 @@
                 var r = tb.getBoundingClientRect();
                 tbW = r.width;
                 tbH = r.height;
-                document.addEventListener('mousemove', drag);
-                document.addEventListener('mouseup', stopdrag);
+                hoverZone = null;
+                startPointerCapture(drag, stopdrag, 'grabbing');
             });
 
             function drag(e) {
@@ -4590,16 +4654,150 @@
                 newLeft = Math.min(Math.max(newLeft, minLeft), maxLeft);
                 modal.style.left = newLeft + 'px';
                 modal.style.top = newTop + 'px';
+
+                hoverZone = detectSnapZone(e.clientX, e.clientY);
+                if (hoverZone) showPreview(hoverZone);
+                else hidePreview();
             }
 
             function stopdrag() {
-                document.removeEventListener('mousemove', drag);
-                document.removeEventListener('mouseup', stopdrag);
+                hidePreview();
+                if (hoverZone) applySnap(hoverZone);
+                hoverZone = null;
             }
         })();
 
         var content = modal.querySelector('#__s_content');
         var renamingRuleId = null;
+        // Rule id -> expanded (true/false). Lives for the lifetime of this
+        // modal instance so switching tabs away from Rules and back doesn't
+        // re-collapse everything; only a fresh openSetup() (new closure) or
+        // an explicit re-click of the already-active Rules tab clears it.
+        var ruleExpandState = {};
+
+        // --- edge snapping ---
+        // null | 'left' | 'right' | 'top-left' | 'top-right'. Restored from
+        // the last snap the user dropped the window into, so reopening
+        // Setup reproduces it; a plain (non-snapped) close/reopen leaves
+        // this null and the modal opens at its normal default rect.
+        var currentSnap = st.setupSnap || null;
+        var MODAL_MIN_W = 420,
+            MODAL_MIN_H = 320;
+
+        function getMainPanelWidth() {
+            var dock = document.getElementById('__wo_dock');
+            if (!dock) return 0;
+            return getPanelCollapsed() ? 0 : PANEL_W;
+        }
+
+        // Same geometry used both for the live drag preview and the
+        // committed snap, so the window ends up exactly where the preview
+        // showed it would.
+        function computeSnapRect(zone) {
+            var vw = window.innerWidth,
+                vh = window.innerHeight;
+            var mw = getMainPanelWidth();
+            if (zone === 'left') return {
+                left: 0,
+                top: 0,
+                width: MODAL_MIN_W,
+                height: vh
+            };
+            if (zone === 'right') return {
+                left: Math.max(0, vw - (mw || MODAL_MIN_W)),
+                top: 0,
+                width: mw || MODAL_MIN_W,
+                height: vh
+            };
+            if (zone === 'top-left') return {
+                left: 0,
+                top: 0,
+                width: Math.max(MODAL_MIN_W, vw - mw),
+                height: vh
+            };
+            if (zone === 'top-right') return {
+                left: 0,
+                top: 0,
+                width: vw,
+                height: vh
+            };
+            return null;
+        }
+
+        // Windows-Aero-style zones: top strip is split left/right half into
+        // the two "top" snaps; otherwise a plain side edge is left/right.
+        function detectSnapZone(x, y) {
+            var EDGE = 40;
+            var vw = window.innerWidth;
+            if (y <= EDGE) return x < vw / 2 ? 'top-left' : 'top-right';
+            if (x <= EDGE) return 'left';
+            if (x >= vw - EDGE) return 'right';
+            return null;
+        }
+
+        function saveSetupSnap(zone) {
+            st.setupSnap = zone;
+            var liveSt = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+            liveSt.setupSnap = zone;
+            localStorage.setItem('__wo_settings', JSON.stringify(liveSt));
+        }
+
+        // Only 'left' displaces Maximo's own layout (mirroring how the main
+        // tool panel docks) — 'right' exactly covers where that panel
+        // already sits, and the two 'top' zones simply overlay on top of
+        // everything, so none of those need an extra push of their own.
+        function applySnap(zone) {
+            var rect = computeSnapRect(zone);
+            if (!rect) return;
+            modal.style.left = rect.left + 'px';
+            modal.style.top = rect.top + 'px';
+            modal.style.width = rect.width + 'px';
+            modal.style.height = rect.height + 'px';
+            document.body.style.marginLeft = zone === 'left' ? MODAL_MIN_W + 'px' : '';
+            currentSnap = zone;
+            saveSetupSnap(zone);
+        }
+
+        function clearSnap() {
+            if (!currentSnap) return;
+            currentSnap = null;
+            document.body.style.marginLeft = '';
+            saveSetupSnap(null);
+        }
+
+        function onWindowResizeReapplySnap() {
+            if (currentSnap) applySnap(currentSnap);
+        }
+        window.addEventListener('resize', onWindowResizeReapplySnap);
+        if (currentSnap) applySnap(currentSnap);
+
+        // Both the resize handle and the titlebar drag capture the pointer
+        // via a full-viewport overlay rather than listening on `document`
+        // directly: Maximo's UI is built from nested iframes, and a
+        // mousemove over an iframe's rendered area is delivered to that
+        // iframe's own document, never bubbling up to ours — that's what
+        // made dragging "freeze" over large parts of the screen. An overlay
+        // in OUR top-level document, drawn above everything (including any
+        // iframe), keeps receiving the event regardless of what's visually
+        // underneath it.
+        function startPointerCapture(onMove, onUp, cursor) {
+            var overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;cursor:' + (cursor || 'default') + ';';
+            document.body.appendChild(overlay);
+
+            function move(e) {
+                onMove(e);
+            }
+
+            function up(e) {
+                overlay.removeEventListener('mousemove', move);
+                overlay.removeEventListener('mouseup', up);
+                overlay.remove();
+                if (onUp) onUp(e);
+            }
+            overlay.addEventListener('mousemove', move);
+            overlay.addEventListener('mouseup', up);
+        }
         // Rule kebab menus are built fresh on click and position:fixed from
         // the button's own rect (not absolute-inside-the-card) — a rule
         // card is overflow:hidden (see .wo-card comment above) so an
@@ -4616,7 +4814,7 @@
         }
         modal.addEventListener('click', closeRuleMenu);
 
-        function makeCollapsible(box, headerText, startCollapsed) {
+        function makeCollapsible(box, headerText, startCollapsed, onToggle) {
             if (startCollapsed === undefined) startCollapsed = true;
             var header = box.querySelector('[data-coll-header]');
             var body = box.querySelector('[data-coll-body]');
@@ -4630,13 +4828,23 @@
                 var hidden = body.style.display === 'none';
                 body.style.display = hidden ? '' : 'none';
                 if (arrow) arrow.textContent = hidden ? '▼' : '▶';
+                if (onToggle) onToggle(hidden);
             });
         }
 
+        // Torn down both on an explicit Close/Save and, defensively, if a
+        // second openSetup() call ever replaces this modal without one of
+        // those firing first — otherwise the resize listener and the
+        // left-snap body margin would leak past the modal's own lifetime.
+        modal._woCleanup = function() {
+            window.removeEventListener('resize', onWindowResizeReapplySnap);
+            tabBarResizeObserver.disconnect();
+            document.body.style.marginLeft = '';
+        };
         modal.querySelector('#__s_close').onclick = function() {
             closeTabCtxMenu();
             closeRuleMenu();
-            tabBarResizeObserver.disconnect();
+            modal._woCleanup();
             modal.remove();
         };
         modal.querySelector('#__s_save').onclick = function() {
@@ -4646,7 +4854,7 @@
             applyHotkey();
             closeTabCtxMenu();
             closeRuleMenu();
-            tabBarResizeObserver.disconnect();
+            modal._woCleanup();
             modal.remove();
             render();
             checkForUpdate();
@@ -4881,7 +5089,15 @@
                     titleHtml +
                     '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
                     '<button data-kebab type="button" class="wo-kebab-btn" aria-label="Rule actions" aria-haspopup="true">' +
-                    '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="3" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="8" cy="13" r="1.4"/></svg>' +
+                    // Drawn as thick-stroked circles (stroke-width roughly
+                    // 2x the radius, so the ring fully covers the center)
+                    // rather than filled ones — confirmed in a browser that
+                    // Chromium has a real bug where an SVG `fill` cascade
+                    // override doesn't repaint correctly against a
+                    // competing host-page rule, even though its own
+                    // getComputedStyle reports the right value; `stroke`
+                    // doesn't have this problem.
+                    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="3" r="1.4" stroke="currentColor" stroke-width="3.2"/><circle cx="8" cy="8" r="1.4" stroke="currentColor" stroke-width="3.2"/><circle cx="8" cy="13" r="1.4" stroke="currentColor" stroke-width="3.2"/></svg>' +
                     '</button>' +
                     '</span>' +
                     '</div>' +
@@ -4895,7 +5111,9 @@
 
 
                 content.appendChild(box);
-                makeCollapsible(box, rule.label);
+                makeCollapsible(box, rule.label, !ruleExpandState[rule.id], function(expandedNow) {
+                    ruleExpandState[rule.id] = expandedNow;
+                });
 
                 var msgWrap = box.querySelector('[data-msg-sections]');
                 msgWrap.appendChild(msgSection(rule, 'pass', '✓ Pass', '#3fb950', false));
@@ -6169,14 +6387,22 @@
             });
         }
 
-        function bindTab(id, fn) {
+        function bindTab(id, fn, onReclick) {
             modal.querySelector('#' + id).onclick = function() {
+                // Clicking a tab header that's already active is the one
+                // explicit "reset" gesture for state a tab preserves across
+                // ordinary tab switches (e.g. Rules' expand/collapse) —
+                // everything else (switching away and back) must leave it
+                // alone, so this only fires on a genuine re-click.
+                if (onReclick && this.classList.contains('is-active')) onReclick();
                 activateTab(id);
                 fn();
             };
         }
         bindTab('__s_guide', guideTab);
-        bindTab('__s_rules', rulesTab);
+        bindTab('__s_rules', rulesTab, function() {
+            ruleExpandState = {};
+        });
         bindTab('__s_vars', varsTab);
         bindTab('__s_groups', groupsTab);
         bindTab('__s_scan', scanTab);

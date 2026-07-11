@@ -1,10 +1,21 @@
 {
-  "latest": "0.20.15",
+  "latest": "0.20.16",
   "channels": {
-    "stable": "0.20.15",
-    "beta": "0.20.15"
+    "stable": "0.20.16",
+    "beta": "0.20.16"
   },
   "versions": [
+    {
+      "version": "0.20.16",
+      "changes": [
+        "Fixed every icon in the docked panel and Setup modal rendering invisible (no stroke/fill) — the CSS isolation reset added in v0.20.13 was also stripping the stroke=\"currentColor\"/fill=\"currentColor\" attributes the icons rely on; this was happening on every domain, not just IBM Maximo",
+        "Fixed the Setup window's drag/resize freezing over parts of the Maximo page — Maximo tiles the screen with iframes, and tracking mouse movement via `document` stops working once the pointer crosses into one; drag and resize now capture the pointer via a full-viewport overlay so they keep tracking regardless of what's underneath",
+        "Setup window now snaps like a normal OS window: drag it to the left edge (snaps to minimum width, pushes Maximo right, like the docked panel), right edge (snaps to cover the docked panel), top-left (fills the Maximo content area), or top-right (covers the whole browser). The last snap used is remembered and restored next time Setup is opened, and re-adjusts automatically if the browser is resized or moved to another display",
+        "Rules tab: an expanded rule now stays expanded when you switch to another Setup tab and back — it only re-collapses when Setup is closed and reopened, or when you click the Rules tab header while already on it",
+        "Rules tab kebab menu (Rename/Duplicate/Delete) is no longer artificially wide — it now sizes to its content",
+        "Fixed an odd-looking gap in the Setup tab bar between tab groups (e.g. between Scan and Profiles) — replaced with a deliberate divider line, matching the same treatment at every group boundary"
+      ]
+    },
     {
       "version": "0.20.15",
       "changes": [
