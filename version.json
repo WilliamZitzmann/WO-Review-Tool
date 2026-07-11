@@ -1,10 +1,20 @@
 {
-  "latest": "0.20.9",
+  "latest": "0.20.10",
   "channels": {
-    "stable": "0.20.9",
-    "beta": "0.20.9"
+    "stable": "0.20.10",
+    "beta": "0.20.10"
   },
   "versions": [
+    {
+      "version": "0.20.10",
+      "changes": [
+        "Fixed: a collapsed rule card in the Rules tab showed a noticeable empty gap around the header — the card's own padding wrapped the header even when the body below it was hidden. Padding now lives on the header and body separately.",
+        "Fixed: dragging the Setup window's title bar off-screen could make it unrecoverable, since the title bar is the only handle you can grab to drag it back. It's now fully contained top-to-bottom; up to 75% of its width can still go off the left or right edge.",
+        "Moved the status summary bar to sit between the scan log and the first group (was between the status line and the scan log)",
+        "Replaced the small per-rule dots in a group header with a single badge showing the group's worst rule status (error > fail > warn > pass, matching priority) — all four badges are the same fixed size regardless of label length",
+        "The badge shares the same spot as the tooltip/hide icons — hovering the header swaps the badge out for those icons rather than showing both at once. Groups with no rules attached show no badge."
+      ]
+    },
     {
       "version": "0.20.9",
       "changes": [
