@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.14';
+    var TOOL_VERSION = '0.20.15';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -4253,7 +4253,7 @@
             "#__wo_setup_modal .wo-btn-ghost:hover{color:var(--wo-text);background:var(--wo-field);}" +
             "#__wo_setup_modal input[type=text],#__wo_setup_modal input[type=number],#__wo_setup_modal textarea,#__wo_setup_modal select{font:inherit;font-size:11.5px;background:var(--wo-field);color:var(--wo-text);border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:5px 7px;}" +
             "#__wo_setup_modal input[type=text]:focus,#__wo_setup_modal input[type=number]:focus,#__wo_setup_modal textarea:focus,#__wo_setup_modal select:focus{outline:2px solid var(--wo-accent);outline-offset:-1px;border-color:var(--wo-accent);}" +
-            "#__wo_setup_modal textarea.wo-code{font-family:Consolas,'Cascadia Mono',monospace;background:#010409;color:#7ee787;border-color:var(--wo-border);}" +
+            "#__wo_setup_modal textarea.wo-code{font-family:Consolas,'Cascadia Mono',monospace;background:#010409;color:#7ee787;border-color:var(--wo-border);resize:vertical;}" +
             // Padding lives on the head and body separately, NOT on .wo-card
             // itself — a card that's collapsed only renders its head, so if
             // the card carried the padding, a collapsed card would show a

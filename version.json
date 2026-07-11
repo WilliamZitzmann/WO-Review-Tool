@@ -1,10 +1,16 @@
 {
-  "latest": "0.20.14",
+  "latest": "0.20.15",
   "channels": {
-    "stable": "0.20.14",
-    "beta": "0.20.14"
+    "stable": "0.20.15",
+    "beta": "0.20.15"
   },
   "versions": [
+    {
+      "version": "0.20.15",
+      "changes": [
+        "Rule formula box in the Rules tab can no longer be dragged wider than the panel — only vertical resize is allowed now, matching every other textarea's width-locked-to-container behavior"
+      ]
+    },
     {
       "version": "0.20.14",
       "changes": [
