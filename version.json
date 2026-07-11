@@ -1,10 +1,17 @@
 {
-  "latest": "0.20.18",
+  "latest": "0.20.19",
   "channels": {
-    "stable": "0.20.18",
-    "beta": "0.20.18"
+    "stable": "0.20.19",
+    "beta": "0.20.19"
   },
   "versions": [
+    {
+      "version": "0.20.19",
+      "changes": [
+        "Reverted the Return/Route experiment - Return and Approve are back to plain buttons, no icon (the route.txt icon isn't currently used anywhere; flagged to the user that neither button has an obviously better claim to it than the other)",
+        "Groups & Display tab restyled to match the dark card-based design used in Rules and the main panel - group cards, header-message and variable-fields sub-panels, the field-row editor, and every button/input on this tab now use the shared theme instead of old hardcoded grey colors"
+      ]
+    },
     {
       "version": "0.20.18",
       "changes": [

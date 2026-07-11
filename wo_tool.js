@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.18';
+    var TOOL_VERSION = '0.20.19';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -3843,21 +3843,8 @@
 
         var returnBtn = document.createElement('button');
         returnBtn.type = 'button';
-        // Route icon supplied by the user (route.txt) — a small node/branch
-        // diagram with a checkmark, already stroke-only so it's unaffected
-        // by the fill-vs-host-CSS paint bug documented on the other icons.
-        returnBtn.innerHTML =
-            '<svg width="15" height="15" viewBox="0 0 320 320" fill="none" aria-hidden="true">' +
-            '<line x1="65" y1="50" x2="95" y2="50" stroke="currentColor" stroke-width="10" stroke-linecap="round"/>' +
-            '<line x1="100" y1="60" x2="60" y2="100" stroke="currentColor" stroke-width="10" stroke-linecap="round"/>' +
-            '<line x1="65" y1="110" x2="80" y2="110" stroke="currentColor" stroke-width="10" stroke-linecap="round"/>' +
-            '<circle cx="50" cy="50" r="15" stroke="currentColor" stroke-width="10"/>' +
-            '<circle cx="110" cy="50" r="15" stroke="currentColor" stroke-width="10"/>' +
-            '<circle cx="50" cy="110" r="15" stroke="currentColor" stroke-width="10"/>' +
-            '<circle cx="110" cy="110" r="25" stroke="currentColor" stroke-width="5"/>' +
-            '<path d="M100 110L108 118L122 101" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>' +
-            '</svg><span>Route</span>';
-        returnBtn.className = 'wo-btn wo-btn-danger wo-btn-block wo-btn-icon';
+        returnBtn.textContent = '↩ Return';
+        returnBtn.className = 'wo-btn wo-btn-danger wo-btn-block';
         returnBtn.onclick = function() {
             if (!confirm('Return this Work Order?\n\nThe return message will be filled into the Memo field.')) return;
             routeWorkflow('return');
@@ -4337,6 +4324,12 @@
             "#__wo_setup_modal .wo-card-arrow{font-size:9px;color:var(--wo-muted);min-width:9px;}" +
             "#__wo_setup_modal .wo-rule-title{flex:1;min-width:0;font-weight:700;font-size:12px;color:var(--wo-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}" +
             "#__wo_setup_modal .wo-rule-title-input{flex:1;min-width:0;font:inherit;font-weight:700;font-size:12px;background:var(--wo-field);border:1px solid var(--wo-accent);border-radius:var(--wo-r-ctl);padding:4px 7px;color:var(--wo-text);}" +
+            // Shared subtle inset box for a sub-section within a card body
+            // (e.g. a group's header-message settings) — one visual
+            // language reused across every tab instead of each tab having
+            // its own ad hoc bordered div.
+            "#__wo_setup_modal .wo-subbox{border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:8px;background:var(--wo-field);}" +
+            "#__wo_setup_modal .wo-subbox-accent{border-color:var(--wo-accent);}" +
             "#__wo_setup_modal .wo-kebab-wrap{position:relative;flex-shrink:0;margin-left:auto;}" +
             "#__wo_setup_modal .wo-kebab-btn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);cursor:pointer;flex-shrink:0;}" +
             "#__wo_setup_modal .wo-kebab-btn:hover,#__wo_setup_modal .wo-kebab-btn:focus-visible{color:var(--wo-text);background:var(--wo-border);}" +
@@ -5393,7 +5386,7 @@
             cfg.groups.forEach(function(group, idx) {
                 var vis = gs[group.id] ? gs[group.id].visible !== false : true;
                 var box = document.createElement('div');
-                box.style.cssText = 'border:1px solid #333;border-radius:6px;padding:8px;margin-bottom:8px;';
+                box.className = 'wo-card';
                 var fc = opts.fields.map(function(f) {
                     return '<label style="display:block;"><input type="checkbox" data-fd="' + f.replace(/"/g, '&quot;') + '" ' + (group.fields.indexOf(f) >= 0 ? 'checked' : '') + '>' + f + '</label>';
                 }).join('');
@@ -5415,58 +5408,58 @@
                 }
 
                 box.innerHTML =
-                    '<div data-coll-header style="display:flex;align-items:center;gap:6px;padding:4px 0;">' +
-                    '<span data-coll-arrow style="font-size:10px;color:#aaa;min-width:10px;">▶</span>' +
-                    '<input type="text" value="' + group.title.replace(/"/g, '&quot;') + '" data-ti style="width:50%;background:#222;color:#eee;border:1px solid #333;padding:2px 5px;border-radius:3px;" onclick="event.stopPropagation()"> ' +
-                    '<label onclick="event.stopPropagation()"><input type="checkbox" data-v ' + (vis ? 'checked' : '') + '>Visible</label> ' +
-                    '<button data-d style="margin-left:auto;color:#e74c3c;" onclick="event.stopPropagation()">Delete</button>' +
+                    '<div data-coll-header class="wo-card-head">' +
+                    '<span data-coll-arrow class="wo-card-arrow">▶</span>' +
+                    '<input type="text" value="' + group.title.replace(/"/g, '&quot;') + '" data-ti class="wo-rule-title-input" style="flex:0 1 45%;" onclick="event.stopPropagation()"> ' +
+                    '<label onclick="event.stopPropagation()"><input type="checkbox" data-v ' + (vis ? 'checked' : '') + '> Visible</label> ' +
+                    '<button data-d type="button" class="wo-btn-ghost wo-kebab-item-danger" style="margin-left:auto;" onclick="event.stopPropagation()">Delete</button>' +
                     '</div>' +
                     '<div data-coll-body>' +
-                    '<div style="margin-top:4px;">Layout: <select data-la><option value="vertical" ' + (group.layout === 'vertical' ? 'selected' : '') + '>Vertical</option><option value="horizontal" ' + (group.layout === 'horizontal' ? 'selected' : '') + '>Horizontal</option></select> <label><input type="checkbox" data-c ' + (group.defaultCollapsed ? 'checked' : '') + '>Collapsed by default</label></div>' +
-                    '<div style="margin-top:4px;"><label style="color:#aaa;">Tooltip:</label><br><input type="text" data-tt value="' + (group.tooltip || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#333;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;margin-top:2px;"></div>' +
-                    '<div style="margin-top:4px;"><label style="color:#aaa;">Expanded Message:</label><br><textarea data-em style="width:100%;height:44px;background:#333;color:#aad4f5;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;margin-top:2px;">' + (group.expandedMsg || '').replace(/</g, '&lt;') + '</textarea></div>' +
+                    '<div style="margin-top:4px;">Layout: <select data-la><option value="vertical" ' + (group.layout === 'vertical' ? 'selected' : '') + '>Vertical</option><option value="horizontal" ' + (group.layout === 'horizontal' ? 'selected' : '') + '>Horizontal</option></select> <label><input type="checkbox" data-c ' + (group.defaultCollapsed ? 'checked' : '') + '> Collapsed by default</label></div>' +
+                    '<div style="margin-top:4px;"><label>Tooltip:</label><br><input type="text" data-tt value="' + (group.tooltip || '').replace(/"/g, '&quot;') + '" style="width:100%;margin-top:2px;"></div>' +
+                    '<div style="margin-top:4px;"><label>Expanded Message:</label><br><textarea data-em style="width:100%;height:44px;margin-top:2px;color:var(--wo-accent);">' + (group.expandedMsg || '').replace(/</g, '&lt;') + '</textarea></div>' +
                     '<div style="margin-top:6px;"><b>Table:</b> <select data-tb>' + to + '</select></div>' +
-                    '<div style="margin-top:6px;" id="__roweditor_' + idx + '"><b>Field Rows</b> <button data-addrow style="font-size:10px;margin-left:6px;">+ Add Row</button><div data-rowlist style="margin-top:4px;"></div></div>' +
-                    '<div style="margin-top:6px;max-height:90px;overflow:auto;border:1px solid #333;padding:4px;"><b>Rules:</b>' + rc + '</div>' +
-                    '<div style="margin-top:8px;border:1px solid #444;border-radius:4px;padding:6px;" id="__hm_block_' + idx + '">' +
-                    '<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#aaa;"><input type="checkbox" id="__hm_en_' + idx + '" ' + (group.headerMsg && group.headerMsg.enabled ? 'checked' : '') + '><b>Show inline header message</b></label>' +
-                    '<div style="margin-top:6px;border:1px solid #2a4a6a;border-radius:4px;padding:6px;">' +
-                    '<b style="color:#7ec8e3;font-size:11px;">Variable Fields</b> <span style="color:#555;font-size:10px;">(shown in expanded group body)</span><br>' +
+                    '<div style="margin-top:6px;" id="__roweditor_' + idx + '"><b>Field Rows</b> <button data-addrow type="button" class="wo-btn-ghost" style="margin-left:6px;">+ Add Row</button><div data-rowlist style="margin-top:4px;"></div></div>' +
+                    '<div style="margin-top:6px;max-height:90px;overflow:auto;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:4px;"><b>Rules:</b>' + rc + '</div>' +
+                    '<div class="wo-subbox" style="margin-top:8px;" id="__hm_block_' + idx + '">' +
+                    '<label style="display:flex;align-items:center;gap:6px;font-size:11px;"><input type="checkbox" id="__hm_en_' + idx + '" ' + (group.headerMsg && group.headerMsg.enabled ? 'checked' : '') + '><b>Show inline header message</b></label>' +
+                    '<div class="wo-subbox wo-subbox-accent" style="margin-top:6px;">' +
+                    '<b style="color:var(--wo-accent);font-size:11px;">Variable Fields</b> <span style="color:var(--wo-muted);font-size:10px;">(shown in expanded group body)</span><br>' +
                     '<div id="__vf_list_' + idx + '" style="margin-top:4px;">' +
                     (getVars().map(function(v) {
                         var checked = (group.varFields || []).indexOf(v.id) >= 0;
-                        return '<label style="display:block;font-size:11px;"><input type="checkbox" data-vref="' + v.id + '" ' + (checked ? 'checked' : '') + '> ' + v.label + ' <code style="color:#555;font-size:9px;">' + v.id + '</code></label>';
-                    }).join('') || '<span style="color:#555;font-size:10px;">No variables defined — create them in the Variables tab.</span>') +
+                        return '<label style="display:block;font-size:11px;"><input type="checkbox" data-vref="' + v.id + '" ' + (checked ? 'checked' : '') + '> ' + v.label + ' <code style="color:var(--wo-muted);font-size:9px;">' + v.id + '</code></label>';
+                    }).join('') || '<span style="color:var(--wo-muted);font-size:10px;">No variables defined — create them in the Variables tab.</span>') +
                     '</div>' +
                     '</div>' +
                     '<div id="__hm_opts_' + idx + '" style="margin-top:6px;' + (group.headerMsg && group.headerMsg.enabled ? '' : 'display:none;') + '">' +
                     '<div style="margin-bottom:4px;">Type: ' +
-                    '<select id="__hm_type_' + idx + '" style="background:#222;color:#eee;border:1px solid #444;font-size:11px;">' +
+                    '<select id="__hm_type_' + idx + '">' +
                     '<option value="field"' + (group.headerMsg && group.headerMsg.type === 'field' ? ' selected' : '') + '>Field value</option>' +
                     '<option value="rule"' + (group.headerMsg && group.headerMsg.type === 'rule' ? ' selected' : '') + '>Rule pass/fail message</option>' +
                     '<option value="variable"' + (group.headerMsg && group.headerMsg.type === 'variable' ? ' selected' : '') + '>Variable value</option>' +
                     '</select></div>' +
                     '<div id="__hm_field_wrap_' + idx + '" style="' + (group.headerMsg && (group.headerMsg.type === 'rule' || group.headerMsg.type === 'variable') ? 'display:none;' : '') + '">' +
-                    'Field: <select id="__hm_field_' + idx + '" style="background:#222;color:#eee;border:1px solid #444;font-size:11px;max-width:100%;">' +
+                    'Field: <select id="__hm_field_' + idx + '" style="max-width:100%;">' +
                     '<option value="">-- pick field --</option>' +
                     opts.fields.map(function(f) {
                         return '<option value="' + f.replace(/"/g, '&quot;') + '"' + (group.headerMsg && group.headerMsg.value === f ? ' selected' : '') + '>' + f + '</option>';
                     }).join('') +
                     '</select></div>' +
                     '<div id="__hm_rule_wrap_' + idx + '" style="' + (group.headerMsg && group.headerMsg.type === 'rule' ? '' : 'display:none;') + '">' +
-                    'Rule: <select id="__hm_rule_' + idx + '" style="background:#222;color:#eee;border:1px solid #444;font-size:11px;max-width:100%;">' +
+                    'Rule: <select id="__hm_rule_' + idx + '" style="max-width:100%;">' +
                     '<option value="">-- pick rule --</option>' +
                     cfg.rules.map(function(r) {
                         return '<option value="' + r.id + '"' + (group.headerMsg && group.headerMsg.value === r.id ? ' selected' : '') + '>' + r.label + '</option>';
                     }).join('') +
                     '</select>' +
-                    '<div style="margin-top:4px;"><label style="font-size:10px;color:#aaa;">Short pass message (leave blank to use rule\'s Pass Message):</label><br>' +
-                    '<input type="text" id="__hm_short_pass_' + idx + '" value="' + ((group.headerMsg && group.headerMsg.shortPassMsg) ? group.headerMsg.shortPassMsg.replace(/"/g, '&quot;') : '') + '" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:2px 4px;font-size:11px;margin-top:2px;"></div>' +
-                    '<div style="margin-top:4px;"><label style="font-size:10px;color:#aaa;">Short fail message (leave blank to use rule\'s Fail Messages):</label><br>' +
-                    '<input type="text" id="__hm_short_fail_' + idx + '" value="' + ((group.headerMsg && group.headerMsg.shortFailMsg) ? group.headerMsg.shortFailMsg.replace(/"/g, '&quot;') : '') + '" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:2px 4px;font-size:11px;margin-top:2px;"></div>' +
+                    '<div style="margin-top:4px;"><label style="font-size:10px;">Short pass message (leave blank to use rule\'s Pass Message):</label><br>' +
+                    '<input type="text" id="__hm_short_pass_' + idx + '" value="' + ((group.headerMsg && group.headerMsg.shortPassMsg) ? group.headerMsg.shortPassMsg.replace(/"/g, '&quot;') : '') + '" style="width:100%;margin-top:2px;"></div>' +
+                    '<div style="margin-top:4px;"><label style="font-size:10px;">Short fail message (leave blank to use rule\'s Fail Messages):</label><br>' +
+                    '<input type="text" id="__hm_short_fail_' + idx + '" value="' + ((group.headerMsg && group.headerMsg.shortFailMsg) ? group.headerMsg.shortFailMsg.replace(/"/g, '&quot;') : '') + '" style="width:100%;margin-top:2px;"></div>' +
                     '</div>' +
                     '<div id="__hm_var_wrap_' + idx + '" style="' + (group.headerMsg && group.headerMsg.type === 'variable' ? '' : 'display:none;') + '">' +
-                    'Variable: <select id="__hm_var_' + idx + '" style="background:#222;color:#7ec8e3;border:1px solid #444;font-size:11px;max-width:100%;">' +
+                    'Variable: <select id="__hm_var_' + idx + '" style="color:var(--wo-accent);max-width:100%;">' +
                     '<option value="">-- pick variable --</option>' +
                     getVars().map(function(v) {
                         return '<option value="' + v.id + '"' + (group.headerMsg && group.headerMsg.value === v.id ? ' selected' : '') + '>' + v.label + '</option>';
@@ -5531,13 +5524,13 @@
                     rl.innerHTML = '';
                     (group.fieldRows || []).forEach(function(row, ri) {
                         var rd = document.createElement('div');
-                        rd.style.cssText = 'display:flex;align-items:center;gap:4px;margin-bottom:4px;flex-wrap:nowrap;border:1px solid #2a2a2a;border-radius:4px;padding:4px;';
+                        rd.style.cssText = 'display:flex;align-items:center;gap:4px;margin-bottom:4px;flex-wrap:nowrap;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:4px;background:var(--wo-field);';
                         // each field cell
                         row.forEach(function(fk, fi) {
                             var cell = document.createElement('div');
                             cell.style.cssText = 'display:flex;align-items:center;gap:2px;flex:1 1 0;min-width:0;';
                             var sel = document.createElement('select');
-                            sel.style.cssText = 'flex:1;min-width:0;background:#222;color:#eee;border:1px solid #444;font-size:11px;';
+                            sel.style.cssText = 'flex:1;min-width:0;font-size:11px;';
                             var varOpts = getVars().map(function(v) {
                                 return '<option value="' + v.id.replace(/"/g, '&quot;') + '"' + (v.id === fk ? ' selected' : '') + '>⚙ ' + v.label.replace(/</g, '&lt;') + '</option>';
                             }).join('');
@@ -5565,7 +5558,7 @@
                             wInp.type = 'number';
                             wInp.min = '5';
                             wInp.max = '100';
-                            wInp.style.cssText = 'width:42px;background:#222;color:#eee;border:1px solid #444;font-size:10px;padding:1px 3px;';
+                            wInp.style.cssText = 'width:42px;font-size:10px;padding:1px 3px;';
                             wInp.title = '% width (leave blank for auto)';
                             wInp.placeholder = 'auto';
                             wInp.value = widthStore[key] !== undefined ? widthStore[key] : '';
@@ -5578,7 +5571,9 @@
                             rd.appendChild(cell);
                         });
                         var addBtn = document.createElement('button');
+                        addBtn.type = 'button';
                         addBtn.textContent = '+field';
+                        addBtn.className = 'wo-btn-ghost';
                         addBtn.style.cssText = 'font-size:10px;flex-shrink:0;';
                         addBtn.onclick = function() {
                             row.push(opts.fields[0] || '');
@@ -5586,8 +5581,10 @@
                             renderRows();
                         };
                         var delBtn = document.createElement('button');
+                        delBtn.type = 'button';
                         delBtn.textContent = '✕row';
-                        delBtn.style.cssText = 'font-size:10px;color:#e74c3c;flex-shrink:0;';
+                        delBtn.className = 'wo-btn-ghost wo-kebab-item-danger';
+                        delBtn.style.cssText = 'font-size:10px;flex-shrink:0;';
                         delBtn.onclick = function() {
                             group.fieldRows.splice(ri, 1);
                             group.fields = [].concat.apply([], group.fieldRows);
@@ -5656,7 +5653,9 @@
                 };
             });
             var b = document.createElement('button');
+            b.type = 'button';
             b.textContent = '+ Add Group';
+            b.className = 'wo-btn';
             b.onclick = function() {
                 cfg.groups.push({
                     id: 'g_' + Date.now(),
@@ -5674,24 +5673,27 @@
 
             // Add new field picker (fields not in any group)
             var addFieldDiv = document.createElement('div');
-            addFieldDiv.style.cssText = 'margin-top:12px;padding:8px;border:1px solid #444;border-radius:6px;';
-            addFieldDiv.innerHTML = '<b style="color:#aaa;">Add a field not yet in any group:</b><br>' +
-                '<select id="__new_field_pick" style="background:#222;color:#eee;border:1px solid #444;margin-top:4px;width:70%;">' +
+            addFieldDiv.className = 'wo-subbox';
+            addFieldDiv.style.cssText = 'margin-top:12px;';
+            addFieldDiv.innerHTML = '<b style="color:var(--wo-muted);">Add a field not yet in any group:</b><br>' +
+                '<select id="__new_field_pick" style="margin-top:4px;width:70%;">' +
                 '<option value="">-- pick field --</option>' +
                 opts.fields.map(function(f) {
                     return '<option value="' + f.replace(/"/g, '&quot;') + '">' + f + '</option>';
                 }).join('') +
-                '</select> into group: <select id="__new_field_grp" style="background:#222;color:#eee;border:1px solid #444;">' +
+                '</select> into group: <select id="__new_field_grp">' +
                 '<option value="">--</option>' +
                 cfg.groups.map(function(g, gi) {
                     return '<option value="' + gi + '">' + g.title + '</option>';
                 }).join('') +
-                '</select> <button id="__new_field_add">Add</button>';
+                '</select> <button id="__new_field_add" type="button" class="wo-btn-ghost">Add</button>';
             content.appendChild(addFieldDiv);
             // Pick from page button
             var pickBtn = document.createElement('button');
+            pickBtn.type = 'button';
             pickBtn.textContent = '🔍 Browse Page Fields';
-            pickBtn.style.cssText = 'margin-top:8px;padding:5px 12px;background:#8e44ad;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;';
+            pickBtn.className = 'wo-btn';
+            pickBtn.style.cssText = 'margin-top:8px;';
             pickBtn.onclick = function() {
                 openFieldBrowser(cfg, opts, function(added) {
                     if (added.length) groupsTab();
