@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.19.0';
+    var TOOL_VERSION = '0.19.1';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -1143,6 +1143,35 @@
         saveProfiles(profiles);
     }
 
+    // Before a re-import overwrites an EXISTING local profile, save whatever it
+    // currently holds under a timestamped backup slot — mirrors the "never lose
+    // work" guarantee switchProfile() already gives normal profile switches.
+    // No-ops on a true first-time import (nothing to protect). If `id` is the
+    // currently active profile, the live edits (not just its last save) are
+    // what get backed up, since that's what's actually about to be discarded.
+    function backupProfileBeforeOverwrite(id) {
+        var profiles = getProfiles();
+        var existing = profiles[id];
+        if (!existing) return null;
+        var backupId = id + '_backup_' + Date.now();
+        var backupName = (existing.name || id) + ' (before re-import, ' + new Date().toLocaleDateString() + ')';
+        var isActive = getActiveProfileId() === id;
+        var snap = isActive ?
+            snapshotProfile({
+                id: backupId,
+                name: backupName,
+                description: existing.description || '',
+                configVersion: existing.configVersion
+            }) :
+            Object.assign({}, existing, {
+                id: backupId,
+                name: backupName
+            });
+        profiles[backupId] = snap;
+        saveProfiles(profiles);
+        return backupId;
+    }
+
     // ── GitHub-hosted preset fetch (configs/index.json + configs/<id>.json) ──
     function fetchProfileIndex() {
         return new Promise(function(resolve) {
@@ -1188,14 +1217,21 @@
         });
     }
 
-    // Download a GitHub preset, register it locally, and switch to it.
+    // Download a GitHub preset, register it locally, and switch to it. If a
+    // profile with this id already exists locally (a RE-import, not a first
+    // install), whatever it currently holds is backed up first — see
+    // backupProfileBeforeOverwrite().
     function installProfileFromGitHub(id) {
         return fetchProfile(id).then(function(p) {
             if (!p) return false;
+            var backupId = backupProfileBeforeOverwrite(id);
             registerProfile(p);
             localStorage.setItem(ACTIVE_PROFILE_KEY, p.id); // before applyProfile's auto-save fires
             applyProfile(p);
-            return true;
+            return {
+                ok: true,
+                backupId: backupId
+            };
         });
     }
 
@@ -3766,7 +3802,8 @@
                 var statusEl = modal.querySelector('#__inst_status');
                 statusEl.textContent = 'Installing...';
                 goBtn.disabled = true;
-                installProfileFromGitHub(selectedProfileId).then(function(ok) {
+                installProfileFromGitHub(selectedProfileId).then(function(result) {
+                    var ok = !!(result && result.ok);
                     statusEl.textContent = ok ? 'Done!' : 'Could not install — starting with basic defaults.';
                     setTimeout(finish, ok ? 300 : 1200);
                 });
@@ -5240,11 +5277,22 @@
                 listDiv.querySelectorAll('.__pf_import').forEach(function(btn) {
                     btn.onclick = function() {
                         var id = btn.getAttribute('data-id');
+                        var already = !!profiles[id];
+                        if (already) {
+                            var isActive = getActiveProfileId() === id;
+                            var msg = 'Re-import "' + id + '" from GitHub?\n\n' +
+                                (isActive ?
+                                    'This is your currently active config — it will be overwritten with the GitHub version.' :
+                                    'Your locally saved "' + id + '" profile will be overwritten with the GitHub version.') +
+                                '\n\nWhatever it currently holds will be saved as a backup profile first, so nothing is lost — but any local edits you made under this profile stop being the "' + id + '" profile once this runs.';
+                            if (!confirm(msg)) return;
+                        }
                         btn.disabled = true;
                         btn.textContent = 'Importing...';
-                        installProfileFromGitHub(id).then(function(ok) {
+                        installProfileFromGitHub(id).then(function(result) {
+                            var ok = !!(result && result.ok);
                             if (ok) {
-                                alert('Imported and switched.');
+                                alert('Imported and switched.' + (result.backupId ? ' Your previous version was saved as a backup profile — see Local Profiles.' : ''));
                                 modal.remove();
                                 render();
                             } else {
