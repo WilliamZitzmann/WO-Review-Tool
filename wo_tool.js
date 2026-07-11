@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.5';
+    var TOOL_VERSION = '0.20.6';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -3079,7 +3079,17 @@
             "#__wo_dock .wo-btn-pass{background:var(--wo-pass);color:#04210c;border-color:var(--wo-pass);}" +
             "#__wo_dock .wo-btn-fail{background:var(--wo-fail);color:#2b0705;border-color:var(--wo-fail);}" +
             "#__wo_dock .wo-showall{width:100%;margin-top:4px;text-align:center;}" +
-            "#__wo_dock .wo-footer{text-align:center;color:var(--wo-muted);font-size:10px;padding:8px 0 2px;opacity:.7;}";
+            "#__wo_dock .wo-footer{text-align:center;color:var(--wo-muted);font-size:10px;padding:8px 0 2px;opacity:.7;}" +
+            // Chrome/Edge are both Chromium, so -webkit-scrollbar is reliable
+            // here (unlike most cross-browser CSS, this tool is Chrome/Edge-
+            // only already — see the File System Access API usage elsewhere).
+            // Standard scrollbar-width/-color are included too for forward
+            // compatibility; harmless no-ops where unsupported.
+            "#__wo_dock #__wo_groups,#__wo_dock #__wo_scanlog{scrollbar-width:thin;scrollbar-color:#30363d #0d1117;}" +
+            "#__wo_dock #__wo_groups::-webkit-scrollbar,#__wo_dock #__wo_scanlog::-webkit-scrollbar{width:8px;}" +
+            "#__wo_dock #__wo_groups::-webkit-scrollbar-track,#__wo_dock #__wo_scanlog::-webkit-scrollbar-track{background:#0d1117;}" +
+            "#__wo_dock #__wo_groups::-webkit-scrollbar-thumb,#__wo_dock #__wo_scanlog::-webkit-scrollbar-thumb{background:#30363d;border-radius:4px;}" +
+            "#__wo_dock #__wo_groups::-webkit-scrollbar-thumb:hover,#__wo_dock #__wo_scanlog::-webkit-scrollbar-thumb:hover{background:#454d59;}";
         var styleEl = document.createElement('style');
         styleEl.id = '__wo_panel_style';
         styleEl.textContent = css;
