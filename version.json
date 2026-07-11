@@ -1,10 +1,17 @@
 {
-  "latest": "0.20.2",
+  "latest": "0.20.3",
   "channels": {
-    "stable": "0.20.2",
-    "beta": "0.20.2"
+    "stable": "0.20.3",
+    "beta": "0.20.3"
   },
   "versions": [
+    {
+      "version": "0.20.3",
+      "changes": [
+        "Fixed: the tooltip and hide icons in a group header sat at the left (next to the title) instead of the right whenever there was no header message showing — including always, pre-scan, since that's exactly when there's nothing to push them over. They now stay pinned right regardless.",
+        "Escalated the panel body's scroll behavior to !important — two prior attempts at plain (non-!important) inline styles still wasn't enough to make expanding multiple groups scroll instead of cutting content off, which points at something on the Maximo page forcing scroll/overflow behavior globally"
+      ]
+    },
     {
       "version": "0.20.2",
       "changes": [

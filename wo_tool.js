@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.2';
+    var TOOL_VERSION = '0.20.3';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -3024,7 +3024,7 @@
             "#__wo_dock .__wo_th:focus-visible{outline:2px solid var(--wo-accent);outline-offset:-2px;}" +
             "#__wo_dock .wo-th-title{display:flex;align-items:center;gap:6px;flex-shrink:0;font-weight:700;font-size:12px;}" +
             "#__wo_dock .wo-th-title b{white-space:nowrap;}" +
-            "#__wo_dock .wo-th-actions{display:flex;align-items:center;gap:2px;flex-shrink:0;}" +
+            "#__wo_dock .wo-th-actions{display:flex;align-items:center;gap:2px;flex-shrink:0;margin-left:auto;}" +
             "#__wo_dock .wo-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;display:inline-block;}" +
             "#__wo_dock .__wo_tx{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);opacity:.5;cursor:pointer;flex-shrink:0;}" +
             "#__wo_dock .__wo_tx:hover,#__wo_dock .__wo_tx:focus-visible{opacity:1;background:var(--wo-field);color:var(--wo-fail);}" +
@@ -3114,8 +3114,16 @@
             '</div>' +
             '</div>' +
             '<div id="__wo_status" style="padding:6px 12px;color:#9aa4af;font-size:11px;min-height:15px;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
-            '<div id="__wo_scanlog" style="padding:0 12px 6px;font-size:10.5px;color:#9aa4af;max-height:80px;overflow-y:auto;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
-            '<div id="__wo_body" style="flex:1 1 0;min-height:0;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:8px;background:#0d1117;color:#f0f3f6;"></div>';
+            '<div id="__wo_scanlog" style="padding:0 12px 6px;font-size:10.5px;color:#9aa4af;max-height:80px;overflow-y:auto!important;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
+            // !important on the scroll-critical properties: two prior rounds
+            // of plain inline styles (correct on paper — flex:1 1 0 +
+            // min-height:0 + overflow-y:auto is the standard scrollable-flex-
+            // child pattern) still didn't produce a scrollbar in real Maximo,
+            // which points at the host page forcing something like
+            // `overflow: visible` globally via its own !important rule.
+            // Inline alone loses to that; !important is the strongest
+            // available counter short of literally not being CSS.
+            '<div id="__wo_body" style="flex:1 1 0!important;min-height:0!important;height:0!important;overflow-y:auto!important;padding:8px;display:flex;flex-direction:column;gap:8px;background:#0d1117;color:#f0f3f6;"></div>';
         document.body.appendChild(panel);
         bodyEl = panel.querySelector('#__wo_body');
         statusEl = panel.querySelector('#__wo_status');
@@ -3400,7 +3408,13 @@
                 }
             }
             // ── header inline message ──
-            var headerMsgHtml = '';
+            // Always emit the wrapping span, even empty — it's the flex:1
+            // spacer between the title and the action icons. Without it
+            // present (e.g. pre-scan, when dots/hmText are both blank, or
+            // any group with no header message configured), the actions
+            // cluster has nothing pushing it right and collapses in next to
+            // the title instead of staying pinned to the right edge.
+            var headerMsgHtml = '<span class="wo-header-msg"></span>';
             if (!preScan && group.headerMsg && group.headerMsg.enabled) {
                 var hmRaw = group.headerMsg.value || '';
                 var hmText = '';
