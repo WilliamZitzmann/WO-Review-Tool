@@ -20,7 +20,21 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.16';
+    var TOOL_VERSION = '0.20.17';
+
+    // The main panel header and Setup titlebar are set to this same fixed
+    // height (instead of just letting padding/content size them) so the two
+    // line up when the Setup window is snapped beside the docked panel.
+    // Matches Maximo's own Carbon header when present, so the tool's chrome
+    // reads as part of one continuous toolbar rather than a mismatched
+    // overlay; falls back to Carbon's standard 48px otherwise.
+    function getHostHeaderHeight() {
+        try {
+            var h = document.querySelector('.bx--header');
+            if (h && h.offsetHeight > 0) return h.offsetHeight;
+        } catch (e) {}
+        return 48;
+    }
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -3128,7 +3142,7 @@
             "#__wo_dock .wo-collapse-btn:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
             "#__wo_dock.is-collapsed>*:not(.wo-collapse-btn){display:none;}" +
             "#__wo_dock .wo-mono{font-family:Consolas,'Cascadia Mono',monospace;font-variant-numeric:tabular-nums;}" +
-            "#__wo_dock .wo-head{background:var(--wo-surface-2);padding:10px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--wo-border);gap:8px;}" +
+            "#__wo_dock .wo-head{height:var(--wo-header-h,48px);box-sizing:border-box;background:var(--wo-surface-2);padding:0 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--wo-border);gap:8px;flex-shrink:0;}" +
             "#__wo_dock .wo-head-title{display:flex;flex-direction:column;line-height:1.2;min-width:0;}" +
             "#__wo_dock .wo-head-title b{font-size:13px;font-weight:800;color:#ffffff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
             "#__wo_dock .wo-head-title span{font-size:11px;color:var(--wo-muted);font-weight:400;}" +
@@ -3257,6 +3271,7 @@
         // expanded above, even if the groups region's own scroll behavior
         // is ever fighting something on the host page.
         panel.style.cssText = 'position:fixed;top:0;right:0;width:' + (startCollapsed ? 0 : PANEL_W) + 'px;height:100vh;background:#0d1117;z-index:999999;font-size:12px;display:flex;flex-direction:column;box-shadow:-4px 0 14px rgba(0,0,0,.5);';
+        panel.style.setProperty('--wo-header-h', getHostHeaderHeight() + 'px');
         panel.innerHTML =
             '<button id="__wo_collapse_btn" class="wo-collapse-btn" type="button" title="' + (startCollapsed ? 'Expand panel' : 'Collapse panel') + '" aria-label="' + (startCollapsed ? 'Expand panel' : 'Collapse panel') + '">' + (startCollapsed ? '◀' : '▶') + '</button>' +
             '<div class="wo-head">' +
@@ -3465,7 +3480,7 @@
                     '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
                     '<circle cx="8" cy="8" r="6.3" stroke="currentColor" stroke-width="1.3"/>' +
                     '<line x1="8" y1="7.1" x2="8" y2="11.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' +
-                    '<circle cx="8" cy="4.9" r="0.9" stroke="currentColor" stroke-width="2.2"/>' +
+                    '<circle cx="8" cy="4.9" r="0.45" stroke="currentColor" stroke-width="0.9"/>' +
                     '</svg></span>';
             }
 
@@ -4231,7 +4246,7 @@
             "#__wo_setup_modal{--wo-bg:#0d1117;--wo-surface:#161b22;--wo-surface-2:#1f2630;--wo-field:#1f2630;--wo-border:#30363d;--wo-text:#f0f3f6;--wo-muted:#9aa4af;--wo-accent:#58a6ff;--wo-on-accent:#04101f;--wo-pass:#3fb950;--wo-fail:#f85149;--wo-warn:#d29922;--wo-r-panel:10px;--wo-r-card:6px;--wo-r-ctl:6px;font-family:'Segoe UI',system-ui,sans-serif;background:var(--wo-bg);color:var(--wo-text);}" +
             "#__wo_setup_modal .wo-mono{font-family:Consolas,'Cascadia Mono',monospace;}" +
             // Title bar
-            "#__wo_setup_modal .wo-modal-titlebar{display:flex;justify-content:space-between;align-items:center;cursor:move;user-select:none;padding:10px 12px;background:var(--wo-surface-2);border-radius:var(--wo-r-panel) var(--wo-r-panel) 0 0;border-bottom:1px solid var(--wo-border);margin:-10px -10px 0;}" +
+            "#__wo_setup_modal .wo-modal-titlebar{height:var(--wo-header-h,48px);box-sizing:border-box;flex-shrink:0;display:flex;justify-content:space-between;align-items:center;cursor:move;user-select:none;padding:0 12px;background:var(--wo-surface-2);border-radius:var(--wo-r-panel) var(--wo-r-panel) 0 0;border-bottom:1px solid var(--wo-border);margin:-10px -10px 0;}" +
             "#__wo_setup_modal .wo-modal-title{font-size:13px;font-weight:800;color:#fff;}" +
             "#__wo_setup_modal .wo-modal-title-actions{display:flex;align-items:center;gap:8px;}" +
             // Tab bar — grouped into content tabs / management tabs / utility
@@ -4255,8 +4270,12 @@
             // structure instead of a stray gap.
             "#__wo_setup_modal .wo-tab-group + .wo-tab-group:not(.wo-tab-group-end){margin-left:10px;padding-left:10px;border-left:1px solid var(--wo-border);}" +
             "#__wo_setup_modal .wo-tab-group-end{margin-left:auto;padding-left:10px;border-left:1px solid var(--wo-border);}" +
-            "#__wo_setup_modal .wo-tab-btn{position:relative;display:inline-flex;align-items:center;gap:6px;flex-shrink:0;font:inherit;font-weight:600;font-size:11.5px;padding:7px 11px 8px;margin-bottom:-1px;border-radius:7px 7px 0 0;border:none;border-right:1px solid var(--wo-border);background:transparent;color:var(--wo-muted);cursor:pointer;}" +
-            "#__wo_setup_modal .wo-tab-btn:last-child{border-right:none;}" +
+            "#__wo_setup_modal .wo-tab-btn{position:relative;display:inline-flex;align-items:center;gap:6px;flex-shrink:0;font:inherit;font-weight:600;font-size:11.5px;padding:7px 11px 8px;margin-bottom:-1px;border-radius:7px 7px 0 0;border:none;background:transparent;color:var(--wo-muted);cursor:pointer;}" +
+            // Chrome-style separator: a short line only through the middle
+            // of the tab (not full-height like a real border), that
+            // disappears next to the active tab on either side.
+            "#__wo_setup_modal .wo-tab-btn:not(:last-child)::after{content:'';position:absolute;top:50%;right:0;transform:translateY(-50%);width:1px;height:14px;background:var(--wo-border);}" +
+            "#__wo_setup_modal .wo-tab-btn:has(+ .wo-tab-btn.is-active)::after{content:none;}" +
             "#__wo_setup_modal .wo-tab-btn:hover{color:var(--wo-text);background:var(--wo-field);}" +
             "#__wo_setup_modal .wo-tab-btn:focus-visible{outline:2px solid var(--wo-accent);outline-offset:-1px;z-index:3;}" +
             "#__wo_setup_modal .wo-tab-btn-ghost{font-weight:400;color:var(--wo-muted);font-size:11px;}" +
@@ -4264,7 +4283,6 @@
             "#__wo_setup_modal .wo-tab-btn.wo-tab-mode-icon .wo-tab-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;}" +
             "#__wo_setup_modal .wo-tab-btn.wo-tab-mode-icon{padding-left:9px;padding-right:9px;gap:0;}" +
             "#__wo_setup_modal .wo-tab-btn.wo-tab-mode-word .wo-tab-icon{display:none;}" +
-            "#__wo_setup_modal .wo-tab-btn.is-active,#__wo_setup_modal .wo-tab-btn:has(+ .wo-tab-btn.is-active){border-right-color:transparent;}" +
             "#__wo_setup_modal .wo-tab-btn.is-active{z-index:2;color:var(--wo-text);background:var(--wo-surface);}" +
             "#__wo_setup_modal .wo-tab-btn.is-active::before,#__wo_setup_modal .wo-tab-btn.is-active::after{content:'';position:absolute;bottom:0;width:11px;height:11px;}" +
             "#__wo_setup_modal .wo-tab-btn.is-active::before{left:-11px;background:radial-gradient(circle at top left,transparent 11px,var(--wo-surface) 11.5px);}" +
@@ -4314,9 +4332,24 @@
             "#__wo_setup_modal .wo-kebab-check{margin-left:auto;flex-shrink:0;color:var(--wo-accent);}" +
             "#__wo_setup_modal .wo-kebab-item-danger{color:var(--wo-fail);}" +
             "#__wo_setup_modal label{color:var(--wo-muted);}" +
-            "#__wo_setup_modal .wo-resize-handle{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;color:var(--wo-muted);z-index:5;}" +
+            "#__wo_setup_modal .wo-resize-handle{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;color:var(--wo-muted);z-index:6;}" +
             "#__wo_setup_modal .wo-resize-handle:hover{color:var(--wo-text);}" +
-            "#__wo_setup_modal .wo-resize-handle svg{position:absolute;right:2px;bottom:2px;pointer-events:none;}";
+            "#__wo_setup_modal .wo-resize-handle svg{position:absolute;right:2px;bottom:2px;pointer-events:none;}" +
+            // Invisible hit zones for the other 3 corners + 4 edges.
+            // Corners sit at z-index 6 (above the edges) so the small
+            // corner squares win in the region where an edge strip would
+            // otherwise overlap them.
+            "#__wo_setup_modal .wo-resize-edge{position:absolute;z-index:5;}" +
+            "#__wo_setup_modal .wo-resize-edge-n,#__wo_setup_modal .wo-resize-edge-s{left:12px;right:12px;height:6px;cursor:ns-resize;}" +
+            "#__wo_setup_modal .wo-resize-edge-n{top:-3px;}" +
+            "#__wo_setup_modal .wo-resize-edge-s{bottom:-3px;}" +
+            "#__wo_setup_modal .wo-resize-edge-e,#__wo_setup_modal .wo-resize-edge-w{top:12px;bottom:12px;width:6px;cursor:ew-resize;}" +
+            "#__wo_setup_modal .wo-resize-edge-e{right:-3px;}" +
+            "#__wo_setup_modal .wo-resize-edge-w{left:-3px;}" +
+            "#__wo_setup_modal .wo-resize-corner{position:absolute;width:14px;height:14px;z-index:6;}" +
+            "#__wo_setup_modal .wo-resize-corner-nw{top:-3px;left:-3px;cursor:nwse-resize;}" +
+            "#__wo_setup_modal .wo-resize-corner-ne{top:-3px;right:-3px;cursor:nesw-resize;}" +
+            "#__wo_setup_modal .wo-resize-corner-sw{bottom:-3px;left:-3px;cursor:nesw-resize;}";
         var styleEl = document.createElement('style');
         styleEl.id = '__wo_setup_style';
         styleEl.textContent = css;
@@ -4343,6 +4376,7 @@
         var modal = document.createElement('div');
         modal.id = '__wo_setup_modal';
         modal.style.cssText = 'position:fixed;top:3%;left:10%;width:75%;height:92%;z-index:9999999;padding:10px;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);display:flex;flex-direction:column;font-size:12px;';
+        modal.style.setProperty('--wo-header-h', getHostHeaderHeight() + 'px');
         // Minimalist line-icon per tab, keyed by the same id used for the
         // per-tab display-mode override (icon-only / word-only / both).
         var TAB_ICONS = {
@@ -4351,11 +4385,10 @@
             vars: '<path d="M5.6 2.8C4.1 2.8 3.7 3.6 3.7 4.6V6.4C3.7 7.1 3.4 7.5 2.6 7.7V8.3C3.4 8.5 3.7 8.9 3.7 9.6V11.4C3.7 12.4 4.1 13.2 5.6 13.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M10.4 2.8C11.9 2.8 12.3 3.6 12.3 4.6V6.4C12.3 7.1 12.6 7.5 13.4 7.7V8.3C12.6 8.5 12.3 8.9 12.3 9.6V11.4C12.3 12.4 11.9 13.2 10.4 13.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>',
             scan: '<path d="M2.5 5.5V3.5C2.5 2.9 2.9 2.5 3.5 2.5H5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M10.5 2.5H12.5C13.1 2.5 13.5 2.9 13.5 3.5V5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M13.5 10.5V12.5C13.5 13.1 13.1 13.5 12.5 13.5H10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M5.5 13.5H3.5C2.9 13.5 2.5 13.1 2.5 12.5V10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="8" r="1.6" stroke="currentColor" stroke-width="1.3"/>',
             profiles: '<circle cx="8" cy="5.3" r="2.3" stroke="currentColor" stroke-width="1.3"/><path d="M3 13.2C3.6 10.6 5.5 9.3 8 9.3C10.5 9.3 12.4 10.6 13 13.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
-            // Teeth drawn as thick round-capped strokes rather than filled
-            // rects — see the comment on the rule kebab icon: SVG `fill`
-            // doesn't reliably repaint against a competing host-page rule
-            // in this Chromium version, `stroke` does.
-            settings: '<circle cx="8" cy="8" r="4" stroke="currentColor" stroke-width="1.1"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/><path d="M8 1.9L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M8 1.9L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" transform="rotate(60 8 8)"/><path d="M8 1.9L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" transform="rotate(120 8 8)"/><path d="M8 1.9L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" transform="rotate(180 8 8)"/><path d="M8 1.9L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" transform="rotate(240 8 8)"/><path d="M8 1.9L8 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" transform="rotate(300 8 8)"/>',
+            // A proper gear silhouette (single zigzag outline path + inner
+            // ring), not filled — see the comment on the rule kebab icon
+            // for why every icon here is stroke-only.
+            settings: '<path d="M8 2.3L9 3.9L10.8 3.4L11 5.3L12.8 6L12.3 7.8L13.7 9L12.3 10.2L12.8 12L11 12.7L10.8 14.6L9 14.1L8 15.7L7 14.1L5.2 14.6L5 12.7L3.2 12L3.7 10.2L2.3 9L3.7 7.8L3.2 6L5 5.3L5.2 3.4L7 3.9Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><circle cx="8" cy="8" r="2.3" stroke="currentColor" stroke-width="1.2"/>',
             update: '<path d="M12.8 5.2A5 5 0 1 0 13.5 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M12.8 2.5V5.2H10.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
             guide: '<path d="M2.5 3.5C2.5 3 2.9 2.7 3.4 2.8C5 3 6.5 3.6 8 4.6C9.5 3.6 11 3 12.6 2.8C13.1 2.7 13.5 3 13.5 3.5V11.5C13.5 12 13.1 12.3 12.6 12.4C11 12.6 9.5 13.2 8 14.2C6.5 13.2 5 12.6 3.4 12.4C2.9 12.3 2.5 12 2.5 11.5V3.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 4.6V14.2" stroke="currentColor" stroke-width="1.2"/>',
             exp: '<path d="M8 10V2.5M8 2.5L5.5 5M8 2.5L10.5 5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.5 10V12.5C2.5 13.1 2.9 13.5 3.5 13.5H12.5C13.1 13.5 13.5 13.1 13.5 12.5V10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -4390,8 +4423,6 @@
             tabBtn('__s_groups', 'groups', 'Groups & Display') +
             tabBtn('__s_vars', 'vars', 'Variables') +
             tabBtn('__s_scan', 'scan', 'Scan') +
-            '</div>' +
-            '<div class="wo-tab-group">' +
             tabBtn('__s_profiles', 'profiles', 'Profiles') +
             tabBtn('__s_settings', 'settings', 'Settings') +
             tabBtn('__s_update', 'update', 'Update') +
@@ -4403,10 +4434,22 @@
             '</div>' +
             '</div>' +
             '<div id="__s_content" class="wo-modal-content"></div>' +
+            // Bottom-right keeps the visible grab-icon affordance; the other
+            // 3 corners + 4 edges are plain invisible hit zones — showing 8
+            // icons around the frame would be more visual noise than a
+            // resizable panel needs, and the cursor change on hover is
+            // enough of a hint once one corner has taught the pattern.
             '<div class="wo-resize-handle" id="__s_resize">' +
             '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">' +
             '<path d="M9 1L1 9M9 5L5 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' +
-            '</svg></div>';
+            '</svg></div>' +
+            '<div class="wo-resize-edge wo-resize-edge-n" id="__s_resize_n"></div>' +
+            '<div class="wo-resize-edge wo-resize-edge-s" id="__s_resize_s"></div>' +
+            '<div class="wo-resize-edge wo-resize-edge-e" id="__s_resize_e"></div>' +
+            '<div class="wo-resize-edge wo-resize-edge-w" id="__s_resize_w"></div>' +
+            '<div class="wo-resize-corner wo-resize-corner-nw" id="__s_resize_nw"></div>' +
+            '<div class="wo-resize-corner wo-resize-corner-ne" id="__s_resize_ne"></div>' +
+            '<div class="wo-resize-corner wo-resize-corner-sw" id="__s_resize_sw"></div>';
         document.body.appendChild(modal);
         attachTooltip(modal.querySelector('#__s_resize'), 'Drag to resize');
         modal.querySelectorAll('.wo-tab-btn[data-tab-key]').forEach(function(b) {
@@ -4541,17 +4584,19 @@
         });
         modal.addEventListener('click', closeTabCtxMenu);
 
-        // Resize logic — custom handle (bottom-right corner) rather than
-        // native CSS resize:both, for the same reason the drag-to-move uses
-        // custom JS: consistent styling/behavior instead of the browser's
-        // own resize affordance, and room for min-size clamping.
-        (function() {
-            var handle = modal.querySelector('#__s_resize');
+        // Resize logic — custom handles on all 4 edges + 4 corners rather
+        // than native CSS resize:both, for the same reason the drag-to-move
+        // uses custom JS: consistent styling/behavior instead of the
+        // browser's own resize affordance, and room for min-size clamping.
+        // `mode` is any combination of 'n'/'s' with 'e'/'w' (e.g. 'se','n').
+        function attachResizeHandle(handleEl, mode, cursor) {
             var startW = 0,
                 startH = 0,
+                startL = 0,
+                startT = 0,
                 mx = 0,
                 my = 0;
-            handle.addEventListener('mousedown', function(e) {
+            handleEl.addEventListener('mousedown', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
                 // A manual resize opts back out of whatever snap is active
@@ -4561,24 +4606,56 @@
                 var r = modal.getBoundingClientRect();
                 startW = r.width;
                 startH = r.height;
+                startL = modal.offsetLeft;
+                startT = modal.offsetTop;
                 mx = e.clientX;
                 my = e.clientY;
-                startPointerCapture(resize, null, 'nwse-resize');
+                startPointerCapture(resize, null, cursor);
             });
 
             function resize(e) {
-                var newW = Math.max(MODAL_MIN_W, startW + (e.clientX - mx));
-                var newH = Math.max(MODAL_MIN_H, startH + (e.clientY - my));
-                // Clamp to the viewport so resizing can't push the modal's
-                // right/bottom edge past the screen from its current
-                // top/left position.
-                var r = modal.getBoundingClientRect();
-                newW = Math.min(newW, window.innerWidth - r.left);
-                newH = Math.min(newH, window.innerHeight - r.top);
+                var dx = e.clientX - mx;
+                var dy = e.clientY - my;
+                var newL = startL,
+                    newT = startT,
+                    newW = startW,
+                    newH = startH;
+                if (mode.indexOf('e') !== -1) {
+                    newW = Math.max(MODAL_MIN_W, Math.min(startW + dx, window.innerWidth - startL));
+                } else if (mode.indexOf('w') !== -1) {
+                    // Right edge stays fixed — the left edge tracks the
+                    // cursor and width is derived from it, not the reverse,
+                    // so the two can never drift out of sync.
+                    var rightEdge = startL + startW;
+                    newL = Math.max(0, Math.min(startL + dx, rightEdge - MODAL_MIN_W));
+                    newW = rightEdge - newL;
+                }
+                if (mode.indexOf('s') !== -1) {
+                    newH = Math.max(MODAL_MIN_H, Math.min(startH + dy, window.innerHeight - startT));
+                } else if (mode.indexOf('n') !== -1) {
+                    var bottomEdge = startT + startH;
+                    newT = Math.max(0, Math.min(startT + dy, bottomEdge - MODAL_MIN_H));
+                    newH = bottomEdge - newT;
+                }
+                modal.style.left = newL + 'px';
+                modal.style.top = newT + 'px';
                 modal.style.width = newW + 'px';
                 modal.style.height = newH + 'px';
             }
-        })();
+        }
+        attachResizeHandle(modal.querySelector('#__s_resize'), 'se', 'nwse-resize');
+        [
+            ['__s_resize_n', 'n', 'ns-resize'],
+            ['__s_resize_s', 's', 'ns-resize'],
+            ['__s_resize_e', 'e', 'ew-resize'],
+            ['__s_resize_w', 'w', 'ew-resize'],
+            ['__s_resize_nw', 'nw', 'nwse-resize'],
+            ['__s_resize_ne', 'ne', 'nesw-resize'],
+            ['__s_resize_sw', 'sw', 'nesw-resize']
+        ].forEach(function(spec) {
+            var el = modal.querySelector('#' + spec[0]);
+            if (el) attachResizeHandle(el, spec[1], spec[2]);
+        });
 
         // Highlights which tab is active — the old flat button row never
         // indicated this at all.
@@ -4631,7 +4708,14 @@
                 // otherwise swallow their mouseup and eat the click.
                 if (e.target.closest('button')) return;
                 e.preventDefault();
-                clearSnap();
+                if (currentSnap) {
+                    clearSnap();
+                    var std = getStandardRect();
+                    modal.style.left = std.left + 'px';
+                    modal.style.top = std.top + 'px';
+                    modal.style.width = std.width + 'px';
+                    modal.style.height = std.height + 'px';
+                }
                 ox = modal.offsetLeft;
                 oy = modal.offsetTop;
                 mx = e.clientX;
@@ -4763,6 +4847,19 @@
             currentSnap = null;
             document.body.style.marginLeft = '';
             saveSetupSnap(null);
+        }
+
+        // Matches the modal's own initial (never-snapped) cssText rect —
+        // used to snap a currently-snapped window back to its normal size
+        // the moment you start dragging it away, rather than having it keep
+        // whatever oversized/undersized rect the snap left it at.
+        function getStandardRect() {
+            return {
+                left: window.innerWidth * 0.10,
+                top: window.innerHeight * 0.03,
+                width: window.innerWidth * 0.75,
+                height: window.innerHeight * 0.92
+            };
         }
 
         function onWindowResizeReapplySnap() {
@@ -5097,7 +5194,7 @@
                     // competing host-page rule, even though its own
                     // getComputedStyle reports the right value; `stroke`
                     // doesn't have this problem.
-                    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="3" r="1.4" stroke="currentColor" stroke-width="3.2"/><circle cx="8" cy="8" r="1.4" stroke="currentColor" stroke-width="3.2"/><circle cx="8" cy="13" r="1.4" stroke="currentColor" stroke-width="3.2"/></svg>' +
+                    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="3" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="13" r="0.7" stroke="currentColor" stroke-width="1.4"/></svg>' +
                     '</button>' +
                     '</span>' +
                     '</div>' +

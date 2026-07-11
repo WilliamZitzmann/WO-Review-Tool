@@ -1,10 +1,22 @@
 {
-  "latest": "0.20.16",
+  "latest": "0.20.17",
   "channels": {
-    "stable": "0.20.16",
-    "beta": "0.20.16"
+    "stable": "0.20.17",
+    "beta": "0.20.17"
   },
   "versions": [
+    {
+      "version": "0.20.17",
+      "changes": [
+        "Rule kebab dots (fixed in v0.20.16 to use stroke instead of fill) were rendered too thick and overlapping each other — resized to sit cleanly separated again; same fix applied to the info-icon dot",
+        "Setup tab bar: Rules through Update are now one visual group (no more odd gap at Scan/Profiles) — only Guide/Export/Import stays a separate group",
+        "Tab separators are now a short Chrome-style line through the middle of the tab, not a full-height border",
+        "Setup titlebar and the main panel header are now the same fixed height and font alignment, so they line up when the Setup window is snapped beside the docked panel — matches Maximo's own Carbon header height (queried live via .bx--header, falls back to 48px)",
+        "Dragging a snapped Setup window by its titlebar now reverts it to its standard (non-snapped) size immediately, instead of dragging around at the snapped size",
+        "Replaced the settings gear icon with a proper gear silhouette",
+        "Setup window can now be resized from any edge or corner, not just the bottom-right"
+      ]
+    },
     {
       "version": "0.20.16",
       "changes": [
