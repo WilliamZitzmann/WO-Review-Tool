@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.10';
+    var TOOL_VERSION = '0.20.11';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -3014,6 +3014,49 @@
     // feedback stay inline at their call sites, driven by statusColor()).
     // Injected once into <head>, guarded so repeated buildPanel() calls
     // (hot-reload, teardown+reinit) never stack duplicate <style> tags.
+
+    // Reusable "sleek" floating tooltip — a small styled div matching the
+    // rest of the panel, replacing native title= attributes (which render
+    // the browser's own unstyled tooltip). textOrFn may be a plain string
+    // or a function returning one; passing a function means the tooltip
+    // text is recomputed fresh on every hover instead of being frozen at
+    // whatever it was when attachTooltip() was first called — needed for
+    // things like the Scan button, whose hotkey can change after the fact.
+    function attachTooltip(el, textOrFn) {
+        if (!el) return;
+        el.addEventListener('mouseenter', function() {
+            var text = typeof textOrFn === 'function' ? textOrFn() : textOrFn;
+            if (!text) return;
+            var old = document.getElementById('__wo_tip_float');
+            if (old) old.remove();
+            var tt = document.createElement('div');
+            tt.id = '__wo_tip_float';
+            tt.style.cssText = 'position:fixed;z-index:9999999;background:#1f2630;color:#f0f3f6;font-size:11px;font-family:"Segoe UI",Arial,sans-serif;padding:6px 9px;border-radius:6px;max-width:240px;white-space:pre-wrap;box-shadow:0 4px 14px rgba(0,0,0,.5);border:1px solid #30363d;pointer-events:none;';
+            tt.textContent = text;
+            document.body.appendChild(tt);
+            var r = el.getBoundingClientRect();
+            tt.style.top = (r.bottom + 4) + 'px';
+            tt.style.left = Math.min(r.left, window.innerWidth - 250) + 'px';
+        });
+        el.addEventListener('mouseleave', function() {
+            var old = document.getElementById('__wo_tip_float');
+            if (old) old.remove();
+        });
+    }
+
+    // Shared by buildPanel() (initial bind) — applyHotkey() no longer needs
+    // to separately update the tooltip text on a hotkey change, since
+    // attachTooltip() re-runs this function fresh on every hover rather
+    // than freezing whatever text was current when it was first bound.
+    function scanBtnTooltipText() {
+        var st = {};
+        try {
+            st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+        } catch (e) {}
+        var hk = (st.rescanHotkey !== undefined) ? st.rescanHotkey : DEFAULT_HOTKEY;
+        return hk ? 'Scan (' + hk + ')' : 'Scan';
+    }
+
     // Collapses the panel to a 0-width strip with just a small protruding
     // handle (position:absolute, so it tracks the panel's own left edge —
     // at width:0 that edge coincides with the fixed right:0 viewport edge,
@@ -3222,17 +3265,11 @@
             setPanelCollapsed(!panel.classList.contains('is-collapsed'));
         };
         pushLayout(true);
-        // Set rescan button title to show hotkey
-        (function() {
-            var st = {};
-            try {
-                st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
-            } catch (e) {}
-            var hk = st.rescanHotkey || '';
-            var btn = panel.querySelector('#__wo_rescan');
-            if (btn) btn.title = hk ? 'Scan (' + hk + ')' : 'Scan';
-        })();
-
+        // Sleek floating tooltip instead of a native title=. Passing the
+        // function itself (not its current return value) means the text is
+        // recomputed fresh on every hover, so it can never go stale the way
+        // a one-time title= string could.
+        attachTooltip(panel.querySelector('#__wo_rescan'), scanBtnTooltipText);
     }
 
     function renderScanLog() {
@@ -3609,7 +3646,7 @@
                         statusColor(results[hmRaw].status) :
                         (group.headerMsg.type === 'variable' ? '#58a6ff' : 'var(--wo-muted)');
 
-                    headerMsgHtml = '<span class="wo-header-msg" style="color:' + hmColor + ';" title="' + String(hmText).replace(/"/g, '&quot;') + '">' + String(hmText).replace(/</g, '&lt;') + '</span>';
+                    headerMsgHtml = '<span class="wo-header-msg" style="color:' + hmColor + ';">' + String(hmText).replace(/</g, '&lt;') + '</span>';
                 }
             }
             tile.innerHTML = '<div class="__wo_th" role="button" tabindex="0" draggable="true" aria-expanded="' + (!collapsed) + '" aria-label="Toggle ' + String(group.title).replace(/"/g, '&quot;') + ' details">' +
@@ -3617,7 +3654,7 @@
                 headerMsgHtml +
                 '<span class="wo-th-actions">' + badgeHtml +
                 '<span class="wo-th-icons">' + tipHtml +
-                '<button class="__wo_tx" type="button" title="Hide this group" aria-label="Hide this group">' +
+                '<button class="__wo_tx" type="button" aria-label="Hide this group">' +
                 '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
                 '<path d="M1.5 8.4C3 5.6 5.4 3.6 8 3.6C10.6 3.6 13 5.6 14.5 8.4C13 11.2 10.6 13.2 8 13.2C5.4 13.2 3 11.2 1.5 8.4Z" stroke="currentColor" stroke-width="1.3"/>' +
                 '<circle cx="8" cy="8.4" r="1.9" stroke="currentColor" stroke-width="1.3"/>' +
@@ -3630,23 +3667,9 @@
 
             bodyEl.appendChild(tile);
 
-            var tipIcon = tile.querySelector('.__wo_tip_icon');
-            if (tipIcon) {
-                tipIcon.addEventListener('mouseenter', function() {
-                    var tt = document.createElement('div');
-                    tt.id = '__wo_tip_float';
-                    tt.style.cssText = 'position:fixed;z-index:9999999;background:#1f2630;color:#f0f3f6;font-size:11px;font-family:"Segoe UI",Arial,sans-serif;padding:6px 9px;border-radius:6px;max-width:240px;white-space:pre-wrap;box-shadow:0 4px 14px rgba(0,0,0,.5);border:1px solid #30363d;pointer-events:none;';
-                    tt.textContent = tipIcon.getAttribute('data-tip');
-                    document.body.appendChild(tt);
-                    var r = tipIcon.getBoundingClientRect();
-                    tt.style.top = (r.bottom + 4) + 'px';
-                    tt.style.left = Math.min(r.left, window.innerWidth - 250) + 'px';
-                });
-                tipIcon.addEventListener('mouseleave', function() {
-                    var old = document.getElementById('__wo_tip_float');
-                    if (old) old.remove();
-                });
-            }
+            attachTooltip(tile.querySelector('.__wo_tip_icon'), group.tooltip);
+            attachTooltip(tile.querySelector('.__wo_tx'), 'Hide this group');
+            if (hmText) attachTooltip(tile.querySelector('.wo-header-msg'), hmText);
             var colBtn = tile.querySelector('.__wo_col_toggle_btn');
             var colPanel = tile.querySelector('.__wo_col_panel');
             if (colBtn && colPanel) {
@@ -4158,15 +4181,34 @@
             "#__wo_setup_modal .wo-modal-title-actions{display:flex;align-items:center;gap:8px;}" +
             // Tab bar — grouped into content tabs / management tabs / utility
             // actions instead of one flat undifferentiated row of 11 buttons.
-            "#__wo_setup_modal .wo-modal-tabs{display:flex;align-items:center;flex-wrap:wrap;gap:14px;padding:8px 4px;border-bottom:1px solid var(--wo-border);margin-bottom:8px;}" +
-            "#__wo_setup_modal .wo-tab-group{display:flex;align-items:center;gap:2px;}" +
+            // Chrome-style tabs: the active tab's background matches the
+            // content area below it (.wo-modal-content), rounded on top,
+            // with a concave "inverted corner" at each bottom corner
+            // (radial-gradient pseudo-elements) so it visually flows into
+            // the content instead of looking like a separate rounded chip.
+            // A thin divider separates adjacent SIBLING tabs, except on
+            // either side of the active tab, where the tab's own
+            // background already does the separating.
+            "#__wo_setup_modal .wo-modal-tabs{position:relative;display:flex;align-items:flex-end;flex-wrap:wrap;gap:14px;padding:8px 4px 0;}" +
+            "#__wo_setup_modal .wo-modal-tabs::after{content:'';position:absolute;left:4px;right:4px;bottom:0;height:1px;background:var(--wo-border);z-index:0;}" +
+            "#__wo_setup_modal .wo-tab-group{display:flex;align-items:flex-end;position:relative;z-index:1;}" +
             "#__wo_setup_modal .wo-tab-group-end{margin-left:auto;}" +
-            "#__wo_setup_modal .wo-tab-btn{font:inherit;font-weight:600;font-size:11.5px;padding:6px 11px;border-radius:var(--wo-r-ctl);border:1px solid transparent;background:transparent;color:var(--wo-muted);cursor:pointer;}" +
+            "#__wo_setup_modal .wo-tab-btn{position:relative;font:inherit;font-weight:600;font-size:11.5px;padding:7px 11px 8px;margin-bottom:-1px;border-radius:7px 7px 0 0;border:none;border-right:1px solid var(--wo-border);background:transparent;color:var(--wo-muted);cursor:pointer;}" +
+            "#__wo_setup_modal .wo-tab-btn:last-child{border-right:none;}" +
             "#__wo_setup_modal .wo-tab-btn:hover{color:var(--wo-text);background:var(--wo-field);}" +
-            "#__wo_setup_modal .wo-tab-btn.is-active{color:var(--wo-on-accent);background:var(--wo-accent);}" +
-            "#__wo_setup_modal .wo-tab-btn:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
+            "#__wo_setup_modal .wo-tab-btn:focus-visible{outline:2px solid var(--wo-accent);outline-offset:-1px;z-index:3;}" +
             "#__wo_setup_modal .wo-tab-btn-ghost{font-weight:400;color:var(--wo-muted);font-size:11px;}" +
-            "#__wo_setup_modal .wo-modal-content{flex:1;min-height:0;overflow:auto;padding:2px 4px 8px;}" +
+            "#__wo_setup_modal .wo-tab-btn.is-active,#__wo_setup_modal .wo-tab-btn:has(+ .wo-tab-btn.is-active){border-right-color:transparent;}" +
+            "#__wo_setup_modal .wo-tab-btn.is-active{z-index:2;color:var(--wo-text);background:var(--wo-surface);}" +
+            "#__wo_setup_modal .wo-tab-btn.is-active::before,#__wo_setup_modal .wo-tab-btn.is-active::after{content:'';position:absolute;bottom:0;width:7px;height:7px;}" +
+            "#__wo_setup_modal .wo-tab-btn.is-active::before{left:-7px;background:radial-gradient(circle at top left,transparent 7px,var(--wo-surface) 7.5px);}" +
+            "#__wo_setup_modal .wo-tab-btn.is-active::after{right:-7px;background:radial-gradient(circle at top right,transparent 7px,var(--wo-surface) 7.5px);}" +
+            "#__wo_setup_modal .wo-modal-content{flex:1;min-height:0;overflow:auto;padding:10px 10px 8px;background:var(--wo-surface);border-radius:0 6px 8px 8px;margin:0 -10px -10px;}" +
+            "#__wo_setup_modal .wo-modal-content{scrollbar-width:thin;scrollbar-color:#30363d #0d1117;}" +
+            "#__wo_setup_modal .wo-modal-content::-webkit-scrollbar{width:8px;}" +
+            "#__wo_setup_modal .wo-modal-content::-webkit-scrollbar-track{background:#0d1117;}" +
+            "#__wo_setup_modal .wo-modal-content::-webkit-scrollbar-thumb{background:#30363d;border-radius:4px;}" +
+            "#__wo_setup_modal .wo-modal-content::-webkit-scrollbar-thumb:hover{background:#454d59;}" +
             // Generic form controls — buttons/inputs/textareas/selects used
             // throughout every tab's own markup.
             "#__wo_setup_modal .wo-btn{font:inherit;font-weight:700;font-size:11.5px;padding:6px 12px;border-radius:var(--wo-r-ctl);border:1px solid var(--wo-border);background:var(--wo-surface-2);color:var(--wo-text);cursor:pointer;}" +
@@ -4189,7 +4231,10 @@
             "#__wo_setup_modal .wo-card-head:hover{background:var(--wo-field);}" +
             "#__wo_setup_modal .wo-card>[data-coll-body]{padding:0 10px 10px;}" +
             "#__wo_setup_modal .wo-card-arrow{font-size:9px;color:var(--wo-muted);min-width:9px;}" +
-            "#__wo_setup_modal label{color:var(--wo-muted);}";
+            "#__wo_setup_modal label{color:var(--wo-muted);}" +
+            "#__wo_setup_modal .wo-resize-handle{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;color:var(--wo-muted);z-index:5;}" +
+            "#__wo_setup_modal .wo-resize-handle:hover{color:var(--wo-text);}" +
+            "#__wo_setup_modal .wo-resize-handle svg{position:absolute;right:2px;bottom:2px;pointer-events:none;}";
         var styleEl = document.createElement('style');
         styleEl.id = '__wo_setup_style';
         styleEl.textContent = css;
@@ -4243,8 +4288,56 @@
             '<button id="__s_imp" class="wo-tab-btn wo-tab-btn-ghost">Import</button>' +
             '</div>' +
             '</div>' +
-            '<div id="__s_content" class="wo-modal-content"></div>';
+            '<div id="__s_content" class="wo-modal-content"></div>' +
+            '<div class="wo-resize-handle" id="__s_resize">' +
+            '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">' +
+            '<path d="M9 1L1 9M9 5L5 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' +
+            '</svg></div>';
         document.body.appendChild(modal);
+        attachTooltip(modal.querySelector('#__s_resize'), 'Drag to resize');
+
+        // Resize logic — custom handle (bottom-right corner) rather than
+        // native CSS resize:both, for the same reason the drag-to-move uses
+        // custom JS: consistent styling/behavior instead of the browser's
+        // own resize affordance, and room for min-size clamping.
+        (function() {
+            var handle = modal.querySelector('#__s_resize');
+            var startW = 0,
+                startH = 0,
+                mx = 0,
+                my = 0;
+            var MIN_W = 420,
+                MIN_H = 320;
+            handle.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var r = modal.getBoundingClientRect();
+                startW = r.width;
+                startH = r.height;
+                mx = e.clientX;
+                my = e.clientY;
+                document.addEventListener('mousemove', resize);
+                document.addEventListener('mouseup', stopresize);
+            });
+
+            function resize(e) {
+                var newW = Math.max(MIN_W, startW + (e.clientX - mx));
+                var newH = Math.max(MIN_H, startH + (e.clientY - my));
+                // Clamp to the viewport so resizing can't push the modal's
+                // right/bottom edge past the screen from its current
+                // top/left position.
+                var r = modal.getBoundingClientRect();
+                newW = Math.min(newW, window.innerWidth - r.left);
+                newH = Math.min(newH, window.innerHeight - r.top);
+                modal.style.width = newW + 'px';
+                modal.style.height = newH + 'px';
+            }
+
+            function stopresize() {
+                document.removeEventListener('mousemove', resize);
+                document.removeEventListener('mouseup', stopresize);
+            }
+        })();
 
         // Highlights which tab is active — the old flat button row never
         // indicated this at all.
@@ -5864,9 +5957,9 @@
         var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
         var hk = (st.rescanHotkey !== undefined) ? st.rescanHotkey : DEFAULT_HOTKEY;
         if (window.__wo_hk_listener) document.removeEventListener('keydown', window.__wo_hk_listener);
-        // Update rescan button tooltip
-        var rescanBtn = panel && panel.querySelector('#__wo_rescan');
-        if (rescanBtn) rescanBtn.title = hk ? 'Scan (' + hk + ')' : 'Scan';
+        // No need to touch the Scan button's tooltip here — attachTooltip()
+        // was bound with scanBtnTooltipText itself (not a frozen string), so
+        // it re-reads __wo_settings fresh on every hover and can't go stale.
         if (!hk) return;
 
         window.__wo_hk_listener = function(e) {

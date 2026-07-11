@@ -1,10 +1,20 @@
 {
-  "latest": "0.20.10",
+  "latest": "0.20.11",
   "channels": {
-    "stable": "0.20.10",
-    "beta": "0.20.10"
+    "stable": "0.20.11",
+    "beta": "0.20.11"
   },
   "versions": [
+    {
+      "version": "0.20.11",
+      "changes": [
+        "Fixed a real bug: the Scan button's hotkey tooltip stayed blank on a fresh install (even though the default Ctrl+Shift+S shortcut was genuinely working) until you manually set a hotkey — a fallback logic mismatch between two places that compute the same thing",
+        "All tooltips now use the same sleek floating style as the group info icon, instead of the browser's plain default tooltip — applies to the Scan button, the hide-group icon, and a group's inline header message",
+        "Setup's scrollbar now matches the docked panel's (slim, dark, rounded)",
+        "Setup window is now resizable — drag the handle in the bottom-right corner",
+        "Setup's tabs now have a Chrome-style shape: rounded top corners, the active tab's background flows into the content area below it with a curved (not square) transition, and a light divider separates adjacent tabs except on either side of the active one"
+      ]
+    },
     {
       "version": "0.20.10",
       "changes": [
