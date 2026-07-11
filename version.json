@@ -1,10 +1,21 @@
 {
-  "latest": "0.19.1",
+  "latest": "0.20.0",
   "channels": {
-    "stable": "0.19.1",
-    "beta": "0.19.1"
+    "stable": "0.20.0",
+    "beta": "0.20.0"
   },
   "versions": [
+    {
+      "version": "0.20.0",
+      "changes": [
+        "New visual style for the docked panel (\"Signal\"): higher-contrast dark theme, bigger hit targets, full-width status coloring instead of small dots alone — chosen to be easy to scan quickly, not just prettier",
+        "Group tiles now collapse/expand from a click anywhere on the header, not just the small arrow button (the arrow still works too)",
+        "The small \"x\" that hid a group tile is now a faint eye icon that brightens on hover — same action (hide this group), clearer intent, less visually noisy at rest",
+        "Removed decorative emoji from status messages and banners (pin/refresh/checkmark/folder icons) in favor of plain text — the meaningful ✓ / ✗ / ⚠ status symbols are unchanged",
+        "All docked-panel styling now comes from a single stylesheet scoped to the tool's own panel, instead of styles written inline on every element — makes the look consistent and easier to adjust going forward",
+        "This covers the docked panel only. Setup's tabs (Rules, Groups, Variables, Scan, Profiles, Settings, Update) keep their current look for now — same visual system is coming to those next."
+      ]
+    },
     {
       "version": "0.19.1",
       "changes": [

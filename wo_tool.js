@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.19.1';
+    var TOOL_VERSION = '0.20.0';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -1253,12 +1253,14 @@
         if (old) old.remove();
         var banner = document.createElement('div');
         banner.id = '__wo_restore_banner';
-        banner.style.cssText = 'background:#1a2e3a;border:1px solid #2980b9;border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:11px;';
+        banner.className = 'wo-notice wo-info';
         banner.innerHTML =
-            '<div style="color:#7ec8e3;font-weight:bold;margin-bottom:4px;">⚠ Config was reset — backup file found</div>' +
-            '<div style="color:#aaa;margin-bottom:6px;">Click below to restore your settings from <b>' + (handle.name || 'backup') + '</b></div>' +
-            '<button id="__wo_restore_btn" style="background:#2980b9;color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:bold;">Restore Config</button>' +
-            ' <button id="__wo_restore_skip" style="background:none;border:none;color:#666;cursor:pointer;font-size:11px;">Start Fresh</button>';
+            '<div class="wo-notice-title">⚠ Config was reset — backup file found</div>' +
+            '<div class="wo-notice-body">Click below to restore your settings from <b>' + (handle.name || 'backup') + '</b></div>' +
+            '<div class="wo-notice-actions">' +
+            '<button id="__wo_restore_btn" type="button" class="wo-btn wo-btn-primary">Restore Config</button>' +
+            '<button id="__wo_restore_skip" type="button" class="wo-btn-ghost">Start Fresh</button>' +
+            '</div>';
         if (bodyEl) bodyEl.insertBefore(banner, bodyEl.firstChild);
         document.getElementById('__wo_restore_btn').onclick = function() {
             handle.requestPermission({
@@ -1275,7 +1277,7 @@
                             applyBackup(b);
                             banner.remove();
                             render();
-                            setStatus('✅ Config restored from ' + handle.name);
+                            setStatus('Config restored from ' + handle.name);
                         } catch (e) {
                             banner.remove();
                         }
@@ -1297,23 +1299,23 @@
         if (old) old.remove();
         var banner = document.createElement('div');
         banner.id = '__wo_newer_banner';
-        banner.style.cssText = 'background:#1a2a1a;border:1px solid #2ecc71;border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:11px;';
+        banner.className = 'wo-notice wo-pass';
         banner.innerHTML =
-            '<div style="color:#2ecc71;font-weight:bold;margin-bottom:4px;">📂 Newer config found in backup file</div>' +
-            '<div style="color:#aaa;margin-bottom:6px;">' +
+            '<div class="wo-notice-title">Newer config found in backup file</div>' +
+            '<div class="wo-notice-body">' +
             'Backup file: <b>' + fileSavedAt.slice(0, 16).replace('T', ' ') + '</b><br>' +
             'Current config: <b>' + localSavedAt.slice(0, 16).replace('T', ' ') + '</b><br>' +
             'This may be from another browser session. Load the backup?</div>' +
-            '<div style="display:flex;gap:6px;">' +
-            '<button id="__wo_load_bak_btn" style="background:#2ecc71;color:#000;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:bold;">Load Backup</button>' +
-            '<button id="__wo_keep_local_btn" style="background:none;border:none;color:#666;cursor:pointer;font-size:11px;">Keep Current</button>' +
+            '<div class="wo-notice-actions">' +
+            '<button id="__wo_load_bak_btn" type="button" class="wo-btn wo-btn-pass">Load Backup</button>' +
+            '<button id="__wo_keep_local_btn" type="button" class="wo-btn-ghost">Keep Current</button>' +
             '</div>';
         if (bodyEl) bodyEl.insertBefore(banner, bodyEl.firstChild);
         document.getElementById('__wo_load_bak_btn').onclick = function() {
             applyBackup(b);
             banner.remove();
             render();
-            setStatus('✅ Config loaded from backup file');
+            setStatus('Config loaded from backup file');
         };
         document.getElementById('__wo_keep_local_btn').onclick = function() {
             banner.remove();
@@ -1328,14 +1330,14 @@
         if (old) old.remove();
         var banner = document.createElement('div');
         banner.id = '__wo_backup_setup_banner';
-        banner.style.cssText = 'background:#2a1a1a;border:1px solid #e74c3c;border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:11px;';
+        banner.className = 'wo-notice wo-fail';
         banner.innerHTML =
-            '<div style="color:#e74c3c;font-weight:bold;margin-bottom:4px;">⚠ No backup protection</div>' +
-            '<div style="color:#aaa;margin-bottom:6px;">' + message + '</div>' +
-            '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
-            '<button id="__wo_set_new_backup" style="background:#e74c3c;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:bold;">Set New Backup Location</button>' +
-            '<button id="__wo_link_backup" style="background:#555;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;">Link Existing Backup File</button>' +
-            '<button id="__wo_backup_dismiss" style="background:none;border:none;color:#666;cursor:pointer;font-size:11px;">Don\'t ask again</button>' +
+            '<div class="wo-notice-title">⚠ No backup protection</div>' +
+            '<div class="wo-notice-body">' + message + '</div>' +
+            '<div class="wo-notice-actions">' +
+            '<button id="__wo_set_new_backup" type="button" class="wo-btn wo-btn-fail">Set New Backup Location</button>' +
+            '<button id="__wo_link_backup" type="button" class="wo-btn">Link Existing Backup File</button>' +
+            '<button id="__wo_backup_dismiss" type="button" class="wo-btn-ghost">Don\'t ask again</button>' +
             '</div>';
         if (bodyEl) bodyEl.insertBefore(banner, bodyEl.firstChild);
         document.getElementById('__wo_set_new_backup').onclick = function() {
@@ -1382,7 +1384,7 @@
                         s.autoBackup = true;
                         s.backupPromptDismissed = false;
                         saveSettingsCfg(s);
-                        setStatus('✅ Backup saved to ' + handle.name + ' — auto-save enabled');
+                        setStatus('Backup saved to ' + handle.name + ' — auto-save enabled');
                         return handle;
                     });
                 });
@@ -1422,7 +1424,7 @@
                                 s.autoBackup = true;
                                 s.backupPromptDismissed = false;
                                 saveSettingsCfg(s);
-                                setStatus('✅ Config loaded and backup linked to ' + handle.name);
+                                setStatus('Config loaded and backup linked to ' + handle.name);
                                 render();
                             });
                         });
@@ -1483,12 +1485,12 @@
                             var configMissing = !localStorage.getItem(RKEY);
                             if (configMissing) {
                                 applyBackup(b);
-                                setStatus('✅ Config restored from backup file (' + fileSavedAt.slice(0, 10) + ')');
+                                setStatus('Config restored from backup file (' + fileSavedAt.slice(0, 10) + ')');
                             } else if (fileSavedAt > localSavedAt) {
-                                setStatus('📂 Backup file is newer — see prompt above');
+                                setStatus('Backup file is newer — see prompt above');
                                 showNewerBackupPrompt(b, fileSavedAt, localSavedAt);
                             } else {
-                                setStatus('✅ Backup OK — ' + handle.name + ' (up to date)');
+                                setStatus('Backup OK — ' + handle.name + ' (up to date)');
                             }
                         });
                     }).catch(function(e) {
@@ -1705,8 +1707,8 @@
                 if (target.version === TOOL_VERSION) {
                     dismissUpdateBanner();
                     var pinnedLabel = target.pinKind === 'floating' ?
-                        '📌 Pinned to ' + target.pinRaw + '.x (v' + TOOL_VERSION + ')' :
-                        '📌 Pinned to v' + TOOL_VERSION;
+                        'Pinned to ' + target.pinRaw + '.x (v' + TOOL_VERSION + ')' :
+                        'Pinned to v' + TOOL_VERSION;
                     setStatus(target.pinned ?
                         pinnedLabel :
                         'Running the latest ' + target.channel + ' version (v' + TOOL_VERSION + ')');
@@ -1722,8 +1724,8 @@
                     // pin was set must not linger and offer a conflicting install.
                     dismissUpdateBanner();
                     setStatus(target.pinKind === 'floating' ?
-                        '🔄 Installing v' + target.version + ' (latest ' + target.pinRaw + '.x)...' :
-                        '🔄 Installing pinned v' + target.version + '...');
+                        'Installing v' + target.version + ' (latest ' + target.pinRaw + '.x)...' :
+                        'Installing pinned v' + target.version + '...');
                     installUpdate(target.version, target.codeUrl);
                     return;
                 }
@@ -1737,10 +1739,10 @@
                 var isPatchOnly = sameMinor(target.version, TOOL_VERSION) && versionGt(target.version, TOOL_VERSION);
                 var patchAutoUpdate = st.autoUpdatePatch !== false;
                 if (isPatchOnly && patchAutoUpdate) {
-                    setStatus('🔄 Installing patch update v' + target.version + '...');
+                    setStatus('Installing patch update v' + target.version + '...');
                     installUpdate(target.version, target.codeUrl);
                 } else if (st.autoUpdate) {
-                    setStatus('🔄 Auto-installing update v' + target.version + '...');
+                    setStatus('Auto-installing update v' + target.version + '...');
                     installUpdate(target.version, target.codeUrl);
                 } else {
                     var skipped = st.skippedVersion || '';
@@ -1777,7 +1779,7 @@
                 setStatus('Running latest dev build (main) — v' + TOOL_VERSION);
                 return;
             }
-            setStatus('🔄 Installing latest dev build...');
+            setStatus('Installing latest dev build...');
             rawInstall(code, 'dev (main)');
         };
         xhr.onerror = function() {
@@ -1798,8 +1800,8 @@
         });
         var changelogHtml = relevantVersions.map(function(v) {
             return '<div style="margin-bottom:6px;">' +
-                '<span style="color:#2ecc71;font-weight:bold;">v' + v.version + '</span>' +
-                '<ul style=\"margin:2px 0 0 16px;padding:0 0 0 16px;color:#aaa;list-style:disc;\">' +
+                '<span style="color:var(--wo-pass);font-weight:700;">v' + v.version + '</span>' +
+                '<ul style="margin:2px 0 0 16px;padding:0 0 0 16px;color:var(--wo-muted);list-style:disc;">' +
                 (v.changes || []).map(function(c) {
                     return '<li>' + c + '</li>';
                 }).join('') +
@@ -1807,14 +1809,14 @@
         }).join('');
         var banner = document.createElement('div');
         banner.id = '__wo_update_banner';
-        banner.style.cssText = 'background:#1a2e1a;border:1px solid #2ecc71;border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:11px;';
+        banner.className = 'wo-notice wo-pass';
         banner.innerHTML =
-            '<div style="color:#2ecc71;font-weight:bold;margin-bottom:6px;"> Latest ' + target.channel + ' version: v' + target.version + '<br>' +
+            '<div class="wo-notice-title">Latest ' + target.channel + ' version: v' + target.version + '</div>' +
             '<div style="max-height:120px;overflow-y:auto;margin-bottom:8px;">' + changelogHtml + '</div>' +
-            '<div style="display:flex;gap:6px;">' +
-            '<button id="__wo_update_btn" style="background:#2ecc71;color:#000;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:bold;">Install Update</button>' +
-            '<button id="__wo_update_skip" style="background:none;border:none;color:#666;cursor:pointer;font-size:11px;">Skip</button>' +
-            '<button id="__wo_update_disable" style="background:none;border:none;color:#555;cursor:pointer;font-size:11px;">Disable Updates</button>' +
+            '<div class="wo-notice-actions">' +
+            '<button id="__wo_update_btn" type="button" class="wo-btn wo-btn-pass">Install Update</button>' +
+            '<button id="__wo_update_skip" type="button" class="wo-btn-ghost">Skip</button>' +
+            '<button id="__wo_update_disable" type="button" class="wo-btn-ghost">Disable Updates</button>' +
             '</div>';
 
         if (bodyEl) bodyEl.insertBefore(banner, bodyEl.firstChild);
@@ -1906,11 +1908,11 @@
     }
 
     function statusColor(s) {
-        return s === 'pass' ? '#2ecc71' :
-            s === 'fail' ? '#e74c3c' :
-            s === 'warn' ? '#FF9800' :
-            s === 'error' ? '#9b59b6' :
-            '#9E9E9E';
+        return s === 'pass' ? '#3fb950' :
+            s === 'fail' ? '#f85149' :
+            s === 'warn' ? '#d29922' :
+            s === 'error' ? '#bc8cff' :
+            '#9aa4af';
     }
 
 
@@ -2713,6 +2715,12 @@
     function teardown() {
         var p = document.getElementById('__wo_dock');
         if (p) p.remove();
+        // Also drop the injected stylesheet — otherwise a hot-reload (teardown()
+        // + eval() to a newer version) would keep running whatever CSS the OLD
+        // version injected, since injectPanelStyles() only skips re-injecting
+        // when it finds one already present.
+        var s = document.getElementById('__wo_panel_style');
+        if (s) s.remove();
         pushLayout(false);
         panel = null;
         localStorage.removeItem('__wo_last_scanned_wo');
@@ -2983,13 +2991,127 @@
     }
 
 
+    // ── "Signal" visual system for the docked panel ──
+    // Every selector is scoped under #__wo_dock so these rules can never win
+    // specificity against Maximo's own page styles, and Maximo's styles can
+    // never leak into the tool (inline styles elsewhere still win locally —
+    // this stylesheet only covers STATIC repeated component patterns; colors
+    // that depend on rule status, computed field-row widths, and drag-hover
+    // feedback stay inline at their call sites, driven by statusColor()).
+    // Injected once into <head>, guarded so repeated buildPanel() calls
+    // (hot-reload, teardown+reinit) never stack duplicate <style> tags.
+    function injectPanelStyles() {
+        if (document.getElementById('__wo_panel_style')) return;
+        var css = "" +
+            "#__wo_dock,#__wo_dock *{box-sizing:border-box;}" +
+            "#__wo_dock{--wo-bg:#0d1117;--wo-surface:#161b22;--wo-surface-2:#1f2630;--wo-field:#1f2630;--wo-border:#30363d;--wo-text:#f0f3f6;--wo-muted:#9aa4af;--wo-accent:#58a6ff;--wo-on-accent:#04101f;--wo-pass:#3fb950;--wo-fail:#f85149;--wo-warn:#d29922;--wo-r-panel:8px;--wo-r-card:6px;--wo-r-ctl:6px;font-family:'Segoe UI Semibold','Segoe UI',system-ui,sans-serif;}" +
+            "#__wo_dock .wo-mono{font-family:Consolas,'Cascadia Mono',monospace;font-variant-numeric:tabular-nums;}" +
+            "#__wo_dock .wo-head{background:var(--wo-surface-2);padding:10px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--wo-border);gap:8px;}" +
+            "#__wo_dock .wo-head-title{display:flex;flex-direction:column;line-height:1.2;min-width:0;}" +
+            "#__wo_dock .wo-head-title b{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
+            "#__wo_dock .wo-head-title span{font-size:11px;color:var(--wo-muted);font-weight:400;}" +
+            "#__wo_dock .wo-head-ver{color:var(--wo-muted);font-size:9.5px;font-family:Consolas,monospace;flex-shrink:0;}" +
+            "#__wo_dock .wo-head-actions{display:flex;gap:6px;flex-shrink:0;}" +
+            "#__wo_dock .wo-btn{font:inherit;font-weight:700;font-size:11.5px;padding:7px 13px;border-radius:var(--wo-r-ctl);border:1px solid var(--wo-border);background:var(--wo-surface-2);color:var(--wo-text);cursor:pointer;}" +
+            "#__wo_dock .wo-btn:hover{border-color:var(--wo-accent);}" +
+            "#__wo_dock .wo-btn:focus-visible{outline:3px solid var(--wo-accent);outline-offset:1px;}" +
+            "#__wo_dock .wo-btn-primary{background:var(--wo-accent);color:var(--wo-on-accent);border-color:var(--wo-accent);}" +
+            "#__wo_dock .wo-btn-danger{color:var(--wo-fail);border-color:var(--wo-fail);}" +
+            "#__wo_dock #__wo_status{padding:6px 12px;color:var(--wo-muted);font-size:11px;min-height:15px;font-family:Consolas,monospace;}" +
+            "#__wo_dock #__wo_scanlog{padding:0 12px 6px;font-size:10.5px;color:var(--wo-muted);max-height:80px;overflow:auto;font-family:Consolas,monospace;}" +
+            "#__wo_dock #__wo_body{flex:1;overflow:auto;padding:8px;display:flex;flex-direction:column;gap:8px;background:var(--wo-bg);color:var(--wo-text);}" +
+            "#__wo_dock .wo-card{background:var(--wo-surface);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);overflow:hidden;}" +
+            "#__wo_dock .__wo_th{background:var(--wo-surface-2);padding:8px 10px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;gap:8px;}" +
+            "#__wo_dock .__wo_th:hover{background:var(--wo-field);}" +
+            "#__wo_dock .wo-th-title{display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;font-weight:700;font-size:12px;}" +
+            "#__wo_dock .wo-th-title b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
+            "#__wo_dock .wo-th-actions{display:flex;align-items:center;gap:2px;flex-shrink:0;}" +
+            "#__wo_dock .wo-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;display:inline-block;}" +
+            "#__wo_dock .__wo_tc{background:transparent;border:1px solid transparent;color:var(--wo-muted);width:24px;height:24px;border-radius:var(--wo-r-ctl);cursor:pointer;font-size:10px;flex-shrink:0;}" +
+            "#__wo_dock .__wo_tc:hover{color:var(--wo-text);}" +
+            "#__wo_dock .__wo_tc:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
+            "#__wo_dock .__wo_tx{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);opacity:.5;cursor:pointer;flex-shrink:0;}" +
+            "#__wo_dock .__wo_tx:hover,#__wo_dock .__wo_tx:focus-visible{opacity:1;background:var(--wo-field);color:var(--wo-fail);}" +
+            "#__wo_dock .__wo_tx:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
+            "#__wo_dock .wo-card.is-collapsed .__wo_tb,#__wo_dock .wo-card.is-collapsed .__wo_banner{display:none;}" +
+            "#__wo_dock .wo-chevron{display:inline-block;transition:transform .12s ease;flex-shrink:0;}" +
+            "#__wo_dock .wo-card.is-collapsed .wo-chevron{transform:rotate(-90deg);}" +
+            "@media (prefers-reduced-motion:reduce){#__wo_dock .wo-chevron{transition:none;}}" +
+            "#__wo_dock .__wo_banner{padding:7px 10px;font-size:11px;color:var(--wo-accent);background:var(--wo-field);border-bottom:1px solid var(--wo-border);}" +
+            "#__wo_dock .__wo_tb{padding:10px;display:flex;flex-direction:column;gap:8px;}" +
+            "#__wo_dock .wo-rule{display:flex;flex-direction:column;gap:3px;padding:8px 9px;border-radius:var(--wo-r-ctl);background:var(--wo-surface-2);border-left:4px solid var(--wo-border);}" +
+            "#__wo_dock .wo-rule-top{display:flex;align-items:center;gap:7px;}" +
+            "#__wo_dock .wo-rule-label{flex:1;color:var(--wo-text);font-size:11.5px;}" +
+            "#__wo_dock .wo-rule-status{font-size:11px;font-weight:700;}" +
+            "#__wo_dock .wo-rule-msg{font-size:10.5px;padding-left:17px;opacity:.92;}" +
+            "#__wo_dock .wo-fieldstack{display:flex;flex-direction:column;gap:7px;}" +
+            "#__wo_dock .wo-fieldrow{display:flex;flex-direction:row;flex-wrap:nowrap;gap:7px;}" +
+            "#__wo_dock .wo-field{min-width:0;}" +
+            "#__wo_dock .wo-field-k{display:block;font-size:10px;color:var(--wo-muted);text-transform:uppercase;letter-spacing:.03em;margin-bottom:1px;}" +
+            "#__wo_dock .wo-field-v{font-size:12px;}" +
+            "#__wo_dock .wo-field-v.wo-empty{color:var(--wo-border);}" +
+            "#__wo_dock .wo-field-k.wo-varlabel{color:var(--wo-accent);text-transform:none;letter-spacing:0;}" +
+            "#__wo_dock .wo-vartag{color:var(--wo-muted);font-size:9px;text-transform:none;}" +
+            "#__wo_dock .wo-table-bar{display:flex;align-items:center;gap:8px;margin-bottom:4px;}" +
+            "#__wo_dock .wo-table-count{color:var(--wo-muted);font-size:10.5px;flex:1;}" +
+            "#__wo_dock .__wo_col_toggle_btn{font-size:10.5px;padding:3px 8px;border-radius:var(--wo-r-ctl);border:1px solid var(--wo-border);background:var(--wo-surface-2);color:var(--wo-text);cursor:pointer;}" +
+            "#__wo_dock .__wo_col_toggle_btn:hover{border-color:var(--wo-accent);}" +
+            "#__wo_dock .__wo_col_panel{background:var(--wo-field);border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:6px 8px;margin-bottom:6px;font-size:11px;line-height:1.9;}" +
+            "#__wo_dock .__wo_col_panel label{display:inline-block;margin-right:12px;cursor:pointer;}" +
+            "#__wo_dock .wo-table-wrap{overflow-x:auto;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);}" +
+            "#__wo_dock table.wo-table{width:100%;border-collapse:collapse;font-size:11px;}" +
+            "#__wo_dock table.wo-table th{text-align:left;padding:6px 8px;white-space:nowrap;color:var(--wo-muted);font-size:10px;text-transform:uppercase;letter-spacing:.03em;background:var(--wo-surface-2);border-bottom:1px solid var(--wo-border);}" +
+            "#__wo_dock table.wo-table td{padding:6px 8px;border-bottom:1px solid var(--wo-border);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
+            "#__wo_dock table.wo-table tr:last-child td{border-bottom:none;}" +
+            "#__wo_dock .wo-header-msg{margin-left:6px;font-size:10.5px;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px;display:inline-block;vertical-align:middle;}" +
+            "#__wo_dock .__wo_tip_icon{color:var(--wo-muted);font-size:12px;cursor:default;}" +
+            "#__wo_dock .wo-prescan{background:var(--wo-field);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);padding:8px 10px;font-size:11.5px;color:var(--wo-accent);text-align:center;}" +
+            "#__wo_dock .wo-notice{border-radius:var(--wo-r-card);padding:9px 11px;font-size:11.5px;border:1px solid var(--wo-border);background:var(--wo-surface);margin-bottom:6px;}" +
+            "#__wo_dock .wo-notice-title{font-weight:700;margin-bottom:4px;}" +
+            "#__wo_dock .wo-notice-body{color:var(--wo-muted);margin-bottom:8px;}" +
+            "#__wo_dock .wo-notice-actions{display:flex;gap:6px;flex-wrap:wrap;}" +
+            "#__wo_dock .wo-notice.wo-info{border-color:var(--wo-accent);}#__wo_dock .wo-notice.wo-info .wo-notice-title{color:var(--wo-accent);}" +
+            "#__wo_dock .wo-notice.wo-pass{border-color:var(--wo-pass);}#__wo_dock .wo-notice.wo-pass .wo-notice-title{color:var(--wo-pass);}" +
+            "#__wo_dock .wo-notice.wo-fail{border-color:var(--wo-fail);}#__wo_dock .wo-notice.wo-fail .wo-notice-title{color:var(--wo-fail);}" +
+            "#__wo_dock .wo-btn-ghost{background:none;border:1px solid transparent;color:var(--wo-muted);cursor:pointer;font:inherit;font-size:11px;padding:6px 8px;border-radius:var(--wo-r-ctl);}" +
+            "#__wo_dock .wo-btn-ghost:hover{color:var(--wo-text);}" +
+            "#__wo_dock .wo-btn-ghost:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
+            "#__wo_dock .wo-qr-wrap{margin-bottom:2px;}" +
+            "#__wo_dock .wo-qr-box{position:relative;background:var(--wo-surface);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);padding:9px 62px 9px 11px;min-height:40px;font-size:11.5px;color:var(--wo-text);word-break:break-word;}" +
+            "#__wo_dock .wo-qr-box.wo-empty-text{color:var(--wo-muted);}" +
+            "#__wo_dock .wo-qr-copy{position:absolute;bottom:6px;right:6px;font-size:10.5px;padding:4px 8px;}" +
+            "#__wo_dock .wo-action-row{display:flex;gap:7px;margin:8px 0 4px;}" +
+            "#__wo_dock .wo-btn-block{flex:1;padding:9px;font-size:12.5px;text-align:center;}" +
+            "#__wo_dock .wo-btn-pass{background:var(--wo-pass);color:#04210c;border-color:var(--wo-pass);}" +
+            "#__wo_dock .wo-btn-fail{background:var(--wo-fail);color:#2b0705;border-color:var(--wo-fail);}" +
+            "#__wo_dock .wo-showall{width:100%;margin-top:4px;text-align:center;}" +
+            "#__wo_dock .wo-footer{text-align:center;color:var(--wo-muted);font-size:10px;padding:8px 0 2px;opacity:.7;}";
+        var styleEl = document.createElement('style');
+        styleEl.id = '__wo_panel_style';
+        styleEl.textContent = css;
+        document.head.appendChild(styleEl);
+    }
+
     function buildPanel() {
         var old = document.getElementById('__wo_dock');
         if (old) old.remove();
+        injectPanelStyles();
         panel = document.createElement('div');
         panel.id = '__wo_dock';
-        panel.style.cssText = 'position:fixed;top:0;right:0;width:' + PANEL_W + 'px;height:100vh;z-index:999999;background:#141414;color:#eee;font-family:Segoe UI,Arial,sans-serif;font-size:12px;display:flex;flex-direction:column;box-shadow:-4px 0 14px rgba(0,0,0,.5);';
-        panel.innerHTML = '<div style="background:#2c2c2c;padding:8px;display:flex;justify-content:space-between;align-items:center;"><span style="display:flex;flex-direction:column;line-height:1.2;"><b style="font-size:12px;">Will\'s WO</b><b style="font-size:11px;color:#c2c2c2;font-weight:normal;">Review Tool</b></span><span style="color:#c2c2c2;font-size:9px;font-weight:normal;">v' + TOOL_VERSION + '</span><span><button id="__wo_rescan">Scan</button> <button id="__wo_setup">Setup</button> <button id="__wo_exit" style="color:#e74c3c;">Exit</button></span></div><div id="__wo_status" style="padding:2px 8px;color:#ff8;font-size:10px;min-height:14px;"></div><div id="__wo_scanlog" style="padding:0 8px 4px;font-size:10px;color:#999;max-height:80px;overflow:auto;"></div><div id="__wo_body" style="flex:1;overflow:auto;padding:6px;"></div>';
+        panel.style.cssText = 'position:fixed;top:0;right:0;width:' + PANEL_W + 'px;height:100vh;z-index:999999;font-size:12px;display:flex;flex-direction:column;box-shadow:-4px 0 14px rgba(0,0,0,.5);';
+        panel.innerHTML =
+            '<div class="wo-head">' +
+            '<div class="wo-head-title"><b>Will\'s WO</b><span>Review Tool</span></div>' +
+            '<div class="wo-head-ver">v' + TOOL_VERSION + '</div>' +
+            '<div class="wo-head-actions">' +
+            '<button id="__wo_rescan" class="wo-btn wo-btn-primary">Scan</button>' +
+            '<button id="__wo_setup" class="wo-btn">Setup</button>' +
+            '<button id="__wo_exit" class="wo-btn wo-btn-danger">Exit</button>' +
+            '</div>' +
+            '</div>' +
+            '<div id="__wo_status"></div>' +
+            '<div id="__wo_scanlog"></div>' +
+            '<div id="__wo_body"></div>';
         document.body.appendChild(panel);
         bodyEl = panel.querySelector('#__wo_body');
         statusEl = panel.querySelector('#__wo_status');
@@ -3089,9 +3211,8 @@
         var preScan = !hasScanned; // ← all Latin characters
         if (preScan) {
             var banner = document.createElement('div');
-            banner.style.cssText = 'background:#1a1a2e;border:1px solid #2980b9;border-radius:6px;' +
-                'padding:6px 10px;margin-bottom:8px;font-size:11px;color:#7ec8e3;text-align:center;';
-            banner.innerHTML = '⟳ Press <b>Scan</b> to populate values';
+            banner.className = 'wo-prescan';
+            banner.innerHTML = 'Press <b>Scan</b> to populate values';
             bodyEl.appendChild(banner);
         }
 
@@ -3110,23 +3231,23 @@
             var collapsed = st.hasOwnProperty('collapsed') ? st.collapsed : !!group.defaultCollapsed;
             var tile = document.createElement('div');
             tile.setAttribute('data-gid', group.id);
-            tile.style.cssText = 'margin-bottom:6px;border:1px solid #333;border-radius:6px;overflow:hidden;background:#181818;';
+            tile.className = 'wo-card' + (collapsed ? ' is-collapsed' : '');
             var refs = group.ruleRefs || [];
             var dots = '';
             if (!preScan) {
                 refs.forEach(function(id) {
                     var r = results[id];
-                    if (r) dots += '<span title="' + r.label + '" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' + statusColor(r.status) + ';margin-right:4px;"></span>';
+                    if (r) dots += '<span class="wo-dot" title="' + r.label + '" style="background:' + statusColor(r.status) + ';margin-right:4px;"></span>';
                 });
             }
             var tipHtml = '';
             if (group.tooltip) {
-                tipHtml = '<span class="__wo_tip_icon" data-tip="' + group.tooltip.replace(/"/g, '&quot;') + '" style="color:#aaa;font-size:11px;cursor:default;margin-left:4px;">ⓘ</span>';
+                tipHtml = '<span class="__wo_tip_icon" data-tip="' + group.tooltip.replace(/"/g, '&quot;') + '">ⓘ</span>';
             }
 
             var bannerHtml = '';
             if (group.expandedMsg) {
-                bannerHtml = '<div class="__wo_banner" style="padding:4px 10px;font-size:11px;color:#aad4f5;background:#1a2a36;border-bottom:1px solid #2a3a46;' + (collapsed ? 'display:none;' : '') + '">' + String(group.expandedMsg).replace(/</g, '&lt;') + '</div>';
+                bannerHtml = '<div class="__wo_banner">' + String(group.expandedMsg).replace(/</g, '&lt;') + '</div>';
             }
             var rulesHtml = '';
             if (!preScan) {
@@ -3144,40 +3265,40 @@
                         var passLong = resolveMsgList(rule.pass && rule.pass.long, cache);
                         if (passLong.length) {
                             subMsgs = passLong;
-                            statusLabel = '<span style="font-weight:bold;color:' + color + ';">✓ Passed</span>';
+                            statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">✓ Passed</span>';
                         } else {
                             var passShort = (rule.pass && rule.pass.short) ? resolveMsg(rule.pass.short, cache) : '';
-                            statusLabel = '<span style="font-weight:bold;color:' + color + ';">' + (passShort ? '✓ ' + String(passShort).replace(/</g, '&lt;') : '✓ OK') + '</span>';
+                            statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">' + (passShort ? '✓ ' + String(passShort).replace(/</g, '&lt;') : '✓ OK') + '</span>';
                         }
                     } else if (s === 'fail') {
                         var failLong = resolveMsgList(rule.fail && rule.fail.long, cache);
                         if (failLong.length) {
                             subMsgs = failLong;
-                            statusLabel = '<span style="font-weight:bold;color:' + color + ';">✗ Failed</span>';
+                            statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">✗ Failed</span>';
                         } else {
-                            statusLabel = '<span style="font-weight:bold;color:' + color + ';">✗ ' + String(res.detail).replace(/</g, '&lt;') + '</span>';
+                            statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">✗ ' + String(res.detail).replace(/</g, '&lt;') + '</span>';
                         }
                     } else if (s === 'warn') {
                         var warnLong = resolveMsgList(rule.warn && rule.warn.long, cache);
                         if (warnLong.length) {
                             subMsgs = warnLong;
-                            statusLabel = '<span style="font-weight:bold;color:' + color + ';">⚠ Warning</span>';
+                            statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">⚠ Warning</span>';
                         } else {
-                            statusLabel = '<span style="font-weight:bold;color:' + color + ';">⚠ ' + String(res.detail).replace(/</g, '&lt;') + '</span>';
+                            statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">⚠ ' + String(res.detail).replace(/</g, '&lt;') + '</span>';
                         }
                         // override subHtml color for warn
                     } else if (s === 'na') {
-                        statusLabel = '<span style="font-weight:bold;color:' + color + ';">— N/A</span>';
+                        statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">— N/A</span>';
                     } else {
-                        statusLabel = '<span style="font-weight:bold;color:' + color + ';">⚠ ' + String(res.detail).replace(/</g, '&lt;') + '</span>';
+                        statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">⚠ ' + String(res.detail).replace(/</g, '&lt;') + '</span>';
                     }
 
-                    var subColor = (s === 'warn') ? '#e67e22' : (s === 'pass' ? '#2ecc71' : '#e74c3c');
+                    var subColor = (s === 'warn') ? '#d29922' : (s === 'pass' ? '#3fb950' : '#f85149');
                     var subHtml = subMsgs.map(function(m) {
-                        return '<div style="margin-left:20px;color:' + subColor + ';font-size:10px;padding:1px 0;">• ' + String(m).replace(/</g, '&lt;') + '</div>';
+                        return '<div class="wo-rule-msg" style="color:' + subColor + ';">• ' + String(m).replace(/</g, '&lt;') + '</div>';
                     }).join('');
 
-                    rulesHtml += '<div style="margin-top:5px;padding:4px 6px;border-radius:4px;background:#202020;border-left:3px solid ' + color + ';">' + '<div style="display:flex;align-items:center;gap:6px;">' + '<span style="width:8px;height:8px;border-radius:50%;background:' + color + ';display:inline-block;flex-shrink:0;"></span>' + '<span style="flex:1;color:#ccc;">' + String(res.label).replace(/</g, '&lt;') + '</span>' + statusLabel + '</div>' + subHtml + '</div>';
+                    rulesHtml += '<div class="wo-rule" style="border-left-color:' + color + ';">' + '<div class="wo-rule-top">' + '<span class="wo-dot" style="background:' + color + ';"></span>' + '<span class="wo-rule-label">' + String(res.label).replace(/</g, '&lt;') + '</span>' + statusLabel + '</div>' + subHtml + '</div>';
                 });
             }
             var bodyHtml = '';
@@ -3195,26 +3316,26 @@
                     varById[v.id] = v;
                 });
 
-                bodyHtml += '<div style="display:flex;flex-direction:column;gap:6px;">';
+                bodyHtml += '<div class="wo-fieldstack">';
                 fieldRows.forEach(function(row, ri) {
-                    bodyHtml += '<div style="display:flex;flex-direction:row;flex-wrap:nowrap;gap:6px;">';
+                    bodyHtml += '<div class="wo-fieldrow">';
                     row.forEach(function(fk, fi) {
                         var key = ri + '_' + fi;
                         var w = widthStore[key];
-                        var style = w ? 'flex:0 0 ' + w + '%;min-width:0;' : 'flex:1 1 0;min-width:0;';
+                        var style = w ? 'flex:0 0 ' + w + '%;' : 'flex:1 1 0;';
                         // Check if this is a variable reference
                         var vDef = varById[fk];
                         if (vDef) {
                             var val = varCache[fk];
-                            bodyHtml += '<div style="' + style + '">' +
-                                '<div style="color:#7ec8e3;font-size:10px;">' + String(vDef.label).replace(/</g, '&lt;') + ' <span style="color:#555;font-size:9px;">(var)</span></div>' +
-                                '<div>' + (!preScan && val ? String(val).replace(/</g, '&lt;') : '<span style="color:#444">—</span>') + '</div></div>';
+                            bodyHtml += '<div class="wo-field" style="' + style + '">' +
+                                '<span class="wo-field-k wo-varlabel">' + String(vDef.label).replace(/</g, '&lt;') + ' <span class="wo-vartag">(var)</span></span>' +
+                                '<div class="wo-field-v' + (!preScan && val ? '' : ' wo-empty') + '">' + (!preScan && val ? String(val).replace(/</g, '&lt;') : '—') + '</div></div>';
                         } else {
                             var v = cache.fields[fk],
                                 lbl = fk.split(' :: ').pop();
-                            bodyHtml += '<div style="' + style + '">' +
-                                '<div style="color:#999;font-size:10px;">' + lbl + '</div>' +
-                                '<div>' + (!preScan && v ? String(v).replace(/</g, '&lt;') : '<span style="color:#444">—</span>') + '</div></div>';
+                            bodyHtml += '<div class="wo-field" style="' + style + '">' +
+                                '<span class="wo-field-k">' + lbl + '</span>' +
+                                '<div class="wo-field-v' + (!preScan && v ? '' : ' wo-empty') + '">' + (!preScan && v ? String(v).replace(/</g, '&lt;') : '—') + '</div></div>';
                         }
                     });
                     bodyHtml += '</div>';
@@ -3227,13 +3348,13 @@
                 vars.forEach(function(v) {
                     varById[v.id] = v;
                 });
-                bodyHtml += '<div style="display:flex;flex-direction:column;gap:6px;margin-top:' + (group.fields && group.fields.length ? '6' : '0') + 'px;">';
+                bodyHtml += '<div class="wo-fieldstack" style="margin-top:' + (group.fields && group.fields.length ? '7' : '0') + 'px;">';
                 group.varFields.forEach(function(vid) {
                     var vDef = varById[vid];
                     if (!vDef) return;
                     var val = varCache[vid];
-                    bodyHtml += '<div><div style="color:#7ec8e3;font-size:10px;">' + String(vDef.label).replace(/</g, '&lt;') + ' <span style="color:#555;font-size:9px;">(var)</span></div>' +
-                        '<div>' + (!preScan && val ? String(val).replace(/</g, '&lt;') : '<span style="color:#444">—</span>') + '</div></div>';
+                    bodyHtml += '<div class="wo-field"><span class="wo-field-k wo-varlabel">' + String(vDef.label).replace(/</g, '&lt;') + ' <span class="wo-vartag">(var)</span></span>' +
+                        '<div class="wo-field-v' + (!preScan && val ? '' : ' wo-empty') + '">' + (!preScan && val ? String(val).replace(/</g, '&lt;') : '—') + '</div></div>';
                 });
                 bodyHtml += '</div>';
             }
@@ -3242,28 +3363,28 @@
                 var rows = cache.tables[group.table] || [];
                 var err = cache.tableErrors[group.table];
                 if (err && !rows.length) {
-                    bodyHtml += '<div style="color:#e74c3c;margin-top:4px;">' + err + '</div>';
+                    bodyHtml += '<div style="color:var(--wo-fail);margin-top:4px;font-size:11px;">' + err + '</div>';
                 } else if (rows.length === 0) {
-                    bodyHtml += '<div style="color:#666;margin-top:4px;">No rows</div>';
+                    bodyHtml += '<div style="color:var(--wo-muted);margin-top:4px;font-size:11px;">No rows</div>';
                 } else {
                     var allCols = Object.keys(rows[0]);
                     var hiddenCols = getGroupHiddenCols(group.id);
                     var visCols = allCols.filter(function(c) {
                         return hiddenCols.indexOf(c) < 0;
                     });
-                    bodyHtml += '<div style="display:flex;align-items:center;margin-top:4px;margin-bottom:2px;">' + '<span style="color:#999;font-size:10px;flex:1;">' + rows.length + ' row' + (rows.length !== 1 ? 's' : '') + '</span>' + '<button class="__wo_col_toggle_btn" style="font-size:10px;padding:1px 6px;cursor:pointer;" title="Toggle visible columns">⚙ Cols</button>' + '</div>';
-                    bodyHtml += '<div class="__wo_col_panel" style="display:none;background:#202020;border-radius:4px;padding:5px;margin-bottom:4px;font-size:11px;line-height:1.8;">';
+                    bodyHtml += '<div class="wo-table-bar"><span class="wo-table-count">' + rows.length + ' row' + (rows.length !== 1 ? 's' : '') + '</span>' + '<button class="__wo_col_toggle_btn" title="Toggle visible columns">⚙ Cols</button></div>';
+                    bodyHtml += '<div class="__wo_col_panel" style="display:none;">';
                     allCols.forEach(function(c) {
                         var checked = hiddenCols.indexOf(c) < 0;
-                        bodyHtml += '<label style="display:inline-block;margin-right:10px;cursor:pointer;"><input type="checkbox" class="__wo_colcb" data-col="' + c.replace(/"/g, '&quot;') + '" ' + (checked ? 'checked' : '') + '>' + c + '</label>';
+                        bodyHtml += '<label><input type="checkbox" class="__wo_colcb" data-col="' + c.replace(/"/g, '&quot;') + '" ' + (checked ? 'checked' : '') + '>' + c + '</label>';
                     });
                     bodyHtml += '</div>';
-                    bodyHtml += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:11px;"><tr>' + visCols.map(function(c) {
-                        return '<th style="text-align:left;border-bottom:1px solid #444;padding:3px;white-space:nowrap;">' + c + '</th>';
+                    bodyHtml += '<div class="wo-table-wrap"><table class="wo-table"><tr>' + visCols.map(function(c) {
+                        return '<th>' + c + '</th>';
                     }).join('') + '</tr>';
                     rows.forEach(function(r) {
                         bodyHtml += '<tr>' + visCols.map(function(c) {
-                            return '<td style="padding:3px;border-bottom:1px solid #2a2a2a;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + String(r[c] || '').replace(/"/g, '&quot;') + '">' + String(r[c] || '').replace(/</g, '&lt;') + '</td>';
+                            return '<td title="' + String(r[c] || '').replace(/"/g, '&quot;') + '">' + String(r[c] || '').replace(/</g, '&lt;') + '</td>';
                         }).join('') + '</tr>';
                     });
                     bodyHtml += '</table></div>';
@@ -3325,16 +3446,24 @@
                 if (hmText) {
                     var hmColor = (group.headerMsg.type === 'rule' && results[hmRaw]) ?
                         statusColor(results[hmRaw].status) :
-                        (group.headerMsg.type === 'variable' ? '#7ec8e3' : '#aaa');
+                        (group.headerMsg.type === 'variable' ? '#58a6ff' : 'var(--wo-muted)');
 
-                    headerMsgHtml = '<span style="margin-left:6px;font-size:10px;color:' + hmColor + ';font-weight:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;display:inline-block;vertical-align:middle;" title="' + String(hmText).replace(/"/g, '&quot;') + '">' + String(hmText).replace(/</g, '&lt;') + '</span>';
+                    headerMsgHtml = '<span class="wo-header-msg" style="color:' + hmColor + ';" title="' + String(hmText).replace(/"/g, '&quot;') + '">' + String(hmText).replace(/</g, '&lt;') + '</span>';
                 }
             }
-            tile.innerHTML = '<div class="__wo_th" draggable="true" style="background:#252525;padding:5px 8px;display:flex;justify-content:space-between;align-items:center;cursor:grab;">' +
-                '<span style="display:flex;align-items:center;min-width:0;overflow:hidden;">' + dots + '<b>' + String(group.title).replace(/</g, '&lt;') + '</b>' + headerMsgHtml + '</span>' +
-                '<span style="display:flex;align-items:center;gap:4px;">' + tipHtml + '<button class="__wo_tc">' + (collapsed ? '\u25B6' : '\u25BC') + '</button><button class="__wo_tx">x</button></span>' +
+            tile.innerHTML = '<div class="__wo_th" draggable="true">' +
+                '<span class="wo-th-title">' + dots + '<b>' + String(group.title).replace(/</g, '&lt;') + '</b>' + headerMsgHtml + '</span>' +
+                '<span class="wo-th-actions">' + tipHtml +
+                '<button class="__wo_tc" type="button" aria-expanded="' + (!collapsed) + '" aria-label="Toggle group details" title="Toggle details"><span class="wo-chevron">\u25BE</span></button>' +
+                '<button class="__wo_tx" type="button" title="Hide this group" aria-label="Hide this group">' +
+                '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+                '<path d="M1.5 8.4C3 5.6 5.4 3.6 8 3.6C10.6 3.6 13 5.6 14.5 8.4C13 11.2 10.6 13.2 8 13.2C5.4 13.2 3 11.2 1.5 8.4Z" stroke="currentColor" stroke-width="1.3"/>' +
+                '<circle cx="8" cy="8.4" r="1.9" stroke="currentColor" stroke-width="1.3"/>' +
+                '<path d="M2.5 2.5L13.5 14.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' +
+                '</svg></button>' +
+                '</span>' +
                 '</div>' + bannerHtml +
-                '<div class="__wo_tb" style="padding:8px;' + (collapsed ? 'display:none;' : '') + '">' + rulesHtml + bodyHtml + '</div>';
+                '<div class="__wo_tb">' + rulesHtml + bodyHtml + '</div>';
 
             bodyEl.appendChild(tile);
 
@@ -3343,7 +3472,7 @@
                 tipIcon.addEventListener('mouseenter', function() {
                     var tt = document.createElement('div');
                     tt.id = '__wo_tip_float';
-                    tt.style.cssText = 'position:fixed;z-index:9999999;background:#333;color:#eee;font-size:11px;font-family:Segoe UI,Arial,sans-serif;padding:5px 8px;border-radius:4px;max-width:240px;white-space:pre-wrap;box-shadow:0 2px 8px rgba(0,0,0,.6);pointer-events:none;';
+                    tt.style.cssText = 'position:fixed;z-index:9999999;background:#1f2630;color:#f0f3f6;font-size:11px;font-family:"Segoe UI",Arial,sans-serif;padding:6px 9px;border-radius:6px;max-width:240px;white-space:pre-wrap;box-shadow:0 4px 14px rgba(0,0,0,.5);border:1px solid #30363d;pointer-events:none;';
                     tt.textContent = tipIcon.getAttribute('data-tip');
                     document.body.appendChild(tt);
                     var r = tipIcon.getBoundingClientRect();
@@ -3377,19 +3506,29 @@
                     };
                 });
             }
-            tile.querySelector('.__wo_tc').onclick = function() {
-                var b = tile.querySelector('.__wo_tb'),
-                    h = b.style.display === 'none';
-                b.style.display = h ? 'block' : 'none';
-                this.textContent = h ? '\u25BC' : '\u25B6';
-                var banner = tile.querySelector('.__wo_banner');
-                if (banner) banner.style.display = h ? 'block' : 'none';
+
+            // Collapse toggle is shared by the dedicated button (always
+            // keyboard-operable, unchanged hook/behavior) and a click
+            // anywhere else on the header (mouse-only convenience \u2014 the
+            // button remains the sole accessible control, so no ARIA role
+            // is needed on the header div itself).
+            var tcBtn = tile.querySelector('.__wo_tc');
+
+            function toggleGroupCollapse() {
+                var nowCollapsed = !tile.classList.contains('is-collapsed');
+                tile.classList.toggle('is-collapsed', nowCollapsed);
+                tcBtn.setAttribute('aria-expanded', String(!nowCollapsed));
                 var g2 = getGS();
                 if (!g2[group.id]) g2[group.id] = {};
-                g2[group.id].collapsed = !h;
+                g2[group.id].collapsed = nowCollapsed;
                 saveGS(g2);
+            }
+            tcBtn.onclick = function(e) {
+                e.stopPropagation();
+                toggleGroupCollapse();
             };
-            tile.querySelector('.__wo_tx').onclick = function() {
+            tile.querySelector('.__wo_tx').onclick = function(e) {
+                e.stopPropagation();
                 var g2 = getGS();
                 if (!g2[group.id]) g2[group.id] = {};
                 g2[group.id].visible = false;
@@ -3397,19 +3536,34 @@
                 render();
             };
             var head = tile.querySelector('.__wo_th');
+            var headerJustDragged = false;
+            head.addEventListener('click', function(e) {
+                if (headerJustDragged) {
+                    headerJustDragged = false;
+                    return;
+                }
+                if (e.target.closest('.__wo_tx') || e.target.closest('.__wo_tc') || e.target.closest('.__wo_tip_icon')) return;
+                toggleGroupCollapse();
+            });
             head.addEventListener('dragstart', function(e) {
+                headerJustDragged = true;
                 e.dataTransfer.setData('text/plain', group.id);
+            });
+            head.addEventListener('dragend', function() {
+                setTimeout(function() {
+                    headerJustDragged = false;
+                }, 0);
             });
             tile.addEventListener('dragover', function(e) {
                 e.preventDefault();
-                tile.style.borderColor = '#2ecc71';
+                tile.style.borderColor = '#58a6ff';
             });
             tile.addEventListener('dragleave', function() {
-                tile.style.borderColor = '#333';
+                tile.style.borderColor = '';
             });
             tile.addEventListener('drop', function(e) {
                 e.preventDefault();
-                tile.style.borderColor = '#333';
+                tile.style.borderColor = '';
                 var dragged = e.dataTransfer.getData('text/plain');
                 if (!dragged || dragged === group.id) return;
                 var cfg2 = getCfg(),
@@ -3428,32 +3582,34 @@
         });
         // ── Quick Return preview box ──
         var qrWrap = document.createElement('div');
-        qrWrap.style.cssText = 'margin-bottom:4px;';
+        qrWrap.className = 'wo-qr-wrap';
 
         var retMsg = preScan ? '' : buildReturnMessage();
-        qrWrap.innerHTML = '<div style="position:relative;background:#222;border:1px solid #444;border-radius:6px;padding:8px 36px 8px 10px;min-height:38px;font-size:11px;color:' + (retMsg ? '#ddd' : '#666') + ';font-family:Segoe UI,Arial,sans-serif;word-break:break-word;">' +
+        qrWrap.innerHTML = '<div class="wo-qr-box' + (retMsg ? '' : ' wo-empty-text') + '">' +
             (preScan ?
                 '<i>Scan first to generate return message</i>' :
                 (retMsg ? retMsg.replace(/</g, '&lt;') : '<i>No failed rules — return message will appear here</i>')) +
-            '<button class="__wo_qr_copy" title="Copy to clipboard" style="position:absolute;bottom:6px;right:6px;background:none;border:none;cursor:pointer;color:#aaa;font-size:14px;padding:2px 4px;">📋</button>' +
+            '<button class="__wo_qr_copy wo-btn-ghost wo-qr-copy" type="button" title="Copy to clipboard" aria-label="Copy return message">Copy</button>' +
             '</div>';
 
         bodyEl.appendChild(qrWrap);
         // ── Return and Approve buttons ──
         var actionRow = document.createElement('div');
-        actionRow.style.cssText = 'display:flex;gap:6px;margin-bottom:4px;';
+        actionRow.className = 'wo-action-row';
 
         var returnBtn = document.createElement('button');
+        returnBtn.type = 'button';
         returnBtn.textContent = '↩ Return';
-        returnBtn.style.cssText = 'flex:1;padding:6px;background:#e74c3c;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;';
+        returnBtn.className = 'wo-btn wo-btn-danger wo-btn-block';
         returnBtn.onclick = function() {
             if (!confirm('Return this Work Order?\n\nThe return message will be filled into the Memo field.')) return;
             routeWorkflow('return');
         };
 
         var approveBtn = document.createElement('button');
+        approveBtn.type = 'button';
         approveBtn.textContent = '✓ Approve';
-        approveBtn.style.cssText = 'flex:1;padding:6px;background:#2ecc71;color:#000;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:bold;';
+        approveBtn.className = 'wo-btn wo-btn-pass wo-btn-block';
         approveBtn.onclick = function() {
             if (!confirm('Approve this Work Order?\n\nThis will route with Complete Review selected.')) return;
             routeWorkflow('approve');
@@ -3476,16 +3632,17 @@
             document.execCommand('copy');
             ta.remove();
             var btn = qrWrap.querySelector('.__wo_qr_copy');
-            btn.textContent = '✓';
+            btn.textContent = 'Copied';
             setTimeout(function() {
-                btn.textContent = '📋';
+                btn.textContent = 'Copy';
             }, 1500);
         };
 
 
         var showAll = document.createElement('button');
+        showAll.type = 'button';
         showAll.textContent = 'Show hidden tiles';
-        showAll.style.cssText = 'width:100%;margin-top:4px;';
+        showAll.className = 'wo-btn-ghost wo-showall';
         showAll.onclick = function() {
             var g2 = getGS();
             getCfg().groups.forEach(function(g) {
@@ -3498,7 +3655,7 @@
         bodyEl.appendChild(showAll);
         // ── Footer ──
         var footer = document.createElement('div');
-        footer.style.cssText = 'text-align:center;color:#444;font-size:10px;padding:6px 0 2px;font-style:italic;letter-spacing:0.02em;';
+        footer.className = 'wo-footer';
         footer.textContent = 'Created by William Zitzmann, william.zitzmann@abbvie.com';
         bodyEl.appendChild(footer);
 
@@ -4862,7 +5019,7 @@
             var fsaSupported = typeof window.showSaveFilePicker !== 'undefined';
             backupSettDiv.innerHTML = '<b>Auto-Backup</b>' +
                 '<div style="margin-top:4px;color:#555;font-size:10px;">' +
-                (fsaSupported ? '✅ File System Access supported (Chrome/Edge)' : '⚠ Not supported in this browser — use manual Export/Import instead') +
+                (fsaSupported ? 'File System Access supported (Chrome/Edge)' : '⚠ Not supported in this browser — use manual Export/Import instead') +
                 '</div>' +
                 '<div style="margin-top:8px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
