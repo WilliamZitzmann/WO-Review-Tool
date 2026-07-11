@@ -1,10 +1,16 @@
 {
-  "latest": "0.20.3",
+  "latest": "0.20.4",
   "channels": {
-    "stable": "0.20.3",
-    "beta": "0.20.3"
+    "stable": "0.20.4",
+    "beta": "0.20.4"
   },
   "versions": [
+    {
+      "version": "0.20.4",
+      "changes": [
+        "Restructured the panel into three regions instead of one scrolling area: the title/status/scan-log always stay fixed at the top, the return message box and Return/Approve/Show-hidden buttons always stay fixed at the bottom, and only the group tiles in the middle scroll. The return message and action buttons are now always reachable without scrolling, no matter how many groups are expanded above them."
+      ]
+    },
     {
       "version": "0.20.3",
       "changes": [

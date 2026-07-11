@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.3';
+    var TOOL_VERSION = '0.20.4';
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -2691,7 +2691,7 @@
         gs[gid].hiddenCols = cols;
         saveGS(gs);
     }
-    var panel, bodyEl, statusEl;
+    var panel, bodyEl, footerAreaEl, statusEl;
 
     function setStatus(t) {
         if (statusEl) statusEl.textContent = t;
@@ -3017,7 +3017,7 @@
             "#__wo_dock .wo-btn:focus-visible{outline:3px solid var(--wo-accent);outline-offset:1px;}" +
             "#__wo_dock .wo-btn-primary{background:var(--wo-accent);color:var(--wo-on-accent);border-color:var(--wo-accent);}" +
             "#__wo_dock .wo-btn-danger{color:var(--wo-fail);border-color:var(--wo-fail);}" +
-            /* #__wo_status/#__wo_scanlog/#__wo_body layout is kept fully inline at creation (see buildPanel()) — not duplicated here. */
+            /* #__wo_status/#__wo_scanlog/#__wo_groups/#__wo_footer_area layout is kept fully inline at creation (see buildPanel()) — not duplicated here. */
             "#__wo_dock .wo-card{background:var(--wo-surface);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);overflow:hidden;}" +
             "#__wo_dock .__wo_th{background:var(--wo-surface-2);padding:6px 10px;min-height:32px;display:flex;align-items:center;gap:8px;cursor:pointer;}" +
             "#__wo_dock .__wo_th:hover{background:var(--wo-field);}" +
@@ -3092,16 +3092,21 @@
         injectPanelStyles();
         panel = document.createElement('div');
         panel.id = '__wo_dock';
-        // #__wo_status / #__wo_scanlog / #__wo_body are singleton structural
-        // containers, not repeated components — their layout-critical
-        // properties (background, flex sizing, overflow) are kept fully
-        // inline rather than in the shared stylesheet. A prior class-based
-        // version of these left #__wo_status/#__wo_scanlog with NO
-        // background at all (showing the Maximo page through them) and
-        // #__wo_body without a reliable scroll container, so expanding
-        // groups just grew the panel past the screen instead of scrolling
-        // — inline guarantees these three always apply regardless of
-        // anything on the host page.
+        // #__wo_status / #__wo_scanlog / #__wo_groups / #__wo_footer_area are
+        // singleton structural containers, not repeated components — their
+        // layout-critical properties (background, flex sizing, overflow) are
+        // kept fully inline rather than in the shared stylesheet, guaranteed
+        // to apply regardless of anything on the host page.
+        //
+        // The panel is split into three regions instead of one scrolling
+        // catch-all: header+status+scanlog always stay fixed at the top;
+        // #__wo_groups (the group tiles) is the ONLY scrollable region;
+        // #__wo_footer_area (return message, Return/Approve, show-hidden,
+        // credit line) is fixed at the bottom. This means the actions you
+        // actually need — the return message and the buttons — are always
+        // reachable without scrolling, no matter how many groups are
+        // expanded above, even if the groups region's own scroll behavior
+        // is ever fighting something on the host page.
         panel.style.cssText = 'position:fixed;top:0;right:0;width:' + PANEL_W + 'px;height:100vh;background:#0d1117;z-index:999999;font-size:12px;display:flex;flex-direction:column;box-shadow:-4px 0 14px rgba(0,0,0,.5);';
         panel.innerHTML =
             '<div class="wo-head">' +
@@ -3115,17 +3120,11 @@
             '</div>' +
             '<div id="__wo_status" style="padding:6px 12px;color:#9aa4af;font-size:11px;min-height:15px;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
             '<div id="__wo_scanlog" style="padding:0 12px 6px;font-size:10.5px;color:#9aa4af;max-height:80px;overflow-y:auto!important;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
-            // !important on the scroll-critical properties: two prior rounds
-            // of plain inline styles (correct on paper — flex:1 1 0 +
-            // min-height:0 + overflow-y:auto is the standard scrollable-flex-
-            // child pattern) still didn't produce a scrollbar in real Maximo,
-            // which points at the host page forcing something like
-            // `overflow: visible` globally via its own !important rule.
-            // Inline alone loses to that; !important is the strongest
-            // available counter short of literally not being CSS.
-            '<div id="__wo_body" style="flex:1 1 0!important;min-height:0!important;height:0!important;overflow-y:auto!important;padding:8px;display:flex;flex-direction:column;gap:8px;background:#0d1117;color:#f0f3f6;"></div>';
+            '<div id="__wo_groups" style="flex:1 1 0!important;min-height:0!important;height:0!important;overflow-y:auto!important;padding:8px;display:flex;flex-direction:column;gap:8px;background:#0d1117;color:#f0f3f6;"></div>' +
+            '<div id="__wo_footer_area" style="flex-shrink:0;padding:8px;background:#0d1117;color:#f0f3f6;border-top:1px solid #30363d;"></div>';
         document.body.appendChild(panel);
-        bodyEl = panel.querySelector('#__wo_body');
+        bodyEl = panel.querySelector('#__wo_groups');
+        footerAreaEl = panel.querySelector('#__wo_footer_area');
         statusEl = panel.querySelector('#__wo_status');
         panel.querySelector('#__wo_rescan').onclick = function() {
             runScan(render);
@@ -3218,6 +3217,7 @@
             results[r.id] = res;
         });
         bodyEl.innerHTML = '';
+        footerAreaEl.innerHTML = '';
 
         // ── Pre-scan state ──
         var preScan = !hasScanned; // ← all Latin characters
@@ -3617,7 +3617,7 @@
             '<button class="__wo_qr_copy wo-btn-ghost wo-qr-copy" type="button" title="Copy to clipboard" aria-label="Copy return message">Copy</button>' +
             '</div>';
 
-        bodyEl.appendChild(qrWrap);
+        footerAreaEl.appendChild(qrWrap);
         // ── Return and Approve buttons ──
         var actionRow = document.createElement('div');
         actionRow.className = 'wo-action-row';
@@ -3642,7 +3642,7 @@
 
         actionRow.appendChild(returnBtn);
         actionRow.appendChild(approveBtn);
-        bodyEl.appendChild(actionRow);
+        footerAreaEl.appendChild(actionRow);
 
         qrWrap.querySelector('.__wo_qr_copy').onclick = function() {
             var msg = buildReturnMessage();
@@ -3677,12 +3677,12 @@
             saveGS(g2);
             render();
         };
-        bodyEl.appendChild(showAll);
+        footerAreaEl.appendChild(showAll);
         // ── Footer ──
         var footer = document.createElement('div');
         footer.className = 'wo-footer';
         footer.textContent = 'Created by William Zitzmann, william.zitzmann@abbvie.com';
-        bodyEl.appendChild(footer);
+        footerAreaEl.appendChild(footer);
 
     }
 
