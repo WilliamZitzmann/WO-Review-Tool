@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.29';
+    var TOOL_VERSION = '0.20.30';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -1929,6 +1929,16 @@
             '#9aa4af';
     }
 
+    // Compact glyph for a status, used once a group badge has to represent
+    // more than one rule and there's no room left to spell PASS/FAIL out.
+    function statusSymbol(s) {
+        return s === 'pass' ? '✓' :
+            s === 'fail' ? '✕' :
+            s === 'warn' ? '!' :
+            s === 'error' ? '‼' :
+            '?';
+    }
+
 
     function poll(checkFn, timeoutMs, cb) {
         var start = Date.now();
@@ -2786,7 +2796,13 @@
 
             var draggedRect = cardEl.getBoundingClientRect();
             var collapseShift = draggedRect.top - preCollapseRect.top;
-            var headerShiftAmount = draggedRect.height;
+            // A shifted sibling needs to land in the dragged card's whole
+            // slot, not just its content box — getBoundingClientRect()
+            // doesn't include margin-bottom, so omitting it here left every
+            // shifted sibling short by exactly one card's margin until the
+            // drop-triggered rerender snapped it the rest of the way.
+            var cardMarginBottom = parseFloat(getComputedStyle(cardEl).marginBottom) || 0;
+            var headerShiftAmount = draggedRect.height + cardMarginBottom;
             var origRects = cards.map(function(c) {
                 return c.getBoundingClientRect();
             });
@@ -3348,9 +3364,22 @@
             // place — a real chicken-and-egg accessibility trap).
             "#__wo_dock .wo-th-actions{position:relative;display:flex;align-items:center;flex-shrink:0;margin-left:auto;min-height:22px;}" +
             "#__wo_dock .wo-group-badge{display:inline-flex;align-items:center;justify-content:center;width:42px;height:18px;padding:0 4px;border-radius:4px;font-size:9px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;box-sizing:border-box;color:#0d1117;transition:opacity .1s;}" +
+            // 2-rule badge: one flat box split evenly in half by a thin
+            // divider, one symbol per half.
+            "#__wo_dock .wo-badge-multi{display:inline-flex;width:42px;height:18px;border-radius:4px;overflow:hidden;box-sizing:border-box;transition:opacity .1s;}" +
+            "#__wo_dock .wo-badge-seg{flex:1;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#04101f;}" +
+            "#__wo_dock .wo-badge-seg+.wo-badge-seg{border-left:1px solid rgba(4,16,31,.35);}" +
+            // 3+ rule badge: fanned rounded-corner blocks (not capsules),
+            // worst rule up front and fully legible, the rest stacked
+            // behind it in descending z-index so only a colored sliver of
+            // each shows.
+            "#__wo_dock .wo-badge-pills{position:relative;display:inline-block;width:42px;height:18px;transition:opacity .1s;}" +
+            "#__wo_dock .wo-badge-pill{position:absolute;top:0;height:18px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#04101f;box-sizing:border-box;box-shadow:0 0 0 1px rgba(0,0,0,.15) inset;}" +
             "#__wo_dock .wo-th-icons{display:flex;align-items:center;justify-content:center;gap:2px;position:absolute;right:0;top:50%;transform:translateY(-50%);min-width:36px;height:18px;box-sizing:border-box;padding:0 3px;border-radius:999px;background:var(--wo-border);opacity:0;pointer-events:none;transition:opacity .1s;}" +
             "#__wo_dock .__wo_th:hover .wo-th-icons,#__wo_dock .wo-th-actions:focus-within .wo-th-icons{opacity:1;pointer-events:auto;}" +
-            "#__wo_dock .__wo_th:hover .wo-group-badge,#__wo_dock .wo-th-actions:focus-within .wo-group-badge{opacity:0;}" +
+            "#__wo_dock .__wo_th:hover .wo-group-badge,#__wo_dock .wo-th-actions:focus-within .wo-group-badge," +
+            "#__wo_dock .__wo_th:hover .wo-badge-multi,#__wo_dock .wo-th-actions:focus-within .wo-badge-multi," +
+            "#__wo_dock .__wo_th:hover .wo-badge-pills,#__wo_dock .wo-th-actions:focus-within .wo-badge-pills{opacity:0;}" +
             "#__wo_dock .__wo_tx{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;padding:0;border:1px solid transparent;border-radius:3px;background:transparent;color:var(--wo-muted);cursor:pointer;flex-shrink:0;}" +
             "#__wo_dock .__wo_tx:hover,#__wo_dock .__wo_tx:focus-visible{color:#fff;background:var(--wo-field);}" +
             "#__wo_dock .__wo_tx:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
@@ -3656,25 +3685,61 @@
             tile.setAttribute('data-gid', group.id);
             tile.className = 'wo-card' + (collapsed ? ' is-collapsed' : '');
             var refs = group.ruleRefs || [];
-            // Highest-priority status across every rule this group
-            // references (na doesn't count — it's not actionable), shown as
-            // one fixed-size badge instead of one dot per rule. Priority:
-            // error > fail > warn > pass — an all-pass group only shows
-            // green once everything else is ruled out.
+            // Every actionable (non-'na') rule this group references, worst
+            // priority first — one fixed-total-width badge represents all
+            // of them at once instead of collapsing straight to the worst.
+            // Priority: error > fail > warn > pass.
             var badgeHtml = '';
             if (!preScan && refs.length) {
                 var STATUS_PRIORITY = ['error', 'fail', 'warn', 'pass'];
-                var worstStatus = null;
+                var statuses = [];
                 refs.forEach(function(id) {
                     var r = results[id];
                     if (!r || r.status === 'na') return;
-                    if (!worstStatus || STATUS_PRIORITY.indexOf(r.status) < STATUS_PRIORITY.indexOf(worstStatus)) {
-                        worstStatus = r.status;
-                    }
+                    statuses.push({
+                        status: r.status,
+                        label: r.label
+                    });
                 });
-                if (worstStatus) {
-                    var badgeText = worstStatus === 'error' ? 'ERR' : worstStatus;
-                    badgeHtml = '<span class="wo-group-badge" style="background:' + statusColor(worstStatus) + ';" title="Worst rule status in this group: ' + badgeText + '">' + badgeText + '</span>';
+                statuses.sort(function(a, b) {
+                    return STATUS_PRIORITY.indexOf(a.status) - STATUS_PRIORITY.indexOf(b.status);
+                });
+                if (statuses.length === 1) {
+                    var only = statuses[0];
+                    var badgeText = only.status === 'error' ? 'ERR' : only.status;
+                    badgeHtml = '<span class="wo-group-badge" style="background:' + statusColor(only.status) + ';" title="' + only.label.replace(/"/g, '&quot;') + ': ' + badgeText + '">' + badgeText + '</span>';
+                } else if (statuses.length === 2) {
+                    // Even split, thin divider, symbols instead of text —
+                    // there's still room for both to read clearly at 21px.
+                    var tip2 = statuses.map(function(s) {
+                        return s.label + ': ' + s.status;
+                    }).join(' • ');
+                    badgeHtml = '<span class="wo-badge-multi" title="' + tip2.replace(/"/g, '&quot;') + '">' +
+                        statuses.map(function(s) {
+                            return '<span class="wo-badge-seg" style="background:' + statusColor(s.status) + ';">' + statusSymbol(s.status) + '</span>';
+                        }).join('') +
+                        '</span>';
+                } else {
+                    // 3+ rules: the worst rule is a full rounded-corner
+                    // (not capsule-shaped) block up front with its symbol
+                    // legible; every other rule is also a full block of the
+                    // same shape, each one nudged further right and one
+                    // z-index further back, so only a sliver of its color
+                    // peeks out from behind the block in front of it — a
+                    // fanned stack rather than literal equal slices, still
+                    // exactly as wide overall as the 1-rule badge.
+                    var tipN = statuses.map(function(s) {
+                        return s.label + ': ' + s.status;
+                    }).join(' • ');
+                    var BADGE_W = 42,
+                        PILL_W = 24;
+                    var n = statuses.length;
+                    var pillsHtml = statuses.map(function(s, i) {
+                        var left = i === 0 ? 0 : Math.round(i * (BADGE_W - PILL_W) / (n - 1));
+                        var isPrimary = i === 0;
+                        return '<span class="wo-badge-pill' + (isPrimary ? ' is-primary' : '') + '" style="left:' + left + 'px;width:' + PILL_W + 'px;background:' + statusColor(s.status) + ';z-index:' + (n - i) + ';">' + (isPrimary ? statusSymbol(s.status) : '') + '</span>';
+                    }).join('');
+                    badgeHtml = '<span class="wo-badge-pills" title="' + tipN.replace(/"/g, '&quot;') + '">' + pillsHtml + '</span>';
                 }
             }
             var tipHtml = '';
@@ -5327,6 +5392,51 @@
         }
         modal.addEventListener('click', closeRuleMenu);
 
+        // Animates a [data-coll-body] open/closed via a height transition
+        // instead of an instant display:none toggle — display can't be
+        // interpolated, so this measures scrollHeight, transitions an
+        // explicit height to/from it (box-sizing:border-box means that
+        // height already includes the body's own padding), and only sets
+        // display:none once the closing transition actually finishes.
+        function animateBodyToggle(body, expand) {
+            if (body._woAnimCleanup) body._woAnimCleanup();
+            body.style.overflow = 'hidden';
+            if (expand) {
+                body.style.display = '';
+                var target = body.scrollHeight;
+                body.style.height = '0px';
+                body.getBoundingClientRect(); // force reflow before transitioning
+                body.style.transition = 'height 160ms ease';
+                body.style.height = target + 'px';
+            } else {
+                var current = body.scrollHeight;
+                body.style.height = current + 'px';
+                body.getBoundingClientRect(); // force reflow before transitioning
+                body.style.transition = 'height 160ms ease';
+                body.style.height = '0px';
+            }
+            function onEnd(e) {
+                if (e && e.propertyName !== 'height') return;
+                clearTimeout(fallbackTimer);
+                body.style.transition = '';
+                body.style.height = '';
+                body.style.overflow = '';
+                if (!expand) body.style.display = 'none';
+                body.removeEventListener('transitionend', onEnd);
+                body._woAnimCleanup = null;
+            }
+            body.addEventListener('transitionend', onEnd);
+            // transitionend doesn't fire if the height never actually
+            // changed (e.g. an empty card body) — a timeout backstop so the
+            // inline height/overflow never gets stuck past the transition's
+            // own duration either way.
+            var fallbackTimer = setTimeout(onEnd, 220);
+            // If the card gets torn down/re-rendered mid-transition (e.g. a
+            // reorder fires right after a toggle), finish the state jump
+            // immediately rather than leaving a dangling listener/height.
+            body._woAnimCleanup = onEnd;
+        }
+
         function makeCollapsible(box, headerText, startCollapsed, onToggle) {
             if (startCollapsed === undefined) startCollapsed = true;
             var header = box.querySelector('[data-coll-header]');
@@ -5346,7 +5456,7 @@
                 // also toggle collapse as a side effect.
                 if (cardJustDragged) return;
                 var hidden = body.style.display === 'none';
-                body.style.display = hidden ? '' : 'none';
+                animateBodyToggle(body, hidden);
                 if (arrow) arrow.textContent = hidden ? '▼' : '▶';
                 if (onToggle) onToggle(hidden);
             });
@@ -5390,7 +5500,53 @@
             return '<span class="wo-move-wrap" onclick="event.stopPropagation()">' + upBtn + dnBtn + '</span>';
         }
 
+        // A move-arrow (or Groups tab's own order-swap) only ever trades two
+        // ADJACENT cards, at positions idxLow/idxHigh in the container
+        // BEFORE rerenderFn() rebuilds it — a much narrower case than the
+        // drag engine's arbitrary reorder, so a full FLIP (First-Last-
+        // Invert-Play) is simple here: record both cards' rects before the
+        // rerender, rebuild, then slide each new occupant in from the
+        // other's old rect instead of letting the swap just jump instantly.
+        function animateSwap(container, idxLow, idxHigh, rerenderFn) {
+            function getCards() {
+                return Array.prototype.filter.call(container.children, function(el) {
+                    return el.hasAttribute && el.hasAttribute('data-reorder-card');
+                });
+            }
+            var oldCards = getCards();
+            var oldRectLow = oldCards[idxLow] ? oldCards[idxLow].getBoundingClientRect() : null;
+            var oldRectHigh = oldCards[idxHigh] ? oldCards[idxHigh].getBoundingClientRect() : null;
+            rerenderFn();
+            var newCards = getCards();
+
+            function flipFrom(el, oldRect) {
+                if (!el || !oldRect) return;
+                var newRect = el.getBoundingClientRect();
+                var dy = oldRect.top - newRect.top;
+                var dx = oldRect.left - newRect.left;
+                if (!dy && !dx) return;
+                el.style.transition = 'none';
+                el.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+                el.getBoundingClientRect(); // commit the offset before transitioning off it
+                el.style.transition = 'transform 160ms ease';
+                el.style.transform = '';
+                function onEnd(e) {
+                    if (e && e.propertyName !== 'transform') return;
+                    clearTimeout(fallbackTimer);
+                    el.style.transition = '';
+                    el.removeEventListener('transitionend', onEnd);
+                }
+                el.addEventListener('transitionend', onEnd);
+                var fallbackTimer = setTimeout(onEnd, 220);
+            }
+            // The item now sitting in the top slot used to be down in the
+            // bottom slot's rect, and vice versa.
+            flipFrom(newCards[idxLow], oldRectHigh);
+            flipFrom(newCards[idxHigh], oldRectLow);
+        }
+
         function wireMoveButtons(box, arr, idx, rerenderFn) {
+            var container = box.parentElement;
             var upBtn = box.querySelector('[data-mv-up]');
             var dnBtn = box.querySelector('[data-mv-dn]');
             if (upBtn) upBtn.onclick = function() {
@@ -5398,14 +5554,14 @@
                 var tmp = arr[idx - 1];
                 arr[idx - 1] = arr[idx];
                 arr[idx] = tmp;
-                rerenderFn();
+                animateSwap(container, idx - 1, idx, rerenderFn);
             };
             if (dnBtn) dnBtn.onclick = function() {
                 if (idx === arr.length - 1) return;
                 var tmp = arr[idx + 1];
                 arr[idx + 1] = arr[idx];
                 arr[idx] = tmp;
-                rerenderFn();
+                animateSwap(container, idx, idx + 1, rerenderFn);
             };
         }
 
@@ -5485,7 +5641,13 @@
                 // instant the drag arms.
                 var draggedRect = cardEl.getBoundingClientRect();
                 var collapseShift = draggedRect.top - preCollapseRect.top;
-                var headerShiftAmount = draggedRect.height;
+                // A shifted sibling needs to land in the dragged card's whole
+                // slot, not just its content box — getBoundingClientRect()
+                // doesn't include margin-bottom, so omitting it here left every
+                // shifted sibling short by exactly one card's margin until the
+                // drop-triggered rerender snapped it the rest of the way.
+                var cardMarginBottom = parseFloat(getComputedStyle(cardEl).marginBottom) || 0;
+                var headerShiftAmount = draggedRect.height + cardMarginBottom;
                 var origRects = cards.map(function(c) {
                     return c.getBoundingClientRect();
                 });
@@ -6173,21 +6335,21 @@
                 (function() {
                     var upBtn = box.querySelector('[data-mv-up]');
                     var dnBtn = box.querySelector('[data-mv-dn]');
-                    function swapOrder(a, b) {
+                    function swapOrder(lowIdx, highIdx) {
                         var ids = orderedGrps.map(function(g) {
                             return g.id;
                         });
-                        var tmp = ids[a];
-                        ids[a] = ids[b];
-                        ids[b] = tmp;
+                        var tmp = ids[lowIdx];
+                        ids[lowIdx] = ids[highIdx];
+                        ids[highIdx] = tmp;
                         var g2 = getGS();
                         g2.__order = ids;
                         saveGS(g2);
-                        groupsTab();
+                        animateSwap(content, lowIdx, highIdx, groupsTab);
                     }
                     if (upBtn) upBtn.onclick = function() {
                         if (idx === 0) return;
-                        swapOrder(idx, idx - 1);
+                        swapOrder(idx - 1, idx);
                     };
                     if (dnBtn) dnBtn.onclick = function() {
                         if (idx === orderedGrps.length - 1) return;

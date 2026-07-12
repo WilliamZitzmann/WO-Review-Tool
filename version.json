@@ -1,10 +1,19 @@
 {
-  "latest": "0.20.29",
+  "latest": "0.20.30",
   "channels": {
-    "stable": "0.20.29",
-    "beta": "0.20.29"
+    "stable": "0.20.30",
+    "beta": "0.20.30"
   },
   "versions": [
+    {
+      "version": "0.20.30",
+      "changes": [
+        "Fixed the drag-reorder gap bug: when dragging a card past a neighbor, the displaced neighbor now lands exactly in the dragged card's slot immediately (previously it stopped short by the card's own margin until you released the drag)",
+        "Expanding/collapsing a card (by clicking its header) now animates smoothly instead of snapping instantly",
+        "Moving a card with the up/down arrow buttons now animates the swap instead of jumping instantly to the new order",
+        "Main panel group badges can now represent more than one rule at once instead of collapsing straight to the worst status: 2 rules split the badge in half with symbols; 3+ rules show the worst rule up front with the rest fanned out behind it as narrow color slivers - always the same total width as a single-rule badge"
+      ]
+    },
     {
       "version": "0.20.29",
       "changes": [
