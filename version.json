@@ -1,10 +1,18 @@
 {
-  "latest": "0.20.36",
+  "latest": "0.20.37",
   "channels": {
-    "stable": "0.20.36",
-    "beta": "0.20.36"
+    "stable": "0.20.37",
+    "beta": "0.20.37"
   },
   "versions": [
+    {
+      "version": "0.20.37",
+      "name": "Multi-Company Redirect Fix",
+      "changes": [
+        "Fixed a real bug in loader.js: when clicking the bookmarklet from an unrecognized page with more than one company's Maximo configured, it always redirected to the FIRST configured company regardless of which one you actually belonged to. With only one company configured this was invisible, but it would have silently misdirected anyone from a second company.",
+        "Now: one company configured behaves exactly as before (auto-redirect, no extra step). More than one configured and not yet on any known host shows a one-time \"which Maximo instance is this for?\" picker, remembers the choice, and redirects correctly from then on."
+      ]
+    },
     {
       "version": "0.20.36",
       "name": "Preserve Config Across Revoke",

@@ -190,22 +190,72 @@
         });
     }
 
+    var PREFERRED_HOST_KEY = '__wo_preferred_host';
+
     function checkDomainThenProceed(hosts, requiredFields) {
         var here = location.hostname;
         var known = (hosts || []).some(function(h) {
             return h.hostname === here;
         });
         if (hosts && hosts.length && !known) {
-            showBanner('Redirecting to Maximo...');
-            // A bookmarklet can't auto-resume after a navigation — nothing
-            // is left to re-invoke it once the new page loads. The user
-            // has to click the bookmarklet again once Maximo's loaded and
-            // they're logged in (same root constraint as "persist across a
-            // tab refresh" being out of scope for a plain bookmarklet).
-            location.href = hosts[0].url;
+            redirectToMaximo(hosts);
             return;
         }
         proceedWithAccessCheck(requiredFields);
+    }
+
+    function doRedirect(host) {
+        // Remembered so a second click (e.g. after landing mid-SSO-flow on
+        // an auth domain that also isn't a known host) doesn't have to ask
+        // again — same company, same choice.
+        localStorage.setItem(PREFERRED_HOST_KEY, host.hostname);
+        showBanner('Redirecting to Maximo...');
+        // A bookmarklet can't auto-resume after a navigation — nothing is
+        // left to re-invoke it once the new page loads. The user has to
+        // click the bookmarklet again once Maximo's loaded and they're
+        // logged in (same root constraint as "persist across a tab
+        // refresh" being out of scope for a plain bookmarklet).
+        location.href = host.url;
+    }
+
+    // With only one company configured there's nothing to disambiguate —
+    // redirect straight there, same behavior as before. With more than one,
+    // there's no way to know which company a click from an unrecognized
+    // page belongs to (that's exactly the question whoami would answer,
+    // and whoami can only be read AFTER landing on that company's own
+    // Maximo page) — so ask once, then remember the answer.
+    function redirectToMaximo(hosts) {
+        if (hosts.length === 1) {
+            doRedirect(hosts[0]);
+            return;
+        }
+        var preferredHostname = localStorage.getItem(PREFERRED_HOST_KEY);
+        var preferred = hosts.filter(function(h) {
+            return h.hostname === preferredHostname;
+        })[0];
+        if (preferred) {
+            doRedirect(preferred);
+            return;
+        }
+        showHostPicker(hosts);
+    }
+
+    function showHostPicker(hosts) {
+        var old = document.getElementById('__wo_loader_banner');
+        if (old) old.remove();
+        var box = document.createElement('div');
+        box.id = '__wo_loader_banner';
+        box.style.cssText = 'position:fixed;top:10px;right:10px;z-index:2147483647;background:#2c2c2c;color:#fff;padding:12px 16px;border-radius:6px;font-family:Arial,sans-serif;font-size:13px;max-width:320px;';
+        box.innerHTML = '<div style="margin-bottom:8px;">Which Maximo instance is this for?</div>' +
+            hosts.map(function(h, i) {
+                return '<button type="button" data-host-idx="' + i + '" style="display:block;width:100%;margin-bottom:4px;padding:6px 10px;background:#3a3a3a;color:#fff;border:1px solid #555;border-radius:4px;cursor:pointer;text-align:left;">' + h.hostname + '</button>';
+            }).join('');
+        document.body.appendChild(box);
+        Array.prototype.forEach.call(box.querySelectorAll('[data-host-idx]'), function(btn) {
+            btn.onclick = function() {
+                doRedirect(hosts[parseInt(btn.getAttribute('data-host-idx'), 10)]);
+            };
+        });
     }
 
     function main() {
