@@ -22,10 +22,12 @@ Instead:
 
 GitHub Settings → Developer settings → Fine-grained personal access tokens → Generate new token.
 - Repository access: **only** `WO-Review-Tool-Private`.
-- Permissions: **Contents: Read-only**. Nothing else.
-- Set an expiration and put a calendar reminder to rotate it — a fine-grained PAT scoped to Contents:Read on one private repo is low-blast-radius, but it's still a real credential.
+- Permissions: **Contents: Read-only**, plus **Issues: Read and write** (needed for the `/feedback` endpoint, which files bug/suggestion reports as Issues on this repo). Nothing else.
+- Set an expiration and put a calendar reminder to rotate it — a fine-grained PAT scoped to just these two permissions on one private repo is low-blast-radius, but it's still a real credential.
 
 Copy the token now; GitHub won't show it again.
+
+If you already have a PAT deployed from before `/feedback` existed, it only has Contents:Read — edit its permissions on GitHub (fine-grained PATs can be edited in place, no need to regenerate) to add Issues: Read and write, or `/feedback` will fail with a GitHub 403/404.
 
 ## 3. Install Wrangler and log in
 

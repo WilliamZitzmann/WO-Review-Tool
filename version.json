@@ -1,10 +1,19 @@
 {
-  "latest": "0.21.0",
+  "latest": "0.21.1",
   "channels": {
-    "stable": "0.21.0",
-    "beta": "0.21.0"
+    "stable": "0.21.1",
+    "beta": "0.21.1"
   },
   "versions": [
+    {
+      "version": "0.21.1",
+      "name": "Faster Access Checks + Issue-Tracked Feedback",
+      "changes": [
+        "Access checks are much faster: the Worker now caches permissions.json and the tool source at the edge (pinned versions cache for a day since a tag never changes; the branch/dev channel caches for 15 seconds) instead of re-fetching from GitHub on every single click.",
+        "Repeat clicks within 15 minutes now skip the network entirely and run the already-cached tool with the already-cached grants - a deliberate speed/freshness tradeoff: a revoke can take up to 15 minutes to land on a browser that already cached a grant, instead of the very next click.",
+        "Feedback tab now files a GitHub Issue directly (private repo, routed through the Worker) instead of opening an email draft, and includes more context automatically: browser info, current channel/pin, and the last status line. Falls back to email if the report can't be filed for any reason."
+      ]
+    },
     {
       "version": "0.21.0",
       "name": "Minor Version 1 + Beta Framework",

@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.21.0';
+    var TOOL_VERSION = '0.21.1';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -7967,10 +7967,12 @@
             window.open('https://williamzitzmann.github.io/WO-Review-Tool/', '_blank');
         }
 
-        // ── FEEDBACK TAB ── No backend to receive reports — this just
-        // composes a mailto: draft (same support address used for access
-        // requests) pre-filled with version/channel/grants so a report
-        // doesn't need those typed out by hand.
+        // ── FEEDBACK TAB ── Files a GitHub Issue in the private repo via
+        // the Worker's /feedback endpoint (needs a fresh access token, same
+        // as fetching the tool itself — that's what keeps this from being
+        // an open, unauthenticated write path onto the issue tracker).
+        // Falls back to a mailto: draft if the Worker call fails for any
+        // reason, so a report is never just silently lost.
         function feedbackTab() {
             content.innerHTML = '';
             var div = document.createElement('div');
@@ -7983,8 +7985,8 @@
                 '</select></div>' +
                 '<textarea id="__fb_body" placeholder="What happened, or what would help?" style="width:100%;height:140px;"></textarea>' +
                 '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;">' +
-                '<button id="__fb_send" type="button" class="wo-btn wo-btn-primary">Send via Email</button>' +
-                '<span style="color:var(--wo-muted);font-size:10px;">Opens a draft to ' + SUPPORT_EMAIL + ' in your default mail app — nothing is sent automatically.</span>' +
+                '<button id="__fb_send" type="button" class="wo-btn wo-btn-primary">Send Report</button>' +
+                '<span id="__fb_status" style="color:var(--wo-muted);font-size:10px;"></span>' +
                 '</div>' +
                 '</div>';
             content.appendChild(div);
@@ -7993,18 +7995,51 @@
             div.querySelector('#__fb_send').onclick = function() {
                 var type = div.querySelector('#__fb_type').value;
                 var body = div.querySelector('#__fb_body').value.trim();
+                var statusSpan = div.querySelector('#__fb_status');
+                var sendBtn = div.querySelector('#__fb_send');
                 if (!body) {
                     alert('Describe the bug or suggestion first.');
                     return;
                 }
+                var stCtx = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
                 var context = 'Tool version: v' + TOOL_VERSION +
                     '\nGrants: ' + (getGrants().join(', ') || 'user') +
+                    '\nChannel: ' + (stCtx.channel || 'stable') + (stCtx.pinnedVersion ? ' (pinned: ' + stCtx.pinnedVersion + ')' : '') +
+                    '\nLast status: ' + (statusEl ? statusEl.textContent : '') +
+                    '\nBrowser: ' + navigator.userAgent +
                     '\nURL: ' + location.href;
-                var subject = 'WO Review Tool ' + type + ' report';
-                var mailBody = body + '\n\n---\n' + context;
-                window.location.href = 'mailto:' + SUPPORT_EMAIL +
-                    '?subject=' + encodeURIComponent(subject) +
-                    '&body=' + encodeURIComponent(mailBody);
+
+                function fallbackToEmail() {
+                    var subject = 'WO Review Tool ' + type + ' report';
+                    var mailBody = body + '\n\n---\n' + context;
+                    window.location.href = 'mailto:' + SUPPORT_EMAIL +
+                        '?subject=' + encodeURIComponent(subject) +
+                        '&body=' + encodeURIComponent(mailBody);
+                }
+
+                sendBtn.disabled = true;
+                statusSpan.textContent = 'Sending...';
+                getWorkerAccessToken().then(function(token) {
+                    return xhrPostJSON(WORKER_BASE_URL + '/feedback', {
+                        token: token,
+                        type: type,
+                        body: body,
+                        context: context
+                    });
+                }).then(function(res) {
+                    sendBtn.disabled = false;
+                    if (res && res.ok) {
+                        statusSpan.textContent = 'Sent — thank you.';
+                        div.querySelector('#__fb_body').value = '';
+                    } else {
+                        statusSpan.textContent = 'Could not file report — opening an email draft instead.';
+                        fallbackToEmail();
+                    }
+                }).catch(function() {
+                    sendBtn.disabled = false;
+                    statusSpan.textContent = 'Could not reach the report system — opening an email draft instead.';
+                    fallbackToEmail();
+                });
             };
         }
 

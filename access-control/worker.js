@@ -32,10 +32,21 @@
  *                          (the private repo needs the same tags pushed to
  *                          it as the public repo, for every release, so
  *                          version pinning/rollback keeps working).
+ *   POST /feedback       — body: { token, type, body, context }. Requires a
+ *                          valid (unexpired) access token, same as /tool —
+ *                          this is what stops the endpoint being an open
+ *                          spam relay, not a separate auth check. Files a
+ *                          GitHub Issue in the PRIVATE repo (so a reporter
+ *                          never needs private-repo access themselves) and
+ *                          returns { ok, issueUrl }.
  *
  * Required secrets (wrangler secret put ...):
- *   GITHUB_PAT     — fine-grained PAT, read-only, Contents:read on the
- *                    private repo holding wo_tool.js + permissions.json.
+ *   GITHUB_PAT     — fine-grained PAT on the private repo holding
+ *                    wo_tool.js + permissions.json. Needs Contents:read
+ *                    (tool source + permissions) AND Issues:write
+ *                    (feedback reports) — the original deploy only granted
+ *                    Contents:read, so this scope has to be added to the
+ *                    PAT on GitHub's side for /feedback to work.
  *   TOKEN_SECRET   — random string, signs the short-lived access tokens.
  *
  * Required vars (wrangler.toml [vars]):
@@ -79,8 +90,40 @@ async function fetchPrivateFile(env, path, ref) {
     return res.text();
 }
 
-async function loadPermissions(env) {
-    const raw = await fetchPrivateFile(env, 'permissions.json');
+// ── Edge cache for GitHub reads ──
+// Every /bootstrap and /check-access call used to re-fetch permissions.json
+// from GitHub (two full round trips per launch, not one), and every /tool
+// call re-fetched wo_tool.js (hundreds of KB) even when nothing had
+// changed since the last request. Caching at Cloudflare's edge (not
+// client-side, and not the access DECISION itself) cuts that down to a
+// single GitHub fetch per TTL window, worldwide, while every request still
+// re-evaluates permissions against whatever's in the cache — a revoke
+// still lands within the TTL, not "whenever this browser feels like
+// re-checking." A tagged version ref is immutable by convention (a
+// released tag never gets its content changed after the fact), so pinned
+// tool fetches cache far longer than the branch HEAD / permissions.json,
+// which can change at any time.
+const PERMISSIONS_CACHE_TTL = 30; // seconds
+const TOOL_SRC_CACHE_TTL_PINNED = 24 * 60 * 60; // seconds — a "vX.Y.Z" tag never changes
+const TOOL_SRC_CACHE_TTL_UNPINNED = 15; // seconds — dev channel tracks a moving branch
+
+async function cachedFetchPrivateFile(env, ctx, path, ref, ttlSeconds) {
+    const cache = caches.default;
+    const cacheKey = new Request('https://wo-review-tool-cache.internal/' + path + (ref ? '@' + ref : ''));
+    const hit = await cache.match(cacheKey);
+    if (hit) return hit.text();
+    const text = await fetchPrivateFile(env, path, ref);
+    const toCache = new Response(text, { headers: { 'Cache-Control': 'max-age=' + ttlSeconds } });
+    if (ctx && ctx.waitUntil) {
+        ctx.waitUntil(cache.put(cacheKey, toCache));
+    } else {
+        await cache.put(cacheKey, toCache);
+    }
+    return text;
+}
+
+async function loadPermissions(env, ctx) {
+    const raw = await cachedFetchPrivateFile(env, ctx, 'permissions.json', null, PERMISSIONS_CACHE_TTL);
     return JSON.parse(raw);
 }
 
@@ -212,15 +255,15 @@ async function verifyToken(secret, token) {
 }
 
 // ── Handlers ──
-async function handleBootstrap(env) {
-    var perms = await loadPermissions(env);
+async function handleBootstrap(env, ctx) {
+    var perms = await loadPermissions(env, ctx);
     return json({
         maximoHosts: perms.maximoHosts || [],
         requiredFields: computeRequiredFields(perms),
     });
 }
 
-async function handleCheckAccess(request, env) {
+async function handleCheckAccess(request, env, ctx) {
     var body;
     try {
         body = await request.json();
@@ -228,7 +271,7 @@ async function handleCheckAccess(request, env) {
         return json({ granted: false, error: 'bad request' }, 400);
     }
     var user = body.fields || {};
-    var perms = await loadPermissions(env);
+    var perms = await loadPermissions(env, ctx);
     var result = evaluateAccess(perms, user);
     if (!result.granted) return json({ granted: false });
 
@@ -239,7 +282,53 @@ async function handleCheckAccess(request, env) {
     return json({ granted: true, grants: result.grants, token: token });
 }
 
-async function handleGetTool(request, env) {
+async function createPrivateIssue(env, title, body) {
+    const url = `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/issues`;
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${env.GITHUB_PAT}`,
+            'Accept': 'application/vnd.github+json',
+            'User-Agent': 'wo-review-tool-worker',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title: title, body: body }),
+    });
+    if (!res.ok) throw new Error(`GitHub issue create failed: HTTP ${res.status}`);
+    const data = await res.json();
+    return data.html_url;
+}
+
+async function handleFeedback(request, env) {
+    var body;
+    try {
+        body = await request.json();
+    } catch (e) {
+        return json({ ok: false, error: 'bad request' }, 400);
+    }
+    // Same token /tool uses — this isn't a separate identity check, just a
+    // cheap way to keep this endpoint from being an open, unauthenticated
+    // relay onto the private repo's issue tracker.
+    var data = await verifyToken(env.TOKEN_SECRET, body.token);
+    if (!data) {
+        return json({ ok: false, error: 'invalid or expired token' }, 403);
+    }
+    var type = (body.type === 'Suggestion') ? 'Suggestion' : 'Bug';
+    var text = String(body.body || '').slice(0, 8000);
+    var context = String(body.context || '').slice(0, 2000);
+    if (!text.trim()) return json({ ok: false, error: 'empty report' }, 400);
+
+    var title = 'WO Review Tool ' + type + ': ' + text.split('\n')[0].slice(0, 80);
+    var issueBody = text + '\n\n---\n' + context;
+    try {
+        var issueUrl = await createPrivateIssue(env, title, issueBody);
+        return json({ ok: true, issueUrl: issueUrl });
+    } catch (e) {
+        return json({ ok: false, error: String(e && e.message || e) }, 502);
+    }
+}
+
+async function handleGetTool(request, env, ctx) {
     var url = new URL(request.url);
     var token = url.searchParams.get('token');
     var data = await verifyToken(env.TOKEN_SECRET, token);
@@ -252,7 +341,8 @@ async function handleGetTool(request, env) {
     // pushed to it, same as the public repo already does on every release.
     var version = url.searchParams.get('version');
     var ref = version ? 'v' + version.replace(/^v/, '') : null;
-    var src = await fetchPrivateFile(env, 'wo_tool.js', ref);
+    var ttl = ref ? TOOL_SRC_CACHE_TTL_PINNED : TOOL_SRC_CACHE_TTL_UNPINNED;
+    var src = await cachedFetchPrivateFile(env, ctx, 'wo_tool.js', ref, ttl);
     return new Response(src, {
         status: 200,
         headers: Object.assign({ 'Content-Type': 'application/javascript; charset=utf-8' }, corsHeaders()),
@@ -267,13 +357,16 @@ export default {
         var url = new URL(request.url);
         try {
             if (url.pathname === '/bootstrap' && request.method === 'GET') {
-                return await handleBootstrap(env);
+                return await handleBootstrap(env, ctx);
             }
             if (url.pathname === '/check-access' && request.method === 'POST') {
-                return await handleCheckAccess(request, env);
+                return await handleCheckAccess(request, env, ctx);
             }
             if (url.pathname === '/tool' && request.method === 'GET') {
-                return await handleGetTool(request, env);
+                return await handleGetTool(request, env, ctx);
+            }
+            if (url.pathname === '/feedback' && request.method === 'POST') {
+                return await handleFeedback(request, env);
             }
             return json({ error: 'not found' }, 404);
         } catch (err) {

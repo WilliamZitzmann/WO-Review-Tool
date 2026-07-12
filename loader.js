@@ -74,8 +74,38 @@
     // before it's cleared, not just deleted. An exclude-list rather than an
     // allow-list on purpose: new config keys wo_tool.js adds later get
     // captured automatically without this file needing to know their names.
-    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_grants', '__wo_known_hosts', '__wo_last_scanned_wo'];
+    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_grants', '__wo_known_hosts', '__wo_last_scanned_wo', '__wo_grant_cache'];
     var REVOKED_BACKUP_KEY = '__wo_revoked_backup';
+
+    // Short-lived local cache of the last access decision — a deliberate
+    // speed/freshness tradeoff: skips all 3 network round trips (bootstrap,
+    // whoami, check-access) for repeat clicks within the window, at the
+    // cost of a revoke taking up to this long to actually land on a
+    // browser that already cached a grant, instead of the very next click.
+    // wo_tool.js's own update check still runs independently once the
+    // cached copy is running, so a real version bump is never blocked by
+    // this — only the ACCESS check is skipped, not the tool's own
+    // self-update logic.
+    var GRANT_CACHE_KEY = '__wo_grant_cache';
+    var GRANT_CACHE_TTL_MS = 15 * 60 * 1000;
+
+    function readGrantCache() {
+        try {
+            var raw = JSON.parse(localStorage.getItem(GRANT_CACHE_KEY) || 'null');
+            if (!raw || typeof raw.cachedAt !== 'number') return null;
+            if (Date.now() - raw.cachedAt > GRANT_CACHE_TTL_MS) return null;
+            return raw;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function writeGrantCache(grants) {
+        localStorage.setItem(GRANT_CACHE_KEY, JSON.stringify({
+            grants: grants || [],
+            cachedAt: Date.now()
+        }));
+    }
 
     // Clears the tool + its config on a confirmed revoke, but preserves two
     // things so a later regrant comes back whole: IndexedDB (__wo_tool_db,
@@ -149,6 +179,20 @@
     }
 
     function proceedWithAccessCheck(requiredFields) {
+        // Cache hit: skip straight to running the already-cached tool
+        // source with the already-cached grants, no network at all. Only
+        // valid if we actually have a runnable copy cached — a cache hit
+        // with nothing to run would just show an error for no reason, so
+        // fall through to the real check in that case instead.
+        var cached = readGrantCache();
+        if (cached && localStorage.getItem(TOOL_SRC_KEY)) {
+            localStorage.setItem(GRANTS_KEY, JSON.stringify(cached.grants));
+            restoreFromRevokedBackupIfAny();
+            removeBanner();
+            eval(localStorage.getItem(TOOL_SRC_KEY));
+            return;
+        }
+
         showBanner('Checking access...');
         readWhoami().then(function(whoamiData) {
             var fieldsToSend = requiredFields ? fieldsSubset(requiredFields, whoamiData) : whoamiData;
@@ -167,6 +211,7 @@
         }).then(function(decision) {
             if (decision.granted) {
                 localStorage.setItem(GRANTS_KEY, JSON.stringify(decision.grants || []));
+                writeGrantCache(decision.grants);
                 restoreFromRevokedBackupIfAny();
                 return fetchAndRunTool(decision.token);
             }
