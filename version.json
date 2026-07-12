@@ -1,10 +1,22 @@
 {
-  "latest": "0.20.24",
+  "latest": "0.20.25",
   "channels": {
-    "stable": "0.20.24",
-    "beta": "0.20.24"
+    "stable": "0.20.25",
+    "beta": "0.20.25"
   },
   "versions": [
+    {
+      "version": "0.20.25",
+      "changes": [
+        "Variables and Scan tabs rebuilt to match Rules/Groups: card headers with a drag handle, move up/down, and a Rename/Duplicate/Delete kebab menu instead of a lone Delete button; Scan's Row Detail Fields and Post-Scan Actions sub-editors restyled with the shared dark theme and icon+tooltip add/delete buttons instead of hardcoded colors",
+        "Redesigned the drag-handle icon to an up chevron / two lines / down chevron (reads as a drag handle, not a generic arrow)",
+        "Fixed the drag handle and move up/down buttons showing on every row instead of only the one being hovered - the hide/reveal opacity now uses !important, since a host page's own broad rules can beat even a higher-specificity plain rule",
+        "Drag handle now reveals on hovering the card's header OR its expanded body (previously header-only), matching the move buttons",
+        "Move up/down buttons no longer show a background box on hover - just the icon itself brightens",
+        "At the top/bottom of a list, the move button for the impossible direction (e.g. move up on the first entry) is now omitted entirely instead of shown dimmed",
+        "Card headers across Rules/Groups/Variables/Scan are now hard-clamped to the same height (instead of relying on every row's content naturally computing the same size), to permanently rule out any tab's rows silently rendering thicker than another's"
+      ]
+    },
     {
       "version": "0.20.24",
       "changes": [

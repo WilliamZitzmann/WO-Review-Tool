@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.24';
+    var TOOL_VERSION = '0.20.25';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -4405,7 +4405,14 @@
             // visible gap of empty padding above/below the header row for
             // no reason. This way a collapsed card hugs its header tightly.
             "#__wo_setup_modal .wo-card{border:1px solid var(--wo-border);border-radius:var(--wo-r-card);margin-bottom:9px;background:var(--wo-surface);overflow:hidden;}" +
-            "#__wo_setup_modal .wo-card-head{display:flex;align-items:center;gap:6px;padding:6px 10px;min-height:30px;line-height:1;cursor:pointer;user-select:none;background:var(--wo-surface-2);}" +
+            // max-height (not just min-height) forcibly clamps this row to
+            // one line's worth regardless of what's docked in it — a hard
+            // guarantee that Rules/Groups/Variables/Scan headers all render
+            // pixel-identical, since a min-height alone can't stop a row
+            // from silently growing taller than another for reasons that
+            // are hard to isolate in a static test (a couple of px of
+            // difference was reported live but not reproducible here).
+            "#__wo_setup_modal .wo-card-head{display:flex;align-items:center;gap:6px;padding:6px 10px;height:34px;max-height:34px;box-sizing:border-box;overflow:hidden;line-height:1;cursor:pointer;user-select:none;background:var(--wo-surface-2);}" +
             "#__wo_setup_modal .wo-card-head:hover{background:var(--wo-field);}" +
             "#__wo_setup_modal .wo-card>[data-coll-body]{padding:0 10px 10px;}" +
             "#__wo_setup_modal .wo-card-arrow{font-size:9px;color:var(--wo-muted);min-width:9px;}" +
@@ -4428,22 +4435,27 @@
             "#__wo_setup_modal .wo-vis-btn.is-hidden{color:var(--wo-muted);}" +
             // Reserved-width drag handle at the far left of the header —
             // always takes up its slot in the layout (so the title doesn't
-            // reflow when it appears) but stays invisible until this
-            // specific row's header is hovered, signalling "grab here to
-            // reorder" without cluttering every row all the time.
-            "#__wo_setup_modal .wo-drag-handle{display:inline-flex;align-items:center;justify-content:center;width:14px;flex-shrink:0;color:var(--wo-muted);opacity:0;transition:opacity 120ms;cursor:grab;}" +
-            "#__wo_setup_modal .wo-card-head:hover .wo-drag-handle{opacity:1;}" +
+            // reflow when it appears) but stays invisible until the card
+            // (header OR its expanded body) is hovered, signalling "grab
+            // here to reorder" without cluttering every row all the time.
+            // !important on the opacity pair: this is exactly the kind of
+            // property a host page's own broad selectors fight over, and a
+            // plain (non-important) rule can lose that fight even at
+            // higher specificity if the host's is also !important.
+            "#__wo_setup_modal .wo-drag-handle{display:inline-flex;align-items:center;justify-content:center;width:14px;height:22px;flex-shrink:0;color:var(--wo-muted);opacity:0!important;cursor:grab;}" +
+            "#__wo_setup_modal [data-reorder-card]:hover .wo-drag-handle,#__wo_setup_modal [data-reorder-card]:focus-within .wo-drag-handle{opacity:1!important;}" +
             // Move buttons stay invisible until the pointer is anywhere
             // over the card (header or its expanded body) — just an icon
             // that lights up on hover, no visible button chrome at rest.
             // Keyed off [data-reorder-card] (set by attachCardDrag on every
             // card it wires up), not the .wo-card class, so this also
             // covers Variables/Scan whose cards don't use .wo-card styling.
-            "#__wo_setup_modal .wo-move-wrap{display:inline-flex;gap:1px;flex-shrink:0;opacity:0;transition:opacity 120ms;}" +
-            "#__wo_setup_modal [data-reorder-card]:hover .wo-move-wrap,#__wo_setup_modal [data-reorder-card]:focus-within .wo-move-wrap{opacity:1;}" +
-            "#__wo_setup_modal .wo-move-btn{display:inline-flex;align-items:center;justify-content:center;width:17px;height:22px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);cursor:pointer;flex-shrink:0;}" +
-            "#__wo_setup_modal .wo-move-btn:hover:not(:disabled),#__wo_setup_modal .wo-move-btn:focus-visible:not(:disabled){color:var(--wo-text);background:var(--wo-border);}" +
-            "#__wo_setup_modal .wo-move-btn:disabled{opacity:0.3;cursor:not-allowed;}" +
+            "#__wo_setup_modal .wo-move-wrap{display:inline-flex;gap:1px;flex-shrink:0;opacity:0!important;}" +
+            "#__wo_setup_modal [data-reorder-card]:hover .wo-move-wrap,#__wo_setup_modal [data-reorder-card]:focus-within .wo-move-wrap{opacity:1!important;}" +
+            // No background/border box at rest OR on hover — just the icon
+            // itself brightening to indicate it's interactive.
+            "#__wo_setup_modal .wo-move-btn{display:inline-flex;align-items:center;justify-content:center;width:17px;height:22px;padding:0;border:none;background:none;color:var(--wo-muted);cursor:pointer;flex-shrink:0;}" +
+            "#__wo_setup_modal .wo-move-btn:hover,#__wo_setup_modal .wo-move-btn:focus-visible{color:var(--wo-text);}" +
             "#__wo_setup_modal .wo-kebab-wrap{position:relative;flex-shrink:0;margin-left:auto;}" +
             "#__wo_setup_modal .wo-kebab-btn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);cursor:pointer;flex-shrink:0;}" +
             "#__wo_setup_modal .wo-kebab-btn:hover,#__wo_setup_modal .wo-kebab-btn:focus-visible{color:var(--wo-text);background:var(--wo-border);}" +
@@ -4913,12 +4925,17 @@
         var content = modal.querySelector('#__s_content');
         var renamingRuleId = null;
         var renamingGroupId = null;
-        // Rule/group id -> expanded (true/false). Lives for the lifetime of
-        // this modal instance so switching tabs away and back doesn't
-        // re-collapse everything; only a fresh openSetup() (new closure) or
-        // an explicit re-click of the already-active tab's header clears it.
+        var renamingVarId = null;
+        var renamingScanId = null;
+        // Rule/group/variable/scan id -> expanded (true/false). Lives for
+        // the lifetime of this modal instance so switching tabs away and
+        // back doesn't re-collapse everything; only a fresh openSetup()
+        // (new closure) or an explicit re-click of the already-active
+        // tab's header clears it.
         var ruleExpandState = {};
         var groupExpandState = {};
+        var varExpandState = {};
+        var scanExpandState = {};
         // Tab id -> scrollTop of #__s_content, saved just before switching
         // away from a tab and restored right after switching back to it, so
         // returning to a tab doesn't dump you back at the top. Reset only
@@ -5134,15 +5151,18 @@
         // A stacked up/down chevron pair — the same "can drag either way"
         // affordance as the move buttons, but purely a visual cue (attachCardDrag
         // listens on the whole header, not this element specifically).
-        var DRAG_HANDLE_HTML = '<span class="wo-drag-handle" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 6L8 3L12 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 10L8 13L12 10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+        // Up chevron, two horizontal lines, down chevron — reads as "grab
+        // and drag this row up or down" rather than a generic move-arrow.
+        var DRAG_HANDLE_HTML = '<span class="wo-drag-handle" aria-hidden="true"><svg width="12" height="16" viewBox="0 0 16 16" fill="none"><path d="M5 4.2L8 1.8L11 4.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 7.2H11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M5 9.4H11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M5 11.8L8 14.2L11 11.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
 
         function moveButtonsHtml(isFirst, isLast, upTitle, dnTitle) {
             upTitle = upTitle || 'Move up';
             dnTitle = dnTitle || 'Move down';
-            return '<span class="wo-move-wrap" onclick="event.stopPropagation()">' +
-                '<button data-mv-up type="button" class="wo-move-btn" aria-label="' + upTitle + '" title="' + upTitle + '"' + (isFirst ? ' disabled' : '') + '>' + MOVE_UP_SVG + '</button>' +
-                '<button data-mv-dn type="button" class="wo-move-btn" aria-label="' + dnTitle + '" title="' + dnTitle + '"' + (isLast ? ' disabled' : '') + '>' + MOVE_DN_SVG + '</button>' +
-                '</span>';
+            // At a list boundary, the button for the direction that's not
+            // possible is omitted entirely rather than shown dimmed/disabled.
+            var upBtn = isFirst ? '' : '<button data-mv-up type="button" class="wo-move-btn" aria-label="' + upTitle + '" title="' + upTitle + '">' + MOVE_UP_SVG + '</button>';
+            var dnBtn = isLast ? '' : '<button data-mv-dn type="button" class="wo-move-btn" aria-label="' + dnTitle + '" title="' + dnTitle + '">' + MOVE_DN_SVG + '</button>';
+            return '<span class="wo-move-wrap" onclick="event.stopPropagation()">' + upBtn + dnBtn + '</span>';
         }
 
         function wireMoveButtons(box, arr, idx, rerenderFn) {
@@ -5366,51 +5386,37 @@
 
             vars.forEach(function(v, idx) {
                 var box = document.createElement('div');
-                box.style.cssText = 'border:1px solid #2a4a6a;border-radius:6px;padding:8px;margin-bottom:8px;background:#0d1a26;';
+                box.className = 'wo-card';
                 var fo = opts.fields.map(function(f) {
                     return '<option value="' + f.replace(/"/g, '&quot;') + '">' + f + '</option>';
                 }).join('');
+                var isRenaming = renamingVarId === v.id;
+                var titleHtml = isRenaming ?
+                    '<input type="text" value="' + v.label.replace(/"/g, '&quot;') + '" data-l class="wo-rule-title-input" onclick="event.stopPropagation()">' :
+                    '<span class="wo-rule-title">' + String(v.label).replace(/</g, '&lt;') + '</span>';
                 box.innerHTML =
-                    '<div data-coll-header style="display:flex;align-items:center;gap:6px;padding:4px 0;">' +
-                    '<span data-coll-arrow style="font-size:10px;color:#aaa;min-width:10px;">▶</span>' +
-                    '<span style="color:#7ec8e3;font-size:10px;">ID: <code>' + v.id + '</code></span>' +
-                    '<input type="text" data-vl value="' + v.label.replace(/"/g, '&quot;') + '" style="flex:1;background:#222;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;" placeholder="Variable label" onclick="event.stopPropagation()">' +
+                    '<div data-coll-header class="wo-card-head">' +
+                    DRAG_HANDLE_HTML +
+                    titleHtml +
                     moveButtonsHtml(idx === 0, idx === vars.length - 1) +
-                    '<button data-vd style="color:#e74c3c;background:none;border:1px solid #e74c3c;border-radius:3px;padding:2px 6px;cursor:pointer;" onclick="event.stopPropagation()">Delete</button>' +
+                    '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
+                    '<button data-kebab type="button" class="wo-kebab-btn" aria-label="Variable actions" aria-haspopup="true">' +
+                    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="3" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="13" r="0.7" stroke="currentColor" stroke-width="1.4"/></svg>' +
+                    '</button>' +
+                    '</span>' +
                     '</div>' +
-                    '<div data-coll-body>' +
-                    '<div style="margin-bottom:4px;">Insert field: <select data-vi style="background:#222;color:#eee;border:1px solid #444;font-size:11px;"><option value="">--</option>' + fo + '</select></div>' +
-                    '<textarea data-vf style="width:100%;height:80px;font-family:monospace;font-size:11px;background:#000;color:#7ec8e3;border:1px solid #2a4a6a;padding:4px;">' + String(v.formula).replace(/</g, '&lt;') + '</textarea>' +
-                    '<div style="margin-top:4px;display:flex;gap:6px;align-items:center;">' +
-                    '<button data-vt style="font-size:11px;">Test</button>' +
-                    '<span data-vr style="font-size:11px;color:#aaa;"></span>' +
-                    '</div>' +
-                    '<div style="margin-top:4px;color:#555;font-size:10px;">Formula must return a value (string, number, etc.). Use the same helpers as rules: F(), T(), rowCount(), etc.</div>' +
+                    '<div data-coll-body style="margin-top:7px;">' +
+                    '<div style="margin-bottom:6px;color:var(--wo-muted);font-size:10px;">ID: <code class="wo-mono">' + v.id + '</code></div>' +
+                    '<div style="margin-bottom:2px;font-size:11px;">Insert field: <select data-vi style="max-width:65%;"><option value="">--</option>' + fo + '</select></div>' +
+                    formulaBox(v, 'formula') +
+                    '<div style="margin-top:9px;display:flex;align-items:center;gap:9px;"><button data-vt type="button" class="wo-btn">Test</button> <span data-vr class="wo-mono" style="font-size:10.5px;"></span></div>' +
+                    '<div style="margin-top:7px;color:var(--wo-muted);font-size:10px;">Formula must return a value (string, number, etc.). Use the same helpers as rules: F(), T(), rowCount(), etc.</div>' +
                     '</div>';
 
                 content.appendChild(box);
-                makeCollapsible(box, v.label);
-
-                var fa = box.querySelector('[data-vf]');
-                box.querySelector('[data-vl]').oninput = function(e) {
-                    v.label = e.target.value;
-                };
-                fa.oninput = function() {
-                    v.formula = fa.value;
-                };
-                box.querySelector('[data-vi]').onchange = function(e) {
-                    if (!e.target.value) return;
-                    var sn = "F('" + e.target.value.replace(/'/g, "\\'") + "')";
-                    var p = fa.selectionStart || fa.value.length;
-                    fa.value = fa.value.slice(0, p) + sn + fa.value.slice(p);
-                    v.formula = fa.value;
-                    e.target.value = '';
-                };
-                box.querySelector('[data-vd]').onclick = function() {
-                    vars.splice(idx, 1);
-                    saveVars(vars);
-                    varsTab();
-                };
+                makeCollapsible(box, v.label, !varExpandState[v.id], function(expandedNow) {
+                    varExpandState[v.id] = expandedNow;
+                });
                 wireMoveButtons(box, vars, idx, function() {
                     saveVars(vars);
                     varsTab();
@@ -5419,22 +5425,109 @@
                     saveVars(vars);
                     varsTab();
                 });
+
+                var fa = box.querySelector('[data-f]');
+                var titleInput = box.querySelector('[data-l]');
+                if (titleInput) {
+                    titleInput.oninput = function(e) {
+                        v.label = e.target.value;
+                        saveVars(vars);
+                    };
+                    titleInput.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            titleInput.blur();
+                        }
+                    });
+                    titleInput.addEventListener('blur', function() {
+                        renamingVarId = null;
+                        varsTab();
+                    });
+                    titleInput.focus();
+                    titleInput.select();
+                }
+                fa.oninput = function() {
+                    v.formula = fa.value;
+                    saveVars(vars);
+                };
+                box.querySelector('[data-vi]').onchange = function(e) {
+                    if (!e.target.value) return;
+                    var sn = "F('" + e.target.value.replace(/'/g, "\\'") + "')";
+                    var p = fa.selectionStart || fa.value.length;
+                    fa.value = fa.value.slice(0, p) + sn + fa.value.slice(p);
+                    v.formula = fa.value;
+                    saveVars(vars);
+                    e.target.value = '';
+                };
+                var kebabBtn = box.querySelector('[data-kebab]');
+                kebabBtn.onclick = function() {
+                    var wasOpen = !!openRuleMenu;
+                    closeRuleMenu();
+                    if (wasOpen) return;
+                    var menu = document.createElement('div');
+                    menu.className = 'wo-kebab-menu';
+                    menu.innerHTML =
+                        '<button data-rename type="button" class="wo-kebab-item">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M11 2.5L13.5 5L5.5 13H3V10.5L11 2.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
+                        '<span>Rename</span>' +
+                        '</button>' +
+                        '<button data-dup type="button" class="wo-kebab-item">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
+                        '<span>Duplicate</span>' +
+                        '</button>' +
+                        '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
+                        '<span>Delete</span>' +
+                        '</button>';
+                    menu.style.position = 'fixed';
+                    var btnRect = kebabBtn.getBoundingClientRect();
+                    menu.style.top = (btnRect.bottom + 4) + 'px';
+                    menu.style.right = (window.innerWidth - btnRect.right) + 'px';
+                    modal.appendChild(menu);
+                    var mr = menu.getBoundingClientRect();
+                    if (mr.bottom > window.innerHeight) menu.style.top = Math.max(4, btnRect.top - mr.height - 4) + 'px';
+                    menu.querySelector('[data-rename]').onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        renamingVarId = v.id;
+                        varsTab();
+                    };
+                    menu.querySelector('[data-dup]').onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        var copy = JSON.parse(JSON.stringify(v));
+                        copy.id = 'v_' + Date.now();
+                        copy.label = v.label + ' (copy)';
+                        vars.splice(idx + 1, 0, copy);
+                        saveVars(vars);
+                        varsTab();
+                    };
+                    menu.querySelector('[data-del]').onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        vars.splice(idx, 1);
+                        saveVars(vars);
+                        varsTab();
+                    };
+                    openRuleMenu = menu;
+                };
                 box.querySelector('[data-vt]').onclick = function() {
                     var res = runVariable(fa.value, cache);
                     var sp = box.querySelector('[data-vr]');
                     if (res.error) {
-                        sp.style.color = '#e74c3c';
+                        sp.style.color = 'var(--wo-fail)';
                         sp.textContent = '⚠ ' + res.error;
                     } else {
-                        sp.style.color = '#7ec8e3';
+                        sp.style.color = 'var(--wo-accent)';
                         sp.textContent = '→ ' + (res.value !== null ? JSON.stringify(res.value) : '(null)');
                     }
                 };
             });
 
             var addBtn = document.createElement('button');
+            addBtn.type = 'button';
+            addBtn.className = 'wo-btn wo-btn-primary';
             addBtn.textContent = '+ Add Variable';
-            addBtn.style.cssText = 'padding:5px 12px;background:#2980b9;color:#fff;border:none;border-radius:4px;cursor:pointer;';
             addBtn.onclick = function() {
                 vars.push({
                     id: 'v_' + Date.now(),
@@ -5445,11 +5538,6 @@
                 varsTab();
             };
             content.appendChild(addBtn);
-
-            // Save vars on every formula/label change (real-time)
-            content.addEventListener('input', function() {
-                saveVars(vars);
-            });
         }
 
         // ── RULES TAB ──
@@ -6220,45 +6308,55 @@
 
         // ── SCAN TAB ──
         function scanTab() {
-            content.innerHTML = '<div style="margin-bottom:8px;">WO Tab ID: <input type="text" data-wt value="' + scan.woTabId + '"> <span style="color:#999;">(tab returned to after scan)</span></div>';
+            content.innerHTML = '<div style="margin-bottom:10px;font-size:11px;">WO Tab ID: <input type="text" data-wt value="' + scan.woTabId + '"> <span style="color:var(--wo-muted);">(tab returned to after scan)</span></div>';
             content.querySelector('[data-wt]').oninput = function(e) {
                 scan.woTabId = e.target.value;
             };
             scan.scans.forEach(function(s, idx) {
                 var box = document.createElement('div');
-                box.style.cssText = 'border:1px solid #333;border-radius:6px;padding:8px;margin-bottom:8px;';
+                box.className = 'wo-card';
+                var isRenaming = renamingScanId === s.id;
+                var titleHtml = isRenaming ?
+                    '<input type="text" value="' + s.title.replace(/"/g, '&quot;') + '" data-l class="wo-rule-title-input" onclick="event.stopPropagation()">' :
+                    '<span class="wo-rule-title">' + String(s.title).replace(/</g, '&lt;') + '</span>';
                 box.innerHTML =
-                    '<div data-coll-header style="display:flex;align-items:center;gap:6px;padding:4px 0;">' +
-                    '<span data-coll-arrow style="font-size:10px;color:#aaa;min-width:10px;">▶</span>' +
-                    '<input type="text" value="' + s.title.replace(/"/g, '&quot;') + '" data-ti style="width:35%;background:#222;color:#eee;border:1px solid #333;padding:2px 5px;border-radius:3px;" onclick="event.stopPropagation()"> ' +
-                    'Type: <select data-ty onclick="event.stopPropagation()"><option value="tab" ' + (s.type === 'tab' ? 'selected' : '') + '>Tab</option><option value="dialog" ' + (s.type === 'dialog' ? 'selected' : '') + '>Dialog</option></select> ' +
-                    '<span style="margin-left:auto;display:flex;align-items:center;gap:2px;">' +
+                    '<div data-coll-header class="wo-card-head">' +
+                    DRAG_HANDLE_HTML +
+                    titleHtml +
                     moveButtonsHtml(idx === 0, idx === scan.scans.length - 1, 'Move up — runs earlier', 'Move down — runs later') +
-                    '<button data-d style="color:#e74c3c;" onclick="event.stopPropagation()">Delete</button>' +
+                    '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
+                    '<button data-kebab type="button" class="wo-kebab-btn" aria-label="Scan target actions" aria-haspopup="true">' +
+                    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="3" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="13" r="0.7" stroke="currentColor" stroke-width="1.4"/></svg>' +
+                    '</button>' +
                     '</span>' +
                     '</div>' +
-                    '<div data-coll-body>' +
-                    '<div style="margin-top:4px;">Tab ID / Event: <input type="text" data-id value="' + (s.tabId || s.eventType || '') + '"> Wait for text: <input type="text" data-w value="' + s.waitFor + '"> Wait for table: <input type="text" data-wtb value="' + (s.waitTable || '') + '"></div>' +
-                    '<div style="margin-top:4px;color:#999;">Condition (formula, true = scan this):</div>' +
-                    '<textarea data-f style="width:100%;height:60px;font-family:monospace;font-size:11px;background:#000;color:#0f0;">' + String(s.condition).replace(/</g, '&lt;') + '</textarea>' +
+                    '<div data-coll-body style="margin-top:7px;">' +
+                    '<div style="margin-bottom:6px;font-size:11px;">Type: <select data-ty><option value="tab" ' + (s.type === 'tab' ? 'selected' : '') + '>Tab</option><option value="dialog" ' + (s.type === 'dialog' ? 'selected' : '') + '>Dialog</option></select></div>' +
+                    '<div style="margin-bottom:6px;font-size:11px;">Tab ID / Event: <input type="text" data-id value="' + (s.tabId || s.eventType || '').replace(/"/g, '&quot;') + '"><br>Wait for text: <input type="text" data-w value="' + String(s.waitFor).replace(/"/g, '&quot;') + '"> Wait for table: <input type="text" data-wtb value="' + (s.waitTable || '').replace(/"/g, '&quot;') + '"></div>' +
+                    '<div style="margin-bottom:2px;color:var(--wo-muted);font-size:10px;">Condition (formula, true = scan this):</div>' +
+                    formulaBox(s, 'condition') +
                     '</div>';
 
                 // ── Row Detail Fields editor ──
                 var rdfWrap = document.createElement('div');
-                rdfWrap.style.cssText = 'margin-top:8px;border:1px solid #2a4a6a;border-radius:4px;padding:6px;';
-                rdfWrap.innerHTML = '<b style="color:#7ec8e3;font-size:11px;">Row Detail Fields</b> ' +
-                    '<span style="color:#555;font-size:10px;">(fields inside expanded row panels)</span>' +
-                    '<button id="__rdf_add_' + idx + '" style="font-size:10px;margin-left:8px;">+ Add Field</button>' +
-                    '<div id="__rdf_list_' + idx + '" style="margin-top:4px;"></div>';
+                rdfWrap.className = 'wo-subbox-accent';
+                rdfWrap.style.cssText = 'margin-top:9px;';
+                rdfWrap.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><b style="color:var(--wo-accent);font-size:11px;">Row Detail Fields</b> ' +
+                    '<span style="color:var(--wo-muted);font-size:10px;">(fields inside expanded row panels)</span>' +
+                    '<button id="__rdf_add_' + idx + '" type="button" class="wo-btn-ghost" style="margin-left:auto;font-size:12px;padding:3px 7px;">+</button></div>' +
+                    '<div id="__rdf_list_' + idx + '" style="margin-top:6px;"></div>';
                 box.querySelector('[data-coll-body]').appendChild(rdfWrap);
+                attachTooltip(rdfWrap.querySelector('#__rdf_add_' + idx), 'Add field');
                 // ── Actions editor ──
                 var actWrap = document.createElement('div');
-                actWrap.style.cssText = 'margin-top:8px;border:1px solid #2a6a2a;border-radius:4px;padding:6px;';
-                actWrap.innerHTML = '<b style="color:#2ecc71;font-size:11px;">Post-Scan Actions</b> ' +
-                    '<span style="color:#555;font-size:10px;">(fill fields after this tab is scanned)</span>' +
-                    '<button id="__act_add_' + idx + '" style="font-size:10px;margin-left:8px;">+ Add Action</button>' +
-                    '<div id="__act_list_' + idx + '" style="margin-top:4px;"></div>';
+                actWrap.className = 'wo-subbox';
+                actWrap.style.cssText = 'margin-top:9px;';
+                actWrap.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><b style="color:var(--wo-pass);font-size:11px;">Post-Scan Actions</b> ' +
+                    '<span style="color:var(--wo-muted);font-size:10px;">(fill fields after this tab is scanned)</span>' +
+                    '<button id="__act_add_' + idx + '" type="button" class="wo-btn-ghost" style="margin-left:auto;font-size:12px;padding:3px 7px;">+</button></div>' +
+                    '<div id="__act_list_' + idx + '" style="margin-top:6px;"></div>';
                 box.querySelector('[data-coll-body]').appendChild(actWrap);
+                attachTooltip(actWrap.querySelector('#__act_add_' + idx), 'Add action');
 
 
                 function renderActList() {
@@ -6266,18 +6364,19 @@
                     actList.innerHTML = '';
                     (s.actions || []).forEach(function(act, ai) {
                         var row = document.createElement('div');
-                        row.style.cssText = 'display:flex;gap:4px;align-items:flex-start;margin-bottom:6px;flex-wrap:wrap;border:1px solid #333;border-radius:3px;padding:4px;';
+                        row.style.cssText = 'display:flex;gap:4px;align-items:flex-start;margin-bottom:6px;flex-wrap:wrap;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:4px;background:var(--wo-field);';
                         row.innerHTML =
-                            '<div style="flex:1;min-width:140px;"><div style="color:#999;font-size:10px;">Field Element ID</div>' +
-                            '<input type="text" data-act-id value="' + (act.fieldId || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:2px 4px;font-size:11px;" placeholder="e.g. m12345678-tb"></div>' +
-                            '<div style="flex:2;min-width:160px;"><div style="color:#999;font-size:10px;">Value Expression (e.g. V(\'v_core\') or F(\'...\'))</div>' +
-                            '<input type="text" data-act-val value="' + (act.value || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:2px 4px;font-size:11px;"></div>' +
-                            '<div style="flex:2;min-width:160px;"><div style="color:#999;font-size:10px;">Condition (optional — blank = always run)</div>' +
-                            '<input type="text" data-act-cond value="' + (act.condition || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:2px 4px;font-size:11px;"></div>' +
-                            '<div style="display:flex;flex-direction:column;justify-content:center;gap:4px;">' +
-                            '<button data-act-del style="color:#e74c3c;background:none;border:1px solid #e74c3c;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:10px;">✕</button>' +
+                            '<div style="flex:1;min-width:140px;"><div style="color:var(--wo-muted);font-size:10px;">Field Element ID</div>' +
+                            '<input type="text" data-act-id value="' + (act.fieldId || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;" placeholder="e.g. m12345678-tb"></div>' +
+                            '<div style="flex:2;min-width:160px;"><div style="color:var(--wo-muted);font-size:10px;">Value Expression (e.g. V(\'v_core\') or F(\'...\'))</div>' +
+                            '<input type="text" data-act-val value="' + (act.value || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;"></div>' +
+                            '<div style="flex:2;min-width:160px;"><div style="color:var(--wo-muted);font-size:10px;">Condition (optional — blank = always run)</div>' +
+                            '<input type="text" data-act-cond value="' + (act.condition || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;"></div>' +
+                            '<div style="display:flex;flex-direction:column;justify-content:center;">' +
+                            '<button data-act-del type="button" class="wo-btn-ghost wo-kebab-item-danger" style="font-size:12px;padding:3px 7px;">✕</button>' +
                             '</div>';
                         actList.appendChild(row);
+                        attachTooltip(row.querySelector('[data-act-del]'), 'Delete action');
                         row.querySelector('[data-act-id]').oninput = function(e) {
                             act.fieldId = e.target.value;
                         };
@@ -6310,22 +6409,23 @@
                     rdfList.innerHTML = '';
                     (s.rowDetailFields || []).forEach(function(rdf, ri) {
                         var row = document.createElement('div');
-                        row.style.cssText = 'display:flex;gap:4px;align-items:flex-start;margin-bottom:6px;flex-wrap:wrap;border:1px solid #333;border-radius:3px;padding:4px;';
+                        row.style.cssText = 'display:flex;gap:4px;align-items:flex-start;margin-bottom:6px;flex-wrap:wrap;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:4px;background:var(--wo-field);';
                         row.innerHTML =
-                            '<div style="flex:1;min-width:120px;"><div style="color:#999;font-size:10px;">Column Name</div>' +
-                            '<input type="text" data-rdf-col value="' + (rdf.columnName || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:2px 4px;font-size:11px;"></div>' +
-                            '<div style="flex:1;min-width:120px;"><div style="color:#999;font-size:10px;">Element ID</div>' +
-                            '<input type="text" data-rdf-id value="' + (rdf.elementId || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:2px 4px;font-size:11px;"></div>' +
-                            '<div style="flex:1;min-width:120px;"><div style="color:#999;font-size:10px;">Table Prefix</div>' +
-                            '<input type="text" data-rdf-prefix value="' + (rdf.tablePrefix || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:2px 4px;font-size:11px;"></div>' +
-                            '<div style="width:50px;"><div style="color:#999;font-size:10px;">Expand Col</div>' +
-                            '<input type="number" data-rdf-expcol value="' + (rdf.expandColIndex || 0) + '" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:2px 4px;font-size:11px;"></div>' +
-                            '<div style="flex:2;min-width:180px;"><div style="color:#999;font-size:10px;">Collect Condition (formula, blank = always)</div>' +
-                            '<textarea data-rdf-cond style="width:100%;height:48px;background:#000;color:#7ec8e3;font-family:monospace;font-size:10px;border:1px solid #2a4a6a;padding:2px;">' + (rdf.collectCondition || '') + '</textarea></div>' +
-                            '<div style="display:flex;flex-direction:column;justify-content:center;gap:4px;">' +
-                            '<button data-rdf-del style="color:#e74c3c;background:none;border:1px solid #e74c3c;border-radius:3px;padding:2px 6px;cursor:pointer;font-size:10px;">✕</button>' +
+                            '<div style="flex:1;min-width:120px;"><div style="color:var(--wo-muted);font-size:10px;">Column Name</div>' +
+                            '<input type="text" data-rdf-col value="' + (rdf.columnName || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;"></div>' +
+                            '<div style="flex:1;min-width:120px;"><div style="color:var(--wo-muted);font-size:10px;">Element ID</div>' +
+                            '<input type="text" data-rdf-id value="' + (rdf.elementId || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;"></div>' +
+                            '<div style="flex:1;min-width:120px;"><div style="color:var(--wo-muted);font-size:10px;">Table Prefix</div>' +
+                            '<input type="text" data-rdf-prefix value="' + (rdf.tablePrefix || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;"></div>' +
+                            '<div style="width:50px;"><div style="color:var(--wo-muted);font-size:10px;">Expand Col</div>' +
+                            '<input type="number" data-rdf-expcol value="' + (rdf.expandColIndex || 0) + '" style="width:100%;font-size:11px;"></div>' +
+                            '<div style="flex:2;min-width:180px;"><div style="color:var(--wo-muted);font-size:10px;">Collect Condition (formula, blank = always)</div>' +
+                            '<textarea data-rdf-cond class="wo-code" style="width:100%;height:48px;font-size:10px;">' + (rdf.collectCondition || '') + '</textarea></div>' +
+                            '<div style="display:flex;flex-direction:column;justify-content:center;">' +
+                            '<button data-rdf-del type="button" class="wo-btn-ghost wo-kebab-item-danger" style="font-size:12px;padding:3px 7px;">✕</button>' +
                             '</div>';
                         rdfList.appendChild(row);
+                        attachTooltip(row.querySelector('[data-rdf-del]'), 'Delete field');
 
                         row.querySelector('[data-rdf-col]').oninput = function(e) {
                             rdf.columnName = e.target.value;
@@ -6364,11 +6464,30 @@
                 };
 
                 content.appendChild(box);
-                makeCollapsible(box, s.title);
+                makeCollapsible(box, s.title, !scanExpandState[s.id], function(expandedNow) {
+                    scanExpandState[s.id] = expandedNow;
+                });
+                wireMoveButtons(box, scan.scans, idx, scanTab);
+                attachCardDrag(box.querySelector('[data-coll-header]'), box, content, scan.scans, idx, scanTab);
 
-                box.querySelector('[data-ti]').oninput = function(e) {
-                    s.title = e.target.value;
-                };
+                var titleInput = box.querySelector('[data-l]');
+                if (titleInput) {
+                    titleInput.oninput = function(e) {
+                        s.title = e.target.value;
+                    };
+                    titleInput.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            titleInput.blur();
+                        }
+                    });
+                    titleInput.addEventListener('blur', function() {
+                        renamingScanId = null;
+                        scanTab();
+                    });
+                    titleInput.focus();
+                    titleInput.select();
+                }
                 box.querySelector('[data-ty]').onchange = function(e) {
                     s.type = e.target.value;
                 };
@@ -6385,14 +6504,60 @@
                 box.querySelector('[data-f]').oninput = function(e) {
                     s.condition = e.target.value;
                 };
-                box.querySelector('[data-d]').onclick = function() {
-                    scan.scans.splice(idx, 1);
-                    scanTab();
+                var kebabBtn = box.querySelector('[data-kebab]');
+                kebabBtn.onclick = function() {
+                    var wasOpen = !!openRuleMenu;
+                    closeRuleMenu();
+                    if (wasOpen) return;
+                    var menu = document.createElement('div');
+                    menu.className = 'wo-kebab-menu';
+                    menu.innerHTML =
+                        '<button data-rename type="button" class="wo-kebab-item">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M11 2.5L13.5 5L5.5 13H3V10.5L11 2.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
+                        '<span>Rename</span>' +
+                        '</button>' +
+                        '<button data-dup type="button" class="wo-kebab-item">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
+                        '<span>Duplicate</span>' +
+                        '</button>' +
+                        '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
+                        '<span>Delete</span>' +
+                        '</button>';
+                    menu.style.position = 'fixed';
+                    var btnRect = kebabBtn.getBoundingClientRect();
+                    menu.style.top = (btnRect.bottom + 4) + 'px';
+                    menu.style.right = (window.innerWidth - btnRect.right) + 'px';
+                    modal.appendChild(menu);
+                    var mr = menu.getBoundingClientRect();
+                    if (mr.bottom > window.innerHeight) menu.style.top = Math.max(4, btnRect.top - mr.height - 4) + 'px';
+                    menu.querySelector('[data-rename]').onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        renamingScanId = s.id;
+                        scanTab();
+                    };
+                    menu.querySelector('[data-dup]').onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        var copy = JSON.parse(JSON.stringify(s));
+                        copy.id = 's_' + Date.now();
+                        copy.title = s.title + ' (copy)';
+                        scan.scans.splice(idx + 1, 0, copy);
+                        scanTab();
+                    };
+                    menu.querySelector('[data-del]').onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        scan.scans.splice(idx, 1);
+                        scanTab();
+                    };
+                    openRuleMenu = menu;
                 };
-                wireMoveButtons(box, scan.scans, idx, scanTab);
-                attachCardDrag(box.querySelector('[data-coll-header]'), box, content, scan.scans, idx, scanTab);
             });
             var b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'wo-btn wo-btn-primary';
             b.textContent = '+ Add Scan Target';
             b.onclick = function() {
                 scan.scans.push({
@@ -7017,11 +7182,15 @@
         bindTab('__s_rules', rulesTab, function() {
             ruleExpandState = {};
         });
-        bindTab('__s_vars', varsTab);
+        bindTab('__s_vars', varsTab, function() {
+            varExpandState = {};
+        });
         bindTab('__s_groups', groupsTab, function() {
             groupExpandState = {};
         });
-        bindTab('__s_scan', scanTab);
+        bindTab('__s_scan', scanTab, function() {
+            scanExpandState = {};
+        });
         bindTab('__s_profiles', profilesTab);
         bindTab('__s_settings', settingsTab);
         bindTab('__s_update', updateTab);
