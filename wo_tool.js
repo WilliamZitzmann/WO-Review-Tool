@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.20';
+    var TOOL_VERSION = '0.20.21';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -3118,7 +3118,16 @@
             // invisible for exactly this reason. Icons still need
             // protecting from host CSS bleed-through, so that's handled by
             // the plain (non-revert) rules just below instead.
-            "#__wo_dock,#__wo_dock *:not(svg):not(svg *){all:revert;box-sizing:border-box;}" +
+            // A single :not() with a comma list, not two chained :not()s —
+            // two chained :not(svg):not(svg *) each add their own
+            // specificity (they sum), which outranks a plain type selector
+            // like `select{...}` or `textarea{resize:...}` and silently
+            // reverted it back to browser-default styling despite the rule
+            // existing. One :not() with a selector list only counts the
+            // specificity of its most specific branch, which ties with
+            // plain type selectors and lets source order (ours wins, we're
+            // declared later) decide instead.
+            "#__wo_dock,#__wo_dock *:not(svg,svg *){all:revert;box-sizing:border-box;}" +
             "#__wo_dock svg{fill:none;color:inherit;}" +
             "#__wo_dock svg [stroke]{stroke:currentColor;}" +
             // Deliberately no equivalent `fill:currentColor` rule — confirmed
@@ -3935,7 +3944,7 @@
     function injectFieldBrowserStyles() {
         if (document.getElementById('__wo_fb_style')) return;
         var css = "" +
-            "#__wo_field_browser,#__wo_field_browser *:not(svg):not(svg *){all:revert;box-sizing:border-box;}" +
+            "#__wo_field_browser,#__wo_field_browser *:not(svg,svg *){all:revert;box-sizing:border-box;}" +
             "#__wo_field_browser svg{fill:none;color:inherit;}" +
             "#__wo_field_browser svg [stroke]{stroke:currentColor;}" +
             "#__wo_field_browser{--wo-bg:#0d1117;--wo-surface:#161b22;--wo-surface-2:#1f2630;--wo-field:#1f2630;--wo-border:#30363d;--wo-text:#f0f3f6;--wo-muted:#9aa4af;--wo-accent:#58a6ff;--wo-on-accent:#04101f;--wo-pass:#3fb950;--wo-fail:#f85149;--wo-warn:#d29922;--wo-r-panel:10px;--wo-r-card:6px;--wo-r-ctl:6px;font-family:'Segoe UI',system-ui,sans-serif;background:var(--wo-bg);color:var(--wo-text);}" +
@@ -4271,7 +4280,9 @@
             // is right); and no icon here uses `fill="currentColor"` since
             // that specific override doesn't reliably repaint against a
             // competing host rule either — every icon is stroke-only.
-            "#__wo_setup_modal,#__wo_setup_modal *:not(svg):not(svg *){all:revert;box-sizing:border-box;}" +
+            // See the matching comment in injectPanelStyles() re: single
+            // vs chained :not() and why it matters for specificity.
+            "#__wo_setup_modal,#__wo_setup_modal *:not(svg,svg *){all:revert;box-sizing:border-box;}" +
             "#__wo_setup_modal svg{fill:none;color:inherit;}" +
             "#__wo_setup_modal svg [stroke]{stroke:currentColor;}" +
             "#__wo_setup_modal{--wo-bg:#0d1117;--wo-surface:#161b22;--wo-surface-2:#1f2630;--wo-field:#1f2630;--wo-border:#30363d;--wo-text:#f0f3f6;--wo-muted:#9aa4af;--wo-accent:#58a6ff;--wo-on-accent:#04101f;--wo-pass:#3fb950;--wo-fail:#f85149;--wo-warn:#d29922;--wo-r-panel:10px;--wo-r-card:6px;--wo-r-ctl:6px;font-family:'Segoe UI',system-ui,sans-serif;background:var(--wo-bg);color:var(--wo-text);}" +
@@ -4368,7 +4379,11 @@
             // Visibility toggle: bright/white when the group is currently
             // shown (an "on" state should read as emphasized, not muted),
             // dim once it's hidden.
-            "#__wo_setup_modal .wo-vis-btn{color:var(--wo-text);}" +
+            // Sized to match .wo-kebab-btn exactly (not the generic
+            // .wo-btn-ghost padding, which is taller/wider) — the card
+            // header row otherwise stretches to fit whichever button in it
+            // is biggest, making Groups cards visibly thicker than Rules.
+            "#__wo_setup_modal .wo-vis-btn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid transparent;flex-shrink:0;color:var(--wo-text);}" +
             "#__wo_setup_modal .wo-vis-btn.is-hidden{color:var(--wo-muted);}" +
             "#__wo_setup_modal .wo-kebab-wrap{position:relative;flex-shrink:0;margin-left:auto;}" +
             "#__wo_setup_modal .wo-kebab-btn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);cursor:pointer;flex-shrink:0;}" +
@@ -4380,7 +4395,11 @@
             "#__wo_setup_modal .wo-kebab-menu{display:inline-flex;flex-direction:column;gap:1px;background:var(--wo-surface-2);border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);box-shadow:0 8px 24px rgba(0,0,0,.5);padding:4px;z-index:20;}" +
             "#__wo_setup_modal .wo-kebab-item{display:flex;align-items:center;gap:8px;width:100%;padding:7px 9px;white-space:nowrap;border:none;background:none;color:var(--wo-text);font:inherit;font-size:11.5px;text-align:left;border-radius:calc(var(--wo-r-ctl) - 2px);cursor:pointer;transition:background .08s;}" +
             "#__wo_setup_modal .wo-kebab-item svg{flex-shrink:0;}" +
-            "#__wo_setup_modal .wo-kebab-item:hover{background:var(--wo-field);}" +
+            // --wo-field and --wo-surface-2 (the menu's own background) are
+            // the exact same color, so a hover background of --wo-field was
+            // never visible against the menu — the item you were pointing
+            // at never actually looked different from the rest of the menu.
+            "#__wo_setup_modal .wo-kebab-item:hover{background:var(--wo-border);}" +
             "#__wo_setup_modal .wo-kebab-item-active{color:var(--wo-accent);}" +
             "#__wo_setup_modal .wo-kebab-check{margin-left:auto;flex-shrink:0;color:var(--wo-accent);}" +
             "#__wo_setup_modal .wo-kebab-item-danger{color:var(--wo-fail);}" +
@@ -5789,7 +5808,7 @@
             var b = document.createElement('button');
             b.type = 'button';
             b.textContent = '+ Add Group';
-            b.className = 'wo-btn';
+            b.className = 'wo-btn wo-btn-primary';
             b.onclick = function() {
                 cfg.groups.push({
                     id: 'g_' + Date.now(),

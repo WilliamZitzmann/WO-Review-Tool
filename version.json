@@ -1,10 +1,19 @@
 {
-  "latest": "0.20.20",
+  "latest": "0.20.21",
   "channels": {
-    "stable": "0.20.20",
-    "beta": "0.20.20"
+    "stable": "0.20.21",
+    "beta": "0.20.21"
   },
   "versions": [
+    {
+      "version": "0.20.21",
+      "changes": [
+        "Fixed a CSS specificity bug where the isolation reset rule (chained :not(svg):not(svg *)) could outrank plain type-selector rules declared later - this silently overrode the vertical-only textarea resize handle (Expanded Message box was still resizable both ways) and gave every <select> dropdown in Setup a native white background instead of the dark theme",
+        "Groups tab collapsed card headers are now the same height as Rules tab cards - the eye/hide toggle button was using bigger padding than the kebab button, puffing up the row",
+        "Kebab menu items (Rename/Duplicate/Delete) now actually highlight on hover - the hover color was identical to the menu's own background so it was doing nothing",
+        "+ Add Group button now matches the styling of + Add Rule"
+      ]
+    },
     {
       "version": "0.20.20",
       "changes": [
