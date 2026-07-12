@@ -1,10 +1,16 @@
 {
-  "latest": "0.20.31",
+  "latest": "0.20.32",
   "channels": {
-    "stable": "0.20.31",
-    "beta": "0.20.31"
+    "stable": "0.20.32",
+    "beta": "0.20.32"
   },
   "versions": [
+    {
+      "version": "0.20.32",
+      "changes": [
+        "Fixed Groups tab: clicking the hidden button to unhide a group no longer also expands/collapses that entry - Show/Hide now only ever touches visibility"
+      ]
+    },
     {
       "version": "0.20.31",
       "changes": [

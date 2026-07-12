@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.31';
+    var TOOL_VERSION = '0.20.32';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -6482,11 +6482,6 @@
                     var newVis = !vis;
                     g2[group.id].visible = newVis;
                     saveGS(g2);
-                    // Unhiding also toggles the card's expand/collapse state
-                    // (a quick way to surface it again); hiding leaves it
-                    // alone since the card is about to disappear from the
-                    // main panel regardless of whether it's expanded.
-                    if (newVis) groupExpandState[group.id] = !groupExpandState[group.id];
                     groupsTab();
                 };
 
