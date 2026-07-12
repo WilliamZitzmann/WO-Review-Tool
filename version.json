@@ -1,10 +1,23 @@
 {
-  "latest": "0.20.23",
+  "latest": "0.20.24",
   "channels": {
-    "stable": "0.20.23",
-    "beta": "0.20.23"
+    "stable": "0.20.24",
+    "beta": "0.20.24"
   },
   "versions": [
+    {
+      "version": "0.20.24",
+      "changes": [
+        "Move up/down buttons are now hidden until you hover the card (header or its expanded body) - just a plain icon that lights up on hover, no visible button box sitting there all the time",
+        "Added a small drag-handle indicator on the left of each card's header, appearing only while hovering that row - also nudges the title text slightly right to make room for it",
+        "Card drag-reorder now only needs to cross header-sized increments instead of a tall expanded card's full height - every other card temporarily collapses to its header while you're dragging (whether it's the dragged card or one being displaced), so reordering long expanded rows no longer requires dragging across their entire height. Real expand/collapse state is untouched and simply reappears once you drop",
+        "Fixed a real cursor-tracking bug in that same drag: collapsing a card above the one you're dragging used to yank the dragged card away from the cursor by however much space that collapse freed up - the drag now compensates so the card stays glued to the cursor",
+        "Main panel tooltips (the info and hide-group icons) were landing far from the icon whenever the icon sat near the panel's right edge, which is most of them since the panel is right-docked - a fixed 250px clamp was shoving the tooltip's whole box leftward instead of just keeping it on-screen; it now anchors to whichever side of the icon actually has room",
+        "Groups tab: hide/show button now has a hover tooltip; unhiding a group also toggles its expand/collapse state as a quick way to surface it again, hiding leaves it alone",
+        "Setup window: dragging to the left edge from a floating (non-snapped) state now always snaps to the narrowest width, even if a previous left-snap session had been resized wider - that remembered width is only for reopening Setup while still snapped left, not for re-snapping fresh",
+        "Hid the native scrollbar on the main panel's group list and added faint top/bottom scroll shadows that appear only when there's more content to scroll in that direction"
+      ]
+    },
     {
       "version": "0.20.23",
       "changes": [

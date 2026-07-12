@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.23';
+    var TOOL_VERSION = '0.20.24';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -2705,7 +2705,7 @@
         gs[gid].hiddenCols = cols;
         saveGS(gs);
     }
-    var panel, bodyEl, footerAreaEl, statusEl, summaryEl;
+    var panel, bodyEl, footerAreaEl, statusEl, summaryEl, updateScrollShadows = function() {};
 
     function setStatus(t) {
         if (statusEl) statusEl.textContent = t;
@@ -3051,7 +3051,21 @@
             document.body.appendChild(tt);
             var r = el.getBoundingClientRect();
             tt.style.top = (r.bottom + 4) + 'px';
-            tt.style.left = Math.min(r.left, window.innerWidth - 250) + 'px';
+            // The panel is right-docked, so most of its icons sit close to
+            // the browser's right edge. Clamping left to a fixed distance
+            // from that edge (the old behavior) shifted the tooltip's
+            // whole box away from the icon instead of just keeping it
+            // on-screen — for an icon already within that distance, the
+            // tooltip would land far to its left, visibly disconnected.
+            // Anchor from whichever edge of the icon actually has room for
+            // the tooltip's real (measured) width instead.
+            var ttRect = tt.getBoundingClientRect();
+            if (r.left + ttRect.width > window.innerWidth - 8) {
+                tt.style.left = 'auto';
+                tt.style.right = Math.max(4, window.innerWidth - r.right) + 'px';
+            } else {
+                tt.style.left = Math.max(4, r.left) + 'px';
+            }
         });
         el.addEventListener('mouseleave', function() {
             var old = document.getElementById('__wo_tip_float');
@@ -3150,6 +3164,14 @@
             "#__wo_dock .wo-collapse-btn:hover{color:var(--wo-text);background:var(--wo-field);}" +
             "#__wo_dock .wo-collapse-btn:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
             "#__wo_dock.is-collapsed>*:not(.wo-collapse-btn){display:none;}" +
+            "#__wo_dock #__wo_groups::-webkit-scrollbar{display:none;}" +
+            // Faint gradient overlays hinting there's more to scroll, shown
+            // only when there actually is (toggled in updateScrollShadows()
+            // on scroll/resize/re-render) rather than a plain scrollbar.
+            "#__wo_dock .wo-scroll-shadow{position:absolute;left:0;right:0;height:16px;pointer-events:none;opacity:0;transition:opacity 150ms;}" +
+            "#__wo_dock .wo-scroll-shadow-top{top:0;background:linear-gradient(to bottom, rgba(0,0,0,0.35), transparent);}" +
+            "#__wo_dock .wo-scroll-shadow-bottom{bottom:0;background:linear-gradient(to top, rgba(0,0,0,0.35), transparent);}" +
+            "#__wo_dock .wo-scroll-shadow.is-visible{opacity:1;}" +
             "#__wo_dock .wo-mono{font-family:Consolas,'Cascadia Mono',monospace;font-variant-numeric:tabular-nums;}" +
             "#__wo_dock .wo-head{height:var(--wo-header-h,48px);box-sizing:border-box;background:var(--wo-surface-2);padding:0 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--wo-border);gap:8px;flex-shrink:0;}" +
             "#__wo_dock .wo-head-title{display:flex;flex-direction:column;line-height:1.2;min-width:0;}" +
@@ -3304,13 +3326,30 @@
             // version was plain block flow (flex:1;overflow:auto, nothing
             // else) and scrolled correctly; this restores exactly that,
             // using margin-bottom on the children for spacing instead of gap.
-            '<div id="__wo_groups" style="flex:1 1 0!important;min-height:0!important;height:0!important;overflow-y:auto!important;padding:8px;background:#0d1117;color:#f0f3f6;"></div>' +
+            // Wrapped in a position:relative sibling so the two scroll-
+            // shadow overlays below can pin to top:0/bottom:0 of exactly
+            // this box without any manual offset math, regardless of how
+            // tall the status/scanlog/summary section above ends up being.
+            '<div style="position:relative;flex:1 1 0;min-height:0;display:flex;flex-direction:column;">' +
+            '<div id="__wo_groups" style="flex:1 1 0!important;min-height:0!important;height:0!important;overflow-y:auto!important;padding:8px;background:#0d1117;color:#f0f3f6;scrollbar-width:none;"></div>' +
+            '<div class="wo-scroll-shadow wo-scroll-shadow-top"></div>' +
+            '<div class="wo-scroll-shadow wo-scroll-shadow-bottom"></div>' +
+            '</div>' +
             '<div id="__wo_footer_area" style="flex-shrink:0;padding:8px;background:#0d1117;color:#f0f3f6;border-top:1px solid #30363d;"></div>';
         document.body.appendChild(panel);
         bodyEl = panel.querySelector('#__wo_groups');
         footerAreaEl = panel.querySelector('#__wo_footer_area');
         statusEl = panel.querySelector('#__wo_status');
         summaryEl = panel.querySelector('#__wo_summary');
+        var scrollShadowTop = panel.querySelector('.wo-scroll-shadow-top');
+        var scrollShadowBottom = panel.querySelector('.wo-scroll-shadow-bottom');
+        updateScrollShadows = function() {
+            if (!bodyEl) return;
+            scrollShadowTop.classList.toggle('is-visible', bodyEl.scrollTop > 1);
+            scrollShadowBottom.classList.toggle('is-visible', bodyEl.scrollTop + bodyEl.clientHeight < bodyEl.scrollHeight - 1);
+        };
+        bodyEl.addEventListener('scroll', updateScrollShadows);
+        new ResizeObserver(updateScrollShadows).observe(bodyEl);
         panel.querySelector('#__wo_rescan').onclick = function() {
             runScan(render);
         };
@@ -3765,6 +3804,7 @@
                 if (!g2[group.id]) g2[group.id] = {};
                 g2[group.id].collapsed = nowCollapsed;
                 saveGS(g2);
+                updateScrollShadows();
             }
             tile.querySelector('.__wo_tx').onclick = function(e) {
                 e.stopPropagation();
@@ -3917,6 +3957,7 @@
         footer.textContent = 'Created by William Zitzmann, william.zitzmann@abbvie.com';
         footerAreaEl.appendChild(footer);
 
+        updateScrollShadows();
     }
 
     function fieldKeyOptions() {
@@ -4364,7 +4405,7 @@
             // visible gap of empty padding above/below the header row for
             // no reason. This way a collapsed card hugs its header tightly.
             "#__wo_setup_modal .wo-card{border:1px solid var(--wo-border);border-radius:var(--wo-r-card);margin-bottom:9px;background:var(--wo-surface);overflow:hidden;}" +
-            "#__wo_setup_modal .wo-card-head{display:flex;align-items:center;gap:6px;padding:6px 10px;min-height:30px;cursor:pointer;user-select:none;background:var(--wo-surface-2);}" +
+            "#__wo_setup_modal .wo-card-head{display:flex;align-items:center;gap:6px;padding:6px 10px;min-height:30px;line-height:1;cursor:pointer;user-select:none;background:var(--wo-surface-2);}" +
             "#__wo_setup_modal .wo-card-head:hover{background:var(--wo-field);}" +
             "#__wo_setup_modal .wo-card>[data-coll-body]{padding:0 10px 10px;}" +
             "#__wo_setup_modal .wo-card-arrow{font-size:9px;color:var(--wo-muted);min-width:9px;}" +
@@ -4385,7 +4426,21 @@
             // is biggest, making Groups cards visibly thicker than Rules.
             "#__wo_setup_modal .wo-vis-btn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid transparent;flex-shrink:0;color:var(--wo-text);}" +
             "#__wo_setup_modal .wo-vis-btn.is-hidden{color:var(--wo-muted);}" +
-            "#__wo_setup_modal .wo-move-wrap{display:inline-flex;gap:1px;flex-shrink:0;}" +
+            // Reserved-width drag handle at the far left of the header —
+            // always takes up its slot in the layout (so the title doesn't
+            // reflow when it appears) but stays invisible until this
+            // specific row's header is hovered, signalling "grab here to
+            // reorder" without cluttering every row all the time.
+            "#__wo_setup_modal .wo-drag-handle{display:inline-flex;align-items:center;justify-content:center;width:14px;flex-shrink:0;color:var(--wo-muted);opacity:0;transition:opacity 120ms;cursor:grab;}" +
+            "#__wo_setup_modal .wo-card-head:hover .wo-drag-handle{opacity:1;}" +
+            // Move buttons stay invisible until the pointer is anywhere
+            // over the card (header or its expanded body) — just an icon
+            // that lights up on hover, no visible button chrome at rest.
+            // Keyed off [data-reorder-card] (set by attachCardDrag on every
+            // card it wires up), not the .wo-card class, so this also
+            // covers Variables/Scan whose cards don't use .wo-card styling.
+            "#__wo_setup_modal .wo-move-wrap{display:inline-flex;gap:1px;flex-shrink:0;opacity:0;transition:opacity 120ms;}" +
+            "#__wo_setup_modal [data-reorder-card]:hover .wo-move-wrap,#__wo_setup_modal [data-reorder-card]:focus-within .wo-move-wrap{opacity:1;}" +
             "#__wo_setup_modal .wo-move-btn{display:inline-flex;align-items:center;justify-content:center;width:17px;height:22px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);cursor:pointer;flex-shrink:0;}" +
             "#__wo_setup_modal .wo-move-btn:hover:not(:disabled),#__wo_setup_modal .wo-move-btn:focus-visible:not(:disabled){color:var(--wo-text);background:var(--wo-border);}" +
             "#__wo_setup_modal .wo-move-btn:disabled{opacity:0.3;cursor:not-allowed;}" +
@@ -4837,7 +4892,20 @@
 
             function stopdrag() {
                 hidePreview();
-                if (hoverZone) applySnap(hoverZone);
+                if (hoverZone) {
+                    // A fresh drag-to-edge snap should always land at the
+                    // narrowest width, even if a previous left-snap session
+                    // was resized wider — that remembered width is only for
+                    // reopening Setup while it's still snapped left (see
+                    // leftSnapWidth/saveLeftSnapWidth), not for re-snapping
+                    // from a floating/unsnapped state. Re-confirming an
+                    // already-active left snap (currentSnap is already
+                    // 'left') is unaffected, so mid-snap resizing survives.
+                    if (hoverZone === 'left' && currentSnap !== 'left') {
+                        saveLeftSnapWidth(MODAL_MIN_W);
+                    }
+                    applySnap(hoverZone);
+                }
                 hoverZone = null;
             }
         })();
@@ -5063,6 +5131,10 @@
         // same arrays in order.
         var MOVE_UP_SVG = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 10L8 6L12 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         var MOVE_DN_SVG = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        // A stacked up/down chevron pair — the same "can drag either way"
+        // affordance as the move buttons, but purely a visual cue (attachCardDrag
+        // listens on the whole header, not this element specifically).
+        var DRAG_HANDLE_HTML = '<span class="wo-drag-handle" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 6L8 3L12 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 10L8 13L12 10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
 
         function moveButtonsHtml(isFirst, isLast, upTitle, dnTitle) {
             upTitle = upTitle || 'Move up';
@@ -5137,8 +5209,38 @@
                 var cards = Array.prototype.filter.call(container.children, function(el) {
                     return el.hasAttribute && el.hasAttribute('data-reorder-card');
                 });
+                var preCollapseRect = cardEl.getBoundingClientRect();
+
+                // Temporarily collapse every OTHER card to header-only
+                // height so reordering only needs to cross header-sized
+                // increments instead of each entry's full (possibly huge)
+                // expanded height: dragging past a neighbor only needs to
+                // clear its header, and the displaced neighbor "collapses
+                // to fit in that space". Purely a transient DOM style, not
+                // the real persisted expand/collapse state, so it's
+                // discarded for free by rerenderFn()'s full re-render.
+                cards.forEach(function(c, i) {
+                    if (i === idx) return;
+                    var body = c.querySelector('[data-coll-body]');
+                    if (body) body.style.display = 'none';
+                });
+                // Also collapse the DRAGGED card's own body. Not explicitly
+                // asked for, but without it the threshold math below is
+                // still anchored to the dragged card's own (possibly huge)
+                // expanded height, reproducing the same bug from the other
+                // side — and dragging a full expanded panel around by the
+                // cursor is heavy to look at regardless.
+                var draggedBody = cardEl.querySelector('[data-coll-body]');
+                if (draggedBody) draggedBody.style.display = 'none';
+
+                // Collapsing cards ABOVE the dragged one shrinks them,
+                // which shifts everything below (including the dragged
+                // card) upward — re-measure post-collapse and compensate,
+                // or the card visibly jumps away from the cursor the
+                // instant the drag arms.
                 var draggedRect = cardEl.getBoundingClientRect();
-                var draggedHeight = draggedRect.height;
+                var collapseShift = draggedRect.top - preCollapseRect.top;
+                var headerShiftAmount = draggedRect.height;
                 var origRects = cards.map(function(c) {
                     return c.getBoundingClientRect();
                 });
@@ -5156,14 +5258,14 @@
                     cards.forEach(function(c, i) {
                         if (i === idx) return;
                         var shift = 0;
-                        if (idx < targetIdx && i > idx && i <= targetIdx) shift = -draggedHeight;
-                        else if (idx > targetIdx && i >= targetIdx && i < idx) shift = draggedHeight;
+                        if (idx < targetIdx && i > idx && i <= targetIdx) shift = -headerShiftAmount;
+                        else if (idx > targetIdx && i >= targetIdx && i < idx) shift = headerShiftAmount;
                         c.style.transform = shift ? 'translateY(' + shift + 'px)' : '';
                     });
                 }
 
                 startPointerCapture(function(mv) {
-                    var dy = mv.clientY - startY;
+                    var dy = (mv.clientY - startY) - collapseShift;
                     cardEl.style.transform = 'translateY(' + dy + 'px)';
                     var draggedCenter = draggedRect.top + draggedRect.height / 2 + dy;
                     var newTarget = idx;
@@ -5458,6 +5560,7 @@
                     '<span class="wo-rule-title">' + String(rule.label).replace(/</g, '&lt;') + '</span>';
                 box.innerHTML =
                     '<div data-coll-header class="wo-card-head">' +
+                    DRAG_HANDLE_HTML +
                     titleHtml +
                     moveButtonsHtml(idx === 0, idx === cfg.rules.length - 1) +
                     '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
@@ -5688,6 +5791,7 @@
 
                 box.innerHTML =
                     '<div data-coll-header class="wo-card-head">' +
+                    DRAG_HANDLE_HTML +
                     titleHtml +
                     moveButtonsHtml(idx === 0, idx === orderedGrps.length - 1) +
                     '<button data-vis type="button" class="wo-btn-ghost wo-vis-btn' + (vis ? '' : ' is-hidden') + '" aria-label="' + (vis ? 'Hide this group' : 'Show this group') + '" onclick="event.stopPropagation()">' + visIconSvg + '</button>' +
@@ -5810,11 +5914,26 @@
                     titleInput.select();
                 }
 
-                box.querySelector('[data-vis]').onclick = function() {
+                var visBtn = box.querySelector('[data-vis]');
+                attachTooltip(visBtn, vis ? 'Hide this group' : 'Show this group');
+                visBtn.onclick = function(e) {
+                    // Assigning .onclick here replaces the inline
+                    // onclick="event.stopPropagation()" from the markup
+                    // above, so it has to be redone explicitly — otherwise
+                    // this click bubbles to the header's own collapse
+                    // toggle unconditionally, double-toggling the unhide
+                    // case below and wrongly toggling the hide case.
+                    e.stopPropagation();
                     var g2 = getGS();
                     if (!g2[group.id]) g2[group.id] = {};
-                    g2[group.id].visible = !vis;
+                    var newVis = !vis;
+                    g2[group.id].visible = newVis;
                     saveGS(g2);
+                    // Unhiding also toggles the card's expand/collapse state
+                    // (a quick way to surface it again); hiding leaves it
+                    // alone since the card is about to disappear from the
+                    // main panel regardless of whether it's expanded.
+                    if (newVis) groupExpandState[group.id] = !groupExpandState[group.id];
                     groupsTab();
                 };
 
