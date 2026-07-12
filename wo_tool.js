@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.28';
+    var TOOL_VERSION = '0.20.29';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -2879,6 +2879,16 @@
     function teardown() {
         var p = document.getElementById('__wo_dock');
         if (p) p.remove();
+        // Setup modal and field browser are separate top-level containers
+        // with their own lifetime (snap-resize listeners, etc.) — closing
+        // just the main panel left them running/visible after Exit.
+        var setupModal = document.getElementById('__wo_setup_modal');
+        if (setupModal) {
+            if (setupModal._woCleanup) setupModal._woCleanup();
+            setupModal.remove();
+        }
+        var fieldBrowser = document.getElementById('__wo_field_browser');
+        if (fieldBrowser) fieldBrowser.remove();
         // Also drop the injected stylesheet — otherwise a hot-reload (teardown()
         // + eval() to a newer version) would keep running whatever CSS the OLD
         // version injected, since injectPanelStyles() only skips re-injecting
@@ -3337,7 +3347,7 @@
             // and then :focus-within could never trigger in the first
             // place — a real chicken-and-egg accessibility trap).
             "#__wo_dock .wo-th-actions{position:relative;display:flex;align-items:center;flex-shrink:0;margin-left:auto;min-height:22px;}" +
-            "#__wo_dock .wo-group-badge{display:inline-flex;align-items:center;justify-content:center;min-width:36px;height:18px;padding:0 6px;border-radius:4px;font-size:9px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;box-sizing:border-box;color:#0d1117;transition:opacity .1s;}" +
+            "#__wo_dock .wo-group-badge{display:inline-flex;align-items:center;justify-content:center;width:42px;height:18px;padding:0 4px;border-radius:4px;font-size:9px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;box-sizing:border-box;color:#0d1117;transition:opacity .1s;}" +
             "#__wo_dock .wo-th-icons{display:flex;align-items:center;justify-content:center;gap:2px;position:absolute;right:0;top:50%;transform:translateY(-50%);min-width:36px;height:18px;box-sizing:border-box;padding:0 3px;border-radius:999px;background:var(--wo-border);opacity:0;pointer-events:none;transition:opacity .1s;}" +
             "#__wo_dock .__wo_th:hover .wo-th-icons,#__wo_dock .wo-th-actions:focus-within .wo-th-icons{opacity:1;pointer-events:auto;}" +
             "#__wo_dock .__wo_th:hover .wo-group-badge,#__wo_dock .wo-th-actions:focus-within .wo-group-badge{opacity:0;}" +
@@ -4515,6 +4525,13 @@
             "#__wo_setup_modal .wo-tab-btn.is-active::before{left:-13px;background:radial-gradient(circle at top left,transparent 13px,var(--wo-surface) 13.5px);}" +
             "#__wo_setup_modal .wo-tab-btn.is-active::after{right:-13px;background:radial-gradient(circle at top right,transparent 13px,var(--wo-surface) 13.5px);}" +
             "#__wo_setup_modal .wo-modal-content{flex:1;min-height:0;overflow:auto;padding:10px 10px 8px;background:var(--wo-surface);border-radius:0 6px 8px 8px;margin:0 -10px -10px;}" +
+            // Snapped to an edge, the modal is flush against the screen
+            // boundary — rounded corners there just look like a rendering
+            // glitch, so square them off (overrides the inline border-radius
+            // set at creation, hence !important).
+            "#__wo_setup_modal.is-snapped{border-radius:0!important;}" +
+            "#__wo_setup_modal.is-snapped .wo-modal-titlebar{border-radius:0!important;}" +
+            "#__wo_setup_modal.is-snapped .wo-modal-content{border-radius:0!important;}" +
             "#__wo_setup_modal .wo-modal-content{scrollbar-width:thin;scrollbar-color:#30363d #0d1117;}" +
             "#__wo_setup_modal .wo-modal-content::-webkit-scrollbar{width:8px;}" +
             "#__wo_setup_modal .wo-modal-content::-webkit-scrollbar-track{background:#0d1117;}" +
@@ -4535,9 +4552,21 @@
             // textarea that can also stretch wider than its container
             // (the browser default) breaks the panel's own width and looks
             // broken when snapped narrow.
-            "#__wo_setup_modal textarea{resize:vertical;}" +
+            "#__wo_setup_modal textarea{resize:vertical;scrollbar-width:thin;scrollbar-color:#30363d var(--wo-field);}" +
+            // When a textarea's content overflows and a vertical scrollbar
+            // appears, the browser paints a solid corner swatch behind the
+            // resize grip where the scrollbar track meets the resize handle.
+            // Left at its UA default that swatch is a bright, boxy square
+            // that doesn't match the field's own background — flatten it so
+            // the grip just floats on the field color like the rest of it.
+            "#__wo_setup_modal textarea::-webkit-scrollbar{width:8px;}" +
+            "#__wo_setup_modal textarea::-webkit-scrollbar-track{background:var(--wo-field);}" +
+            "#__wo_setup_modal textarea::-webkit-scrollbar-thumb{background:#30363d;border-radius:4px;}" +
+            "#__wo_setup_modal textarea::-webkit-scrollbar-thumb:hover{background:#454d59;}" +
+            "#__wo_setup_modal textarea::-webkit-scrollbar-corner{background:var(--wo-field);}" +
             "#__wo_setup_modal input[type=text]:focus,#__wo_setup_modal input[type=number]:focus,#__wo_setup_modal textarea:focus,#__wo_setup_modal select:focus{outline:2px solid var(--wo-accent);outline-offset:-1px;border-color:var(--wo-accent);}" +
-            "#__wo_setup_modal textarea.wo-code{font-family:Consolas,'Cascadia Mono',monospace;background:#010409;color:#7ee787;border-color:var(--wo-border);resize:vertical;}" +
+            "#__wo_setup_modal textarea.wo-code{font-family:Consolas,'Cascadia Mono',monospace;background:#010409;color:#7ee787;border-color:var(--wo-border);resize:vertical;scrollbar-color:#30363d #010409;}" +
+            "#__wo_setup_modal textarea.wo-code::-webkit-scrollbar-track,#__wo_setup_modal textarea.wo-code::-webkit-scrollbar-corner{background:#010409;}" +
             // Padding lives on the head and body separately, NOT on .wo-card
             // itself — a card that's collapsed only renders its head, so if
             // the card carried the padding, a collapsed card would show a
@@ -4566,13 +4595,21 @@
             // Shared editable-rows table (Scan tab's Row Detail Fields /
             // Post-Scan Actions) — one header row instead of repeating each
             // field's label inside every entry.
-            "#__wo_setup_modal .wo-edit-table{width:100%;border-collapse:collapse;table-layout:fixed;}" +
-            "#__wo_setup_modal .wo-edit-table th{text-align:left;font-weight:600;color:var(--wo-muted);font-size:10px;padding:2px 5px 5px;border-bottom:1px solid var(--wo-border);white-space:nowrap;}" +
+            // table-layout:fixed makes each column's % width shrink/grow
+            // proportionally as the modal is resized. min-width gives the
+            // columns a floor before that shrinking would start mangling
+            // header text mid-word — past that floor the wrapper's own
+            // overflow-x:auto takes over with a horizontal scrollbar instead.
+            "#__wo_setup_modal .wo-edit-table{width:100%;min-width:420px;border-collapse:collapse;table-layout:fixed;}" +
+            // Headers wrap to a 2nd line at word boundaries only (never
+            // mid-word) — down to the table's min-width that's always
+            // enough room for at least the longest single word per column.
+            "#__wo_setup_modal .wo-edit-table th{text-align:left;font-weight:600;color:var(--wo-muted);font-size:10px;padding:2px 5px 5px;border-bottom:1px solid var(--wo-border);white-space:normal;word-break:normal;overflow-wrap:normal;line-height:1.3;}" +
             "#__wo_setup_modal .wo-edit-table td{padding:3px 5px;vertical-align:top;}" +
             "#__wo_setup_modal .wo-edit-table tr:not(:last-child) td{border-bottom:1px solid var(--wo-border);}" +
             "#__wo_setup_modal .wo-edit-table input,#__wo_setup_modal .wo-edit-table textarea{width:100%;font-size:11px;}" +
             "#__wo_setup_modal .wo-edit-table .wo-edit-table-del{width:26px;text-align:center;padding-left:2px;padding-right:2px;}" +
-            "#__wo_setup_modal .wo-th-tip{display:inline-flex;vertical-align:middle;margin-left:3px;color:var(--wo-muted);cursor:default;}" +
+            "#__wo_setup_modal .wo-th-tip{display:inline-flex;vertical-align:middle;margin-left:5px;color:var(--wo-muted);cursor:default;}" +
             "#__wo_setup_modal .wo-th-tip:hover{color:var(--wo-text);}" +
             // Visibility toggle: bright/white when the group is currently
             // shown (an "on" state should read as emphasized, not muted),
@@ -5201,12 +5238,14 @@
             modal.style.height = rect.height + 'px';
             document.body.style.marginLeft = zone === 'left' ? leftSnapWidth + 'px' : '';
             currentSnap = zone;
+            modal.classList.add('is-snapped');
             saveSetupSnap(zone);
         }
 
         function clearSnap() {
             if (!currentSnap) return;
             currentSnap = null;
+            modal.classList.remove('is-snapped');
             document.body.style.marginLeft = '';
             saveSetupSnap(null);
         }
@@ -6559,8 +6598,8 @@
                         return;
                     }
                     var html = '<table class="wo-edit-table"><thead><tr>' +
-                        '<th style="width:24%;">' + thWithTip('Field Element ID', 'The Maximo element ID of the field to fill, e.g. m12345678-tb') + '</th>' +
-                        '<th style="width:36%;">' + thWithTip('Value Expression', "What to put in the field — a variable (V('v_core')) or a formula (F('...'))") + '</th>' +
+                        '<th style="width:20%;">' + thWithTip('Field Element ID', 'The Maximo element ID of the field to fill, e.g. m12345678-tb') + '</th>' +
+                        '<th style="width:28%;">' + thWithTip('Value Expression', "What to put in the field — a variable (V('v_core')) or a formula (F('...'))") + '</th>' +
                         '<th>' + thWithTip('Condition', 'Optional formula — leave blank to always run this action') + '</th>' +
                         '<th class="wo-edit-table-del"></th>' +
                         '</tr></thead><tbody>' +
@@ -6616,10 +6655,10 @@
                         return;
                     }
                     var html = '<table class="wo-edit-table"><thead><tr>' +
-                        '<th style="width:20%;">' + thWithTip('Column Name', "The column header shown in this field's expanded row panel") + '</th>' +
-                        '<th style="width:20%;">' + thWithTip('Element ID', 'The Maximo element ID this field reads from') + '</th>' +
-                        '<th style="width:18%;">' + thWithTip('Table Prefix', 'The internal Maximo table prefix this field belongs to') + '</th>' +
-                        '<th style="width:12%;">' + thWithTip('Expand Col', 'Which column (0-based) triggers the row-expand action') + '</th>' +
+                        '<th style="width:14%;">' + thWithTip('Column Name', "The column header shown in this field's expanded row panel") + '</th>' +
+                        '<th style="width:14%;">' + thWithTip('Element ID', 'The Maximo element ID this field reads from') + '</th>' +
+                        '<th style="width:13%;">' + thWithTip('Table Prefix', 'The internal Maximo table prefix this field belongs to') + '</th>' +
+                        '<th style="width:9%;">' + thWithTip('Expand Col', 'Which column (0-based) triggers the row-expand action') + '</th>' +
                         '<th>' + thWithTip('Collect Condition', 'Optional formula — leave blank to always collect this field') + '</th>' +
                         '<th class="wo-edit-table-del"></th>' +
                         '</tr></thead><tbody>' +
@@ -7000,7 +7039,7 @@
                 '</div>' +
                 '<div style="margin-top:8px;">' +
                 '<label style="color:var(--wo-muted);font-size:11px;">Version:</label><br>' +
-                '<select id="__st_pin" style="width:100%;margin-top:2px;"><option value="">— latest on channel —</option></select>' +
+                '<select id="__st_pin" style="width:100%;margin-top:2px;"><option value="">Latest (current version)</option></select>' +
                 '</div>' +
                 '<div style="margin-top:10px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
@@ -7065,22 +7104,26 @@
                         }
                         byLine[key].push(v.version);
                     });
+                    // Flat list, not <optgroup> — an optgroup's own label
+                    // isn't selectable, which fought the "auto-patch is the
+                    // thing you pick" model. Instead the auto-patch option
+                    // itself acts as the header, with each exact patch
+                    // listed right under it, indented, as its own selectable
+                    // option (for the "newest patch broke something, freeze
+                    // on the previous one" rollback case).
                     lines.forEach(function(key) {
-                        var grp = document.createElement('optgroup');
-                        grp.label = key + '.x';
                         var floatOpt = document.createElement('option');
                         floatOpt.value = key;
                         floatOpt.textContent = key + '.x (auto-patch)';
                         if (st.pinnedVersion === key) floatOpt.selected = true;
-                        grp.appendChild(floatOpt);
+                        pinSel.appendChild(floatOpt);
                         byLine[key].forEach(function(vstr) {
                             var opt = document.createElement('option');
                             opt.value = vstr;
-                            opt.textContent = vstr;
+                            opt.textContent = '    ' + vstr;
                             if (st.pinnedVersion === vstr) opt.selected = true;
-                            grp.appendChild(opt);
+                            pinSel.appendChild(opt);
                         });
-                        pinSel.appendChild(grp);
                     });
                 } catch (e) {}
             };
@@ -7223,7 +7266,7 @@
         }
 
         function guideTab() {
-            window.open('https://wo-review-tool-guide.netlify.app/', '_blank');
+            window.open('https://williamzitzmann.github.io/WO-Review-Tool/', '_blank');
         }
 
         // ── PROFILES TAB ──
@@ -7352,7 +7395,7 @@
             // ── GitHub presets ──
             var ghDiv = document.createElement('div');
             ghDiv.className = 'wo-card';
-            ghDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Shared Presets</span></div>' +
+            ghDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Import Shared Presets</span></div>' +
                 '<div data-coll-body style="margin-top:7px;"><div id="__pf_gh_list" style="color:var(--wo-muted);font-size:11px;">Loading…</div></div>';
             content.appendChild(ghDiv);
             makeCollapsible(ghDiv, 'Shared Presets', false);

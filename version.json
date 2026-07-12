@@ -1,10 +1,24 @@
 {
-  "latest": "0.20.28",
+  "latest": "0.20.29",
   "channels": {
-    "stable": "0.20.28",
-    "beta": "0.20.28"
+    "stable": "0.20.29",
+    "beta": "0.20.29"
   },
   "versions": [
+    {
+      "version": "0.20.29",
+      "changes": [
+        "Fixed Exit button not fully closing the tool - it now also closes Setup (and the field-browser popup) if either was left open, instead of only removing the main panel",
+        "Renamed \"Shared Presets\" to \"Import Shared Presets\" in the Profiles tab",
+        "Fixed a bright square artifact around the resize-grip corner of textareas once a scrollbar appears - it now blends into the field's own background",
+        "Added a little breathing room between each Scan tab table column header and its info-icon tooltip",
+        "Scan tab tables (Row Detail Fields / Post-Scan Actions): narrow columns like Column Name/Element ID/Table Prefix/Expand Col no longer eat more width than they need, freeing up room for Collect Condition/Value Expression. Columns now shrink responsively as the Setup window narrows, and headers wrap at word boundaries onto a 2nd line instead of overflowing; below a sensible floor width the table scrolls horizontally instead of mangling text",
+        "Settings tab version picker: default option renamed to \"Latest (current version)\", and the per-minor-version grouping no longer uses an unselectable optgroup header - the \"X.Y.x (auto-patch)\" entry is now itself a selectable option, with exact patch versions indented underneath it",
+        "Main panel status badges (PASS/FAIL/WARN/ERR) are now a uniform fixed width instead of WARN rendering wider than the others",
+        "Setup modal corners are now square while snapped to any screen edge, instead of showing rounded corners flush against the edge",
+        "Guide button now points to the tool's GitHub Pages guide instead of the old Netlify URL"
+      ]
+    },
     {
       "version": "0.20.28",
       "changes": [
