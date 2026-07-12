@@ -1,10 +1,19 @@
 {
-  "latest": "0.20.21",
+  "latest": "0.20.22",
   "channels": {
-    "stable": "0.20.21",
-    "beta": "0.20.21"
+    "stable": "0.20.22",
+    "beta": "0.20.22"
   },
   "versions": [
+    {
+      "version": "0.20.22",
+      "changes": [
+        "Added move up/down reorder buttons to Rules, Groups, and Variables tabs - sleek stroke-arrow icons (dimmed at the top/bottom of the list) instead of the old unicode triangle style",
+        "Scan tab's existing move up/down buttons replaced with the same sleek icon style as the other tabs",
+        "Rules and Variables tab order is already the single source of truth used everywhere they're referenced, so reordering there needed no extra wiring",
+        "Groups tab now displays and reorders in the same visual order as the main panel's group tiles (previously it showed/reordered cfg.groups' raw storage order, which silently diverged from the main panel the moment tiles had ever been drag-reordered there) - fixed by having the Groups tab read and write the same order the main panel already uses"
+      ]
+    },
     {
       "version": "0.20.21",
       "changes": [

@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.21';
+    var TOOL_VERSION = '0.20.22';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -4385,6 +4385,10 @@
             // is biggest, making Groups cards visibly thicker than Rules.
             "#__wo_setup_modal .wo-vis-btn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid transparent;flex-shrink:0;color:var(--wo-text);}" +
             "#__wo_setup_modal .wo-vis-btn.is-hidden{color:var(--wo-muted);}" +
+            "#__wo_setup_modal .wo-move-wrap{display:inline-flex;gap:1px;flex-shrink:0;}" +
+            "#__wo_setup_modal .wo-move-btn{display:inline-flex;align-items:center;justify-content:center;width:17px;height:22px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);cursor:pointer;flex-shrink:0;}" +
+            "#__wo_setup_modal .wo-move-btn:hover:not(:disabled),#__wo_setup_modal .wo-move-btn:focus-visible:not(:disabled){color:var(--wo-text);background:var(--wo-border);}" +
+            "#__wo_setup_modal .wo-move-btn:disabled{opacity:0.3;cursor:not-allowed;}" +
             "#__wo_setup_modal .wo-kebab-wrap{position:relative;flex-shrink:0;margin-left:auto;}" +
             "#__wo_setup_modal .wo-kebab-btn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);cursor:pointer;flex-shrink:0;}" +
             "#__wo_setup_modal .wo-kebab-btn:hover,#__wo_setup_modal .wo-kebab-btn:focus-visible{color:var(--wo-text);background:var(--wo-border);}" +
@@ -5040,6 +5044,44 @@
             });
         }
 
+        // Shared reorder control used by Rules/Groups/Variables/Scan card
+        // headers — a pair of chevron buttons (stroke-only, same convention
+        // as the kebab dots) instead of unicode ▲/▼ text buttons. `arr` is
+        // the live array the card's item lives in; swapping entries here is
+        // the entire reorder mechanism, since every consumer (main panel
+        // tiles, group rule-lists, variable pickers) just iterates these
+        // same arrays in order.
+        var MOVE_UP_SVG = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 10L8 6L12 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        var MOVE_DN_SVG = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        function moveButtonsHtml(isFirst, isLast, upTitle, dnTitle) {
+            upTitle = upTitle || 'Move up';
+            dnTitle = dnTitle || 'Move down';
+            return '<span class="wo-move-wrap" onclick="event.stopPropagation()">' +
+                '<button data-mv-up type="button" class="wo-move-btn" aria-label="' + upTitle + '" title="' + upTitle + '"' + (isFirst ? ' disabled' : '') + '>' + MOVE_UP_SVG + '</button>' +
+                '<button data-mv-dn type="button" class="wo-move-btn" aria-label="' + dnTitle + '" title="' + dnTitle + '"' + (isLast ? ' disabled' : '') + '>' + MOVE_DN_SVG + '</button>' +
+                '</span>';
+        }
+
+        function wireMoveButtons(box, arr, idx, rerenderFn) {
+            var upBtn = box.querySelector('[data-mv-up]');
+            var dnBtn = box.querySelector('[data-mv-dn]');
+            if (upBtn) upBtn.onclick = function() {
+                if (idx === 0) return;
+                var tmp = arr[idx - 1];
+                arr[idx - 1] = arr[idx];
+                arr[idx] = tmp;
+                rerenderFn();
+            };
+            if (dnBtn) dnBtn.onclick = function() {
+                if (idx === arr.length - 1) return;
+                var tmp = arr[idx + 1];
+                arr[idx + 1] = arr[idx];
+                arr[idx] = tmp;
+                rerenderFn();
+            };
+        }
+
         // Torn down both on an explicit Close/Save and, defensively, if a
         // second openSetup() call ever replaces this modal without one of
         // those firing first — otherwise the resize listener and the
@@ -5118,6 +5160,7 @@
                     '<span data-coll-arrow style="font-size:10px;color:#aaa;min-width:10px;">▶</span>' +
                     '<span style="color:#7ec8e3;font-size:10px;">ID: <code>' + v.id + '</code></span>' +
                     '<input type="text" data-vl value="' + v.label.replace(/"/g, '&quot;') + '" style="flex:1;background:#222;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;" placeholder="Variable label" onclick="event.stopPropagation()">' +
+                    moveButtonsHtml(idx === 0, idx === vars.length - 1) +
                     '<button data-vd style="color:#e74c3c;background:none;border:1px solid #e74c3c;border-radius:3px;padding:2px 6px;cursor:pointer;" onclick="event.stopPropagation()">Delete</button>' +
                     '</div>' +
                     '<div data-coll-body>' +
@@ -5153,6 +5196,10 @@
                     saveVars(vars);
                     varsTab();
                 };
+                wireMoveButtons(box, vars, idx, function() {
+                    saveVars(vars);
+                    varsTab();
+                });
                 box.querySelector('[data-vt]').onclick = function() {
                     var res = runVariable(fa.value, cache);
                     var sp = box.querySelector('[data-vr]');
@@ -5295,6 +5342,7 @@
                 box.innerHTML =
                     '<div data-coll-header class="wo-card-head">' +
                     titleHtml +
+                    moveButtonsHtml(idx === 0, idx === cfg.rules.length - 1) +
                     '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
                     '<button data-kebab type="button" class="wo-kebab-btn" aria-label="Rule actions" aria-haspopup="true">' +
                     // Drawn as thick-stroked circles (stroke-width roughly
@@ -5327,6 +5375,8 @@
                 msgWrap.appendChild(msgSection(rule, 'pass', '✓ Pass', '#3fb950', false));
                 msgWrap.appendChild(msgSection(rule, 'fail', '✗ Fail — must be fixed', '#f85149', true));
                 msgWrap.appendChild(msgSection(rule, 'warn', '⚠ Warn — needs reviewer confirmation', '#d29922', true));
+
+                wireMoveButtons(box, cfg.rules, idx, rulesTab);
 
                 var fa = box.querySelector('[data-f]');
                 var titleInput = box.querySelector('[data-l]');
@@ -5476,7 +5526,15 @@
         function groupsTab() {
             content.innerHTML = '';
             var gs = getGS();
-            cfg.groups.forEach(function(group, idx) {
+            // The main panel already lets users drag-reorder group tiles,
+            // persisted separately as gs.__order (see orderedGroups()) rather
+            // than in cfg.groups itself. This tab must display and reorder
+            // in that same visual order — not cfg.groups' raw array order —
+            // or "Groups tab order" and "main panel order" would silently
+            // diverge the moment either one has ever been reordered.
+            var orderedGrps = orderedGroups(cfg);
+            orderedGrps.forEach(function(group, idx) {
+                var realIdx = cfg.groups.indexOf(group);
                 var vis = gs[group.id] ? gs[group.id].visible !== false : true;
                 var box = document.createElement('div');
                 box.className = 'wo-card';
@@ -5513,6 +5571,7 @@
                 box.innerHTML =
                     '<div data-coll-header class="wo-card-head">' +
                     titleHtml +
+                    moveButtonsHtml(idx === 0, idx === orderedGrps.length - 1) +
                     '<button data-vis type="button" class="wo-btn-ghost wo-vis-btn' + (vis ? '' : ' is-hidden') + '" aria-label="' + (vis ? 'Hide this group' : 'Show this group') + '" onclick="event.stopPropagation()">' + visIconSvg + '</button>' +
                     '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
                     '<button data-kebab type="button" class="wo-kebab-btn" aria-label="Group actions" aria-haspopup="true">' +
@@ -5572,6 +5631,34 @@
                 makeCollapsible(box, group.title, !groupExpandState[group.id], function(expandedNow) {
                     groupExpandState[group.id] = expandedNow;
                 });
+
+                // Swaps within the visual (gs.__order) order, not cfg.groups'
+                // raw array order — mirrors the main panel's own drag-drop
+                // reorder handler so both stay in sync.
+                (function() {
+                    var upBtn = box.querySelector('[data-mv-up]');
+                    var dnBtn = box.querySelector('[data-mv-dn]');
+                    function swapOrder(a, b) {
+                        var ids = orderedGrps.map(function(g) {
+                            return g.id;
+                        });
+                        var tmp = ids[a];
+                        ids[a] = ids[b];
+                        ids[b] = tmp;
+                        var g2 = getGS();
+                        g2.__order = ids;
+                        saveGS(g2);
+                        groupsTab();
+                    }
+                    if (upBtn) upBtn.onclick = function() {
+                        if (idx === 0) return;
+                        swapOrder(idx, idx - 1);
+                    };
+                    if (dnBtn) dnBtn.onclick = function() {
+                        if (idx === orderedGrps.length - 1) return;
+                        swapOrder(idx, idx + 1);
+                    };
+                })();
 
                 var titleInput = box.querySelector('[data-ti]');
                 if (titleInput) {
@@ -5639,13 +5726,25 @@
                         var copy = JSON.parse(JSON.stringify(group));
                         copy.id = 'g_' + Date.now();
                         copy.title = group.title + ' (copy)';
-                        cfg.groups.splice(idx + 1, 0, copy);
+                        cfg.groups.splice(realIdx + 1, 0, copy);
+                        // Place the copy right after the original in the
+                        // visual order too, instead of letting it fall back
+                        // to the end (orderedGroups() appends any id it
+                        // doesn't recognize yet).
+                        var g2 = getGS();
+                        var ids = orderedGroups(cfg).map(function(g) {
+                            return g.id;
+                        });
+                        var pos = ids.indexOf(group.id);
+                        ids.splice(pos + 1, 0, copy.id);
+                        g2.__order = ids;
+                        saveGS(g2);
                         groupsTab();
                     };
                     menu.querySelector('[data-del]').onclick = function(ev) {
                         ev.stopPropagation();
                         closeRuleMenu();
-                        cfg.groups.splice(idx, 1);
+                        cfg.groups.splice(realIdx, 1);
                         groupsTab();
                     };
                     openRuleMenu = menu;
@@ -5883,9 +5982,8 @@
                     '<span data-coll-arrow style="font-size:10px;color:#aaa;min-width:10px;">▶</span>' +
                     '<input type="text" value="' + s.title.replace(/"/g, '&quot;') + '" data-ti style="width:35%;background:#222;color:#eee;border:1px solid #333;padding:2px 5px;border-radius:3px;" onclick="event.stopPropagation()"> ' +
                     'Type: <select data-ty onclick="event.stopPropagation()"><option value="tab" ' + (s.type === 'tab' ? 'selected' : '') + '>Tab</option><option value="dialog" ' + (s.type === 'dialog' ? 'selected' : '') + '>Dialog</option></select> ' +
-                    '<span style="margin-left:auto;display:flex;gap:2px;">' +
-                    '<button data-mv-up title="Move up — runs earlier" ' + (idx === 0 ? 'disabled' : '') + ' style="' + (idx === 0 ? 'opacity:0.35;cursor:not-allowed;' : '') + '" onclick="event.stopPropagation()">▲</button>' +
-                    '<button data-mv-dn title="Move down — runs later" ' + (idx === scan.scans.length - 1 ? 'disabled' : '') + ' style="' + (idx === scan.scans.length - 1 ? 'opacity:0.35;cursor:not-allowed;' : '') + '" onclick="event.stopPropagation()">▼</button>' +
+                    '<span style="margin-left:auto;display:flex;align-items:center;gap:2px;">' +
+                    moveButtonsHtml(idx === 0, idx === scan.scans.length - 1, 'Move up — runs earlier', 'Move down — runs later') +
                     '<button data-d style="color:#e74c3c;" onclick="event.stopPropagation()">Delete</button>' +
                     '</span>' +
                     '</div>' +
@@ -6041,22 +6139,7 @@
                     scan.scans.splice(idx, 1);
                     scanTab();
                 };
-                var mvUpBtn = box.querySelector('[data-mv-up]');
-                if (mvUpBtn) mvUpBtn.onclick = function() {
-                    if (idx === 0) return;
-                    var tmp = scan.scans[idx - 1];
-                    scan.scans[idx - 1] = scan.scans[idx];
-                    scan.scans[idx] = tmp;
-                    scanTab();
-                };
-                var mvDnBtn = box.querySelector('[data-mv-dn]');
-                if (mvDnBtn) mvDnBtn.onclick = function() {
-                    if (idx === scan.scans.length - 1) return;
-                    var tmp = scan.scans[idx + 1];
-                    scan.scans[idx + 1] = scan.scans[idx];
-                    scan.scans[idx] = tmp;
-                    scanTab();
-                };
+                wireMoveButtons(box, scan.scans, idx, scanTab);
             });
             var b = document.createElement('button');
             b.textContent = '+ Add Scan Target';
