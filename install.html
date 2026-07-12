@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WO Review Tool — Install</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #141414;
+    --card: #181818;
+    --border: #333;
+    --text: #eee;
+    --muted: #999;
+    --teal: #7ec8e3;
+    --green: #2ecc71;
+    --red: #e74c3c;
+    --orange: #FF9800;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  .wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 64px 24px 80px;
+  }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--teal);
+    background: rgba(126,200,227,0.1);
+    border: 1px solid rgba(126,200,227,0.25);
+    border-radius: 100px;
+    padding: 4px 12px;
+    margin-bottom: 18px;
+  }
+
+  h1 {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    margin-bottom: 10px;
+  }
+
+  .lede {
+    color: #bbb;
+    font-size: 15.5px;
+    max-width: 52ch;
+    margin-bottom: 40px;
+  }
+
+  /* ── INSTALL CARD ── */
+  .install-card {
+    background: linear-gradient(135deg, #1b1b1b 0%, #1f1f1f 100%);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 32px;
+    text-align: center;
+    margin-bottom: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .install-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(to right, var(--teal), var(--green));
+  }
+
+  .drag-hint {
+    font-size: 12.5px;
+    color: var(--muted);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .drag-hint svg { flex-shrink: 0; }
+
+  .bm-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    background: var(--teal);
+    color: #0c1418;
+    font-weight: 700;
+    font-size: 15px;
+    padding: 14px 26px;
+    border-radius: 10px;
+    text-decoration: none;
+    cursor: grab;
+    border: 2px dashed rgba(12,20,24,0.35);
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+    box-shadow: 0 6px 20px rgba(126,200,227,0.25);
+  }
+  .bm-button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 26px rgba(126,200,227,0.35);
+  }
+  .bm-button:active { cursor: grabbing; }
+
+  .install-note {
+    margin-top: 18px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .install-note a { color: var(--teal); }
+
+  /* ── BROWSER BAR TOGGLE HINT ── */
+  .callout {
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 20px 0;
+    font-size: 13px;
+    border-left: 4px solid;
+    color: #ccc;
+    background: rgba(126,200,227,0.06);
+    border-color: var(--teal);
+  }
+  .callout strong { color: #eee; }
+  .callout .inline-key {
+    display: inline-block;
+    background: #222;
+    border: 1px solid #3a3a3a;
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 11.5px;
+    font-family: 'Consolas', monospace;
+  }
+
+  /* ── STEPS ── */
+  h2 {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--teal);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    margin: 40px 0 14px;
+  }
+
+  .flow-steps { display: flex; flex-direction: column; }
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 11px 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    position: relative;
+  }
+  .flow-step:first-child { border-radius: 8px 8px 0 0; }
+  .flow-step:last-child { border-radius: 0 0 8px 8px; }
+  .flow-step:not(:last-child) { border-bottom: none; }
+  .flow-num {
+    width: 22px; height: 22px;
+    background: var(--teal);
+    color: #111;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+    flex-shrink: 0; margin-top: 1px;
+  }
+  .flow-text { font-size: 13.5px; color: #ccc; flex: 1; padding-top: 2px; }
+  .flow-text code {
+    background: #111;
+    color: var(--green);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+
+  /* ── MANUAL FALLBACK ── */
+  details {
+    margin-top: 28px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card);
+    overflow: hidden;
+  }
+  summary {
+    cursor: pointer;
+    padding: 13px 16px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #ddd;
+    list-style: none;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: '▸ '; color: var(--teal); }
+  details[open] summary::before { content: '▾ '; }
+  .details-body { padding: 4px 16px 16px; }
+  .code-box {
+    background: #0a0a0a;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-family: 'Consolas', monospace;
+    font-size: 11px;
+    color: var(--green);
+    word-break: break-all;
+    max-height: 90px;
+    overflow-y: auto;
+    margin: 10px 0;
+  }
+  .copy-btn {
+    background: #222;
+    border: 1px solid #3a3a3a;
+    color: #ddd;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 7px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .copy-btn:hover { border-color: var(--teal); color: var(--teal); }
+  .copy-btn.copied { border-color: var(--green); color: var(--green); }
+
+  /* ── FOOTER LINKS ── */
+  .footer-links {
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--muted);
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+  .footer-links a { color: var(--teal); text-decoration: none; }
+  .footer-links a:hover { text-decoration: underline; }
+
+  @media (max-width: 600px) {
+    .wrap { padding: 40px 18px 60px; }
+    h1 { font-size: 26px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <span class="eyebrow">WO Review Tool</span>
+  <h1>Install in one drag.</h1>
+  <p class="lede">A bookmarklet that adds a live checklist panel to Maximo work order pages. No install, no extension — just a bookmark.</p>
+
+  <div class="install-card">
+    <div class="drag-hint">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 2.5V10.5M8 10.5L5 7.5M8 10.5L11 7.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 13.5H13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      Drag the button below to your bookmarks bar
+    </div>
+    <a class="bm-button" id="bmLink" href="javascript:(function(){var LOADER_URL='https://raw.githubusercontent.com/WilliamZitzmann/WO-Review-Tool/main/loader.js';var CACHE_KEY='__wo_loader_cache';function run(src){try{eval(src);}catch(e){alert('WO Tool loader error: '+e.message);}}var xhr=new XMLHttpRequest();xhr.open('GET',LOADER_URL,true);xhr.onload=function(){if(xhr.status===200){localStorage.setItem(CACHE_KEY,xhr.responseText);run(xhr.responseText);}else{var c=localStorage.getItem(CACHE_KEY);if(c){run(c);}else{alert('WO Tool: failed to load (HTTP '+xhr.status+').');}}};xhr.onerror=function(){var c=localStorage.getItem(CACHE_KEY);if(c){run(c);}else{alert('WO Tool: network error, check connection.');}};xhr.send();})();">📌 WO Review Tool</a>
+    <div class="install-note">Clicking it here does nothing useful — it only works dragged to your bookmarks bar, then clicked from <em>there</em> while a Maximo work order is open.</div>
+  </div>
+
+  <div class="callout">
+    <strong>Don't see your bookmarks bar?</strong> Show it first: <span class="inline-key">Ctrl+Shift+B</span> on Chrome/Edge, <span class="inline-key">Ctrl+B</span> on Firefox.
+  </div>
+
+  <h2>Then, to use it</h2>
+  <div class="flow-steps">
+    <div class="flow-step"><div class="flow-num">1</div><div class="flow-text">Open a work order in Maximo.</div></div>
+    <div class="flow-step"><div class="flow-num">2</div><div class="flow-text">Click the <strong>WO Review Tool</strong> bookmark you just added.</div></div>
+    <div class="flow-step"><div class="flow-num">3</div><div class="flow-text">If it redirects you to the right Maximo page first, click the bookmark again once you've landed and are logged in.</div></div>
+    <div class="flow-step"><div class="flow-num">4</div><div class="flow-text">First time only: the tool checks whether you have permission to use it, then opens an installer where you pick a starting configuration.</div></div>
+  </div>
+
+  <details>
+    <summary>Can't drag it? Add it manually instead</summary>
+    <div class="details-body">
+      <div class="flow-steps">
+        <div class="flow-step"><div class="flow-num">1</div><div class="flow-text">Right-click your bookmarks bar → <strong>Add page</strong> (or create a new bookmark any way your browser allows).</div></div>
+        <div class="flow-step"><div class="flow-num">2</div><div class="flow-text">Name it anything — e.g. <code>WO Review Tool</code>.</div></div>
+        <div class="flow-step"><div class="flow-num">3</div><div class="flow-text">Paste the code below into the URL/address field instead of a real URL.</div></div>
+      </div>
+      <div class="code-box" id="codeBox">javascript:(function(){var LOADER_URL='https://raw.githubusercontent.com/WilliamZitzmann/WO-Review-Tool/main/loader.js';var CACHE_KEY='__wo_loader_cache';function run(src){try{eval(src);}catch(e){alert('WO Tool loader error: '+e.message);}}var xhr=new XMLHttpRequest();xhr.open('GET',LOADER_URL,true);xhr.onload=function(){if(xhr.status===200){localStorage.setItem(CACHE_KEY,xhr.responseText);run(xhr.responseText);}else{var c=localStorage.getItem(CACHE_KEY);if(c){run(c);}else{alert('WO Tool: failed to load (HTTP '+xhr.status+').');}}};xhr.onerror=function(){var c=localStorage.getItem(CACHE_KEY);if(c){run(c);}else{alert('WO Tool: network error, check connection.');}};xhr.send();})();</div>
+      <button class="copy-btn" id="copyBtn" type="button">Copy code</button>
+    </div>
+  </details>
+
+  <div class="footer-links">
+    <a href="./">Full Guide</a>
+    <a href="https://github.com/WilliamZitzmann/WO-Review-Tool">GitHub Repo</a>
+  </div>
+
+</div>
+
+<script>
+  document.getElementById('copyBtn').addEventListener('click', function() {
+    var btn = this;
+    var text = document.getElementById('codeBox').textContent;
+    navigator.clipboard.writeText(text).then(function() {
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(function() {
+        btn.textContent = 'Copy code';
+        btn.classList.remove('copied');
+      }, 1500);
+    });
+  });
+</script>
+
+</body>
+</html>
