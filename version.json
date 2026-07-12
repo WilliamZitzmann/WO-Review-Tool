@@ -1,10 +1,23 @@
 {
-  "latest": "0.20.27",
+  "latest": "0.20.28",
   "channels": {
-    "stable": "0.20.27",
-    "beta": "0.20.27"
+    "stable": "0.20.28",
+    "beta": "0.20.28"
   },
   "versions": [
+    {
+      "version": "0.20.28",
+      "changes": [
+        "Scan tab: Tab ID / Wait for text / Wait for table fields are no longer crammed on one line - each has its own label and room to breathe",
+        "Added a \"Scan Order\" label under WO Tab ID to make clear the list below is the scan sequence",
+        "Move up/down tooltips are now just \"Move up\"/\"Move down\" - dropped the \"runs earlier/later\" wording",
+        "Row Detail Fields and Post-Scan Actions are now real tables - one header row instead of repeating every field's label on every single entry, with a small info icon on each column header explaining what it's for. Both tables share the same layout/style. This also fixes Expand Col's 2-line header pushing it out of alignment with Table Prefix/Collect Condition, since headers now live in their own row",
+        "Add field / Add action buttons are bigger and easier to hit",
+        "Delete buttons (Scan tab row/action tables, Groups tab field rows, Local Profiles) now use the same trash-can icon as the kebab menu's Delete, instead of a plain X or text button",
+        "Local Profiles: Switch is now disabled whenever it's your only saved profile (previously it could still be clicked even though it would do nothing)",
+        "Renamed \"Import Preset from GitHub\" to \"Shared Presets\" and removed \"GitHub\" from the re-import confirmation text"
+      ]
+    },
     {
       "version": "0.20.27",
       "changes": [

@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.27';
+    var TOOL_VERSION = '0.20.28';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -4563,6 +4563,17 @@
             // its own ad hoc bordered div.
             "#__wo_setup_modal .wo-subbox{border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:8px;background:var(--wo-field);}" +
             "#__wo_setup_modal .wo-subbox-accent{border-color:var(--wo-accent);}" +
+            // Shared editable-rows table (Scan tab's Row Detail Fields /
+            // Post-Scan Actions) — one header row instead of repeating each
+            // field's label inside every entry.
+            "#__wo_setup_modal .wo-edit-table{width:100%;border-collapse:collapse;table-layout:fixed;}" +
+            "#__wo_setup_modal .wo-edit-table th{text-align:left;font-weight:600;color:var(--wo-muted);font-size:10px;padding:2px 5px 5px;border-bottom:1px solid var(--wo-border);white-space:nowrap;}" +
+            "#__wo_setup_modal .wo-edit-table td{padding:3px 5px;vertical-align:top;}" +
+            "#__wo_setup_modal .wo-edit-table tr:not(:last-child) td{border-bottom:1px solid var(--wo-border);}" +
+            "#__wo_setup_modal .wo-edit-table input,#__wo_setup_modal .wo-edit-table textarea{width:100%;font-size:11px;}" +
+            "#__wo_setup_modal .wo-edit-table .wo-edit-table-del{width:26px;text-align:center;padding-left:2px;padding-right:2px;}" +
+            "#__wo_setup_modal .wo-th-tip{display:inline-flex;vertical-align:middle;margin-left:3px;color:var(--wo-muted);cursor:default;}" +
+            "#__wo_setup_modal .wo-th-tip:hover{color:var(--wo-text);}" +
             // Visibility toggle: bright/white when the group is currently
             // shown (an "on" state should read as emphasized, not muted),
             // dim once it's hidden.
@@ -5317,6 +5328,18 @@
         // Up chevron, two horizontal lines, down chevron — reads as "grab
         // and drag this row up or down" rather than a generic move-arrow.
         var DRAG_HANDLE_HTML = '<span class="wo-drag-handle" aria-hidden="true"><svg width="12" height="16" viewBox="0 0 16 16" fill="none"><path d="M5 4.2L8 1.8L11 4.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 7.2H11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M5 9.4H11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M5 11.8L8 14.2L11 11.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+        // Same trash-can glyph as the kebab menu's Delete item, reused
+        // anywhere a plain "delete this row" icon button is needed outside
+        // a kebab menu (table rows, list rows) so delete always reads the
+        // same way everywhere in Setup.
+        var TRASH_SVG = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
+        // Small "i" info icon for a column header tooltip — same glyph as
+        // the main panel's group-tooltip icon, sized for a table <th>.
+        var TH_TIP_SVG = '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.3" stroke="currentColor" stroke-width="1.3"/><line x1="8" y1="7.1" x2="8" y2="11.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="4.9" r="0.45" stroke="currentColor" stroke-width="0.9"/></svg>';
+
+        function thWithTip(label, tip) {
+            return '<span>' + label + '<span class="wo-th-tip" data-th-tip="' + tip.replace(/"/g, '&quot;') + '">' + TH_TIP_SVG + '</span></span>';
+        }
 
         function moveButtonsHtml(isFirst, isLast, upTitle, dnTitle) {
             upTitle = upTitle || 'Move up';
@@ -6360,9 +6383,9 @@
                         };
                         var delBtn = document.createElement('button');
                         delBtn.type = 'button';
-                        delBtn.textContent = '✕';
+                        delBtn.innerHTML = TRASH_SVG;
                         delBtn.className = 'wo-btn-ghost wo-kebab-item-danger';
-                        delBtn.style.cssText = 'font-size:12px;flex-shrink:0;padding:3px 7px;';
+                        delBtn.style.cssText = 'flex-shrink:0;padding:3px 7px;';
                         attachTooltip(delBtn, 'Delete row');
                         delBtn.onclick = function() {
                             group.fieldRows.splice(ri, 1);
@@ -6471,7 +6494,9 @@
 
         // ── SCAN TAB ──
         function scanTab() {
-            content.innerHTML = '<div style="margin-bottom:10px;font-size:11px;">WO Tab ID: <input type="text" data-wt value="' + scan.woTabId + '"> <span style="color:var(--wo-muted);">(tab returned to after scan)</span></div>';
+            content.innerHTML = '<div style="margin-bottom:10px;font-size:11px;">WO Tab ID: <input type="text" data-wt value="' + scan.woTabId + '"> <span style="color:var(--wo-muted);">(tab returned to after scan)</span>' +
+                '<div style="margin-top:8px;font-weight:700;color:var(--wo-text);">Scan Order</div>' +
+                '</div>';
             content.querySelector('[data-wt]').oninput = function(e) {
                 scan.woTabId = e.target.value;
             };
@@ -6486,7 +6511,7 @@
                     '<div data-coll-header class="wo-card-head">' +
                     DRAG_HANDLE_HTML +
                     titleHtml +
-                    moveButtonsHtml(idx === 0, idx === scan.scans.length - 1, 'Move up — runs earlier', 'Move down — runs later') +
+                    moveButtonsHtml(idx === 0, idx === scan.scans.length - 1) +
                     '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
                     '<button data-kebab type="button" class="wo-kebab-btn" aria-label="Scan target actions" aria-haspopup="true">' +
                     '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="3" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="13" r="0.7" stroke="currentColor" stroke-width="1.4"/></svg>' +
@@ -6494,8 +6519,12 @@
                     '</span>' +
                     '</div>' +
                     '<div data-coll-body style="margin-top:7px;">' +
-                    '<div style="margin-bottom:6px;font-size:11px;">Type: <select data-ty><option value="tab" ' + (s.type === 'tab' ? 'selected' : '') + '>Tab</option><option value="dialog" ' + (s.type === 'dialog' ? 'selected' : '') + '>Dialog</option></select></div>' +
-                    '<div style="margin-bottom:6px;font-size:11px;">Tab ID / Event: <input type="text" data-id value="' + (s.tabId || s.eventType || '').replace(/"/g, '&quot;') + '"><br>Wait for text: <input type="text" data-w value="' + String(s.waitFor).replace(/"/g, '&quot;') + '"> Wait for table: <input type="text" data-wtb value="' + (s.waitTable || '').replace(/"/g, '&quot;') + '"></div>' +
+                    '<div style="margin-bottom:8px;font-size:11px;">Type: <select data-ty><option value="tab" ' + (s.type === 'tab' ? 'selected' : '') + '>Tab</option><option value="dialog" ' + (s.type === 'dialog' ? 'selected' : '') + '>Dialog</option></select></div>' +
+                    '<div style="margin-bottom:4px;"><label style="color:var(--wo-muted);font-size:10px;">Tab ID / Event</label><br><input type="text" data-id value="' + (s.tabId || s.eventType || '').replace(/"/g, '&quot;') + '" style="width:100%;margin-top:2px;"></div>' +
+                    '<div style="display:flex;gap:10px;margin-bottom:8px;">' +
+                    '<div style="flex:1;min-width:0;"><label style="color:var(--wo-muted);font-size:10px;">Wait for text</label><br><input type="text" data-w value="' + String(s.waitFor).replace(/"/g, '&quot;') + '" style="width:100%;margin-top:2px;"></div>' +
+                    '<div style="flex:1;min-width:0;"><label style="color:var(--wo-muted);font-size:10px;">Wait for table</label><br><input type="text" data-wtb value="' + (s.waitTable || '').replace(/"/g, '&quot;') + '" style="width:100%;margin-top:2px;"></div>' +
+                    '</div>' +
                     '<div style="margin-bottom:2px;color:var(--wo-muted);font-size:10px;">Condition (formula, true = scan this):</div>' +
                     formulaBox(s, 'condition') +
                     '</div>';
@@ -6506,8 +6535,8 @@
                 rdfWrap.style.cssText = 'margin-top:9px;';
                 rdfWrap.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><b style="color:var(--wo-accent);font-size:11px;">Row Detail Fields</b> ' +
                     '<span style="color:var(--wo-muted);font-size:10px;">(fields inside expanded row panels)</span>' +
-                    '<button id="__rdf_add_' + idx + '" type="button" class="wo-btn-ghost" style="margin-left:auto;font-size:12px;padding:3px 7px;">+</button></div>' +
-                    '<div id="__rdf_list_' + idx + '" style="margin-top:6px;"></div>';
+                    '<button id="__rdf_add_' + idx + '" type="button" class="wo-btn-ghost" style="margin-left:auto;font-size:15px;line-height:1;padding:4px 10px;">+</button></div>' +
+                    '<div id="__rdf_list_' + idx + '" style="margin-top:6px;overflow-x:auto;"></div>';
                 box.querySelector('[data-coll-body]').appendChild(rdfWrap);
                 attachTooltip(rdfWrap.querySelector('#__rdf_add_' + idx), 'Add field');
                 // ── Actions editor ──
@@ -6516,29 +6545,41 @@
                 actWrap.style.cssText = 'margin-top:9px;';
                 actWrap.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><b style="color:var(--wo-pass);font-size:11px;">Post-Scan Actions</b> ' +
                     '<span style="color:var(--wo-muted);font-size:10px;">(fill fields after this tab is scanned)</span>' +
-                    '<button id="__act_add_' + idx + '" type="button" class="wo-btn-ghost" style="margin-left:auto;font-size:12px;padding:3px 7px;">+</button></div>' +
-                    '<div id="__act_list_' + idx + '" style="margin-top:6px;"></div>';
+                    '<button id="__act_add_' + idx + '" type="button" class="wo-btn-ghost" style="margin-left:auto;font-size:15px;line-height:1;padding:4px 10px;">+</button></div>' +
+                    '<div id="__act_list_' + idx + '" style="margin-top:6px;overflow-x:auto;"></div>';
                 box.querySelector('[data-coll-body]').appendChild(actWrap);
                 attachTooltip(actWrap.querySelector('#__act_add_' + idx), 'Add action');
 
 
                 function renderActList() {
                     var actList = actWrap.querySelector('#__act_list_' + idx);
-                    actList.innerHTML = '';
-                    (s.actions || []).forEach(function(act, ai) {
-                        var row = document.createElement('div');
-                        row.style.cssText = 'display:flex;gap:4px;align-items:flex-start;margin-bottom:6px;flex-wrap:wrap;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:4px;background:var(--wo-field);';
-                        row.innerHTML =
-                            '<div style="flex:1;min-width:140px;"><div style="color:var(--wo-muted);font-size:10px;">Field Element ID</div>' +
-                            '<input type="text" data-act-id value="' + (act.fieldId || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;" placeholder="e.g. m12345678-tb"></div>' +
-                            '<div style="flex:2;min-width:160px;"><div style="color:var(--wo-muted);font-size:10px;">Value Expression (e.g. V(\'v_core\') or F(\'...\'))</div>' +
-                            '<input type="text" data-act-val value="' + (act.value || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;"></div>' +
-                            '<div style="flex:2;min-width:160px;"><div style="color:var(--wo-muted);font-size:10px;">Condition (optional — blank = always run)</div>' +
-                            '<input type="text" data-act-cond value="' + (act.condition || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;"></div>' +
-                            '<div style="display:flex;flex-direction:column;justify-content:center;">' +
-                            '<button data-act-del type="button" class="wo-btn-ghost wo-kebab-item-danger" style="font-size:12px;padding:3px 7px;">✕</button>' +
-                            '</div>';
-                        actList.appendChild(row);
+                    var rows = s.actions || [];
+                    if (!rows.length) {
+                        actList.innerHTML = '<div style="color:var(--wo-muted);font-size:11px;padding:2px 0;">No actions yet.</div>';
+                        return;
+                    }
+                    var html = '<table class="wo-edit-table"><thead><tr>' +
+                        '<th style="width:24%;">' + thWithTip('Field Element ID', 'The Maximo element ID of the field to fill, e.g. m12345678-tb') + '</th>' +
+                        '<th style="width:36%;">' + thWithTip('Value Expression', "What to put in the field — a variable (V('v_core')) or a formula (F('...'))") + '</th>' +
+                        '<th>' + thWithTip('Condition', 'Optional formula — leave blank to always run this action') + '</th>' +
+                        '<th class="wo-edit-table-del"></th>' +
+                        '</tr></thead><tbody>' +
+                        rows.map(function(act) {
+                            return '<tr>' +
+                                '<td><input type="text" data-act-id value="' + (act.fieldId || '').replace(/"/g, '&quot;') + '" placeholder="e.g. m12345678-tb"></td>' +
+                                '<td><input type="text" data-act-val value="' + (act.value || '').replace(/"/g, '&quot;') + '"></td>' +
+                                '<td><input type="text" data-act-cond value="' + (act.condition || '').replace(/"/g, '&quot;') + '"></td>' +
+                                '<td class="wo-edit-table-del"><button data-act-del type="button" class="wo-btn-ghost wo-kebab-item-danger" style="padding:2px;">' + TRASH_SVG + '</button></td>' +
+                                '</tr>';
+                        }).join('') +
+                        '</tbody></table>';
+                    actList.innerHTML = html;
+                    actList.querySelectorAll('[data-th-tip]').forEach(function(el) {
+                        attachTooltip(el, el.getAttribute('data-th-tip'));
+                    });
+                    var trs = actList.querySelectorAll('tbody tr');
+                    rows.forEach(function(act, ai) {
+                        var row = trs[ai];
                         attachTooltip(row.querySelector('[data-act-del]'), 'Delete action');
                         row.querySelector('[data-act-id]').oninput = function(e) {
                             act.fieldId = e.target.value;
@@ -6569,27 +6610,38 @@
 
                 function renderRdfList() {
                     var rdfList = rdfWrap.querySelector('#__rdf_list_' + idx);
-                    rdfList.innerHTML = '';
-                    (s.rowDetailFields || []).forEach(function(rdf, ri) {
-                        var row = document.createElement('div');
-                        row.style.cssText = 'display:flex;gap:4px;align-items:flex-start;margin-bottom:6px;flex-wrap:wrap;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:4px;background:var(--wo-field);';
-                        row.innerHTML =
-                            '<div style="flex:1;min-width:120px;"><div style="color:var(--wo-muted);font-size:10px;">Column Name</div>' +
-                            '<input type="text" data-rdf-col value="' + (rdf.columnName || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;"></div>' +
-                            '<div style="flex:1;min-width:120px;"><div style="color:var(--wo-muted);font-size:10px;">Element ID</div>' +
-                            '<input type="text" data-rdf-id value="' + (rdf.elementId || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;"></div>' +
-                            '<div style="flex:1;min-width:120px;"><div style="color:var(--wo-muted);font-size:10px;">Table Prefix</div>' +
-                            '<input type="text" data-rdf-prefix value="' + (rdf.tablePrefix || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;"></div>' +
-                            '<div style="width:50px;"><div style="color:var(--wo-muted);font-size:10px;">Expand Col</div>' +
-                            '<input type="number" data-rdf-expcol value="' + (rdf.expandColIndex || 0) + '" style="width:100%;font-size:11px;"></div>' +
-                            '<div style="flex:2;min-width:180px;"><div style="color:var(--wo-muted);font-size:10px;">Collect Condition (formula, blank = always)</div>' +
-                            '<textarea data-rdf-cond class="wo-code" style="width:100%;height:48px;font-size:10px;">' + (rdf.collectCondition || '') + '</textarea></div>' +
-                            '<div style="display:flex;flex-direction:column;justify-content:center;">' +
-                            '<button data-rdf-del type="button" class="wo-btn-ghost wo-kebab-item-danger" style="font-size:12px;padding:3px 7px;">✕</button>' +
-                            '</div>';
-                        rdfList.appendChild(row);
+                    var rows = s.rowDetailFields || [];
+                    if (!rows.length) {
+                        rdfList.innerHTML = '<div style="color:var(--wo-muted);font-size:11px;padding:2px 0;">No fields yet.</div>';
+                        return;
+                    }
+                    var html = '<table class="wo-edit-table"><thead><tr>' +
+                        '<th style="width:20%;">' + thWithTip('Column Name', "The column header shown in this field's expanded row panel") + '</th>' +
+                        '<th style="width:20%;">' + thWithTip('Element ID', 'The Maximo element ID this field reads from') + '</th>' +
+                        '<th style="width:18%;">' + thWithTip('Table Prefix', 'The internal Maximo table prefix this field belongs to') + '</th>' +
+                        '<th style="width:12%;">' + thWithTip('Expand Col', 'Which column (0-based) triggers the row-expand action') + '</th>' +
+                        '<th>' + thWithTip('Collect Condition', 'Optional formula — leave blank to always collect this field') + '</th>' +
+                        '<th class="wo-edit-table-del"></th>' +
+                        '</tr></thead><tbody>' +
+                        rows.map(function(rdf) {
+                            return '<tr>' +
+                                '<td><input type="text" data-rdf-col value="' + (rdf.columnName || '').replace(/"/g, '&quot;') + '"></td>' +
+                                '<td><input type="text" data-rdf-id value="' + (rdf.elementId || '').replace(/"/g, '&quot;') + '"></td>' +
+                                '<td><input type="text" data-rdf-prefix value="' + (rdf.tablePrefix || '').replace(/"/g, '&quot;') + '"></td>' +
+                                '<td><input type="number" data-rdf-expcol value="' + (rdf.expandColIndex || 0) + '"></td>' +
+                                '<td><textarea data-rdf-cond class="wo-code" style="height:34px;font-size:10px;">' + (rdf.collectCondition || '') + '</textarea></td>' +
+                                '<td class="wo-edit-table-del"><button data-rdf-del type="button" class="wo-btn-ghost wo-kebab-item-danger" style="padding:2px;">' + TRASH_SVG + '</button></td>' +
+                                '</tr>';
+                        }).join('') +
+                        '</tbody></table>';
+                    rdfList.innerHTML = html;
+                    rdfList.querySelectorAll('[data-th-tip]').forEach(function(el) {
+                        attachTooltip(el, el.getAttribute('data-th-tip'));
+                    });
+                    var trs = rdfList.querySelectorAll('tbody tr');
+                    rows.forEach(function(rdf, ri) {
+                        var row = trs[ri];
                         attachTooltip(row.querySelector('[data-rdf-del]'), 'Delete field');
-
                         row.querySelector('[data-rdf-col]').oninput = function(e) {
                             rdf.columnName = e.target.value;
                         };
@@ -7194,6 +7246,11 @@
                 ids.forEach(function(id) {
                     var p = profiles[id];
                     var isActive = id === activeId;
+                    // Can't switch to the profile you're already on, and if
+                    // it's your only saved profile that's also true by
+                    // definition — check both explicitly rather than
+                    // relying on isActive alone matching correctly.
+                    var switchBlocked = isActive || onlyOne;
                     // Can't delete the active profile, and can't delete your last
                     // remaining one either way — disable clearly, don't just rely on
                     // the disabled attribute's default (subtle) look.
@@ -7204,10 +7261,10 @@
                     localHtml += '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px;border:1px solid ' + (isActive ? 'var(--wo-pass)' : 'var(--wo-border)') + ';border-radius:var(--wo-r-ctl);margin-bottom:6px;background:var(--wo-field);">' +
                         '<div style="font-size:11px;"><b>' + (p.name || id) + '</b>' + (isActive ? ' <span style="color:var(--wo-pass);font-size:10px;">(active)</span>' : '') +
                         '<br><span style="color:var(--wo-muted);font-size:10px;">' + (p.description || '') + '</span></div>' +
-                        '<div style="display:flex;gap:4px;flex-shrink:0;">' +
-                        '<button type="button" class="__pf_switch wo-btn" data-id="' + id + '" style="font-size:11px;padding:4px 9px;" ' + (isActive ? 'disabled' : '') + '>Switch</button>' +
-                        '<button type="button" class="__pf_delete wo-btn wo-kebab-item-danger" data-id="' + id + '" style="font-size:11px;padding:4px 9px;' + (deleteBlocked ? 'opacity:0.35;cursor:not-allowed;' : '') + '" ' +
-                        (deleteBlocked ? 'disabled title="Can\'t delete — ' + deleteReason + '"' : '') + '>Delete</button>' +
+                        '<div style="display:flex;gap:4px;flex-shrink:0;align-items:center;">' +
+                        '<button type="button" class="__pf_switch wo-btn" data-id="' + id + '" style="font-size:11px;padding:4px 9px;' + (switchBlocked ? 'opacity:0.35;cursor:not-allowed;' : '') + '" ' + (switchBlocked ? 'disabled' : '') + '>Switch</button>' +
+                        '<button type="button" class="__pf_delete wo-btn-ghost wo-kebab-item-danger" data-id="' + id + '" style="' + (deleteBlocked ? 'opacity:0.35;cursor:not-allowed;' : '') + '" ' +
+                        (deleteBlocked ? 'disabled title="Can\'t delete — ' + deleteReason + '"' : 'aria-label="Delete profile"') + '>' + TRASH_SVG + '</button>' +
                         '</div></div>';
                 });
             }
@@ -7232,6 +7289,7 @@
                 };
             });
             localDiv.querySelectorAll('.__pf_delete').forEach(function(btn) {
+                if (!btn.disabled) attachTooltip(btn, 'Delete profile');
                 btn.onclick = function() {
                     var id = btn.getAttribute('data-id');
                     if (!confirm('Delete profile "' + (profiles[id].name || id) + '"? This cannot be undone.')) return;
@@ -7294,10 +7352,10 @@
             // ── GitHub presets ──
             var ghDiv = document.createElement('div');
             ghDiv.className = 'wo-card';
-            ghDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Import Preset from GitHub</span></div>' +
+            ghDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Shared Presets</span></div>' +
                 '<div data-coll-body style="margin-top:7px;"><div id="__pf_gh_list" style="color:var(--wo-muted);font-size:11px;">Loading…</div></div>';
             content.appendChild(ghDiv);
-            makeCollapsible(ghDiv, 'Import Preset from GitHub', false);
+            makeCollapsible(ghDiv, 'Shared Presets', false);
 
             fetchProfileIndex().then(function(list) {
                 var listDiv = ghDiv.querySelector('#__pf_gh_list');
@@ -7318,10 +7376,10 @@
                         var already = !!profiles[id];
                         if (already) {
                             var isActive = getActiveProfileId() === id;
-                            var msg = 'Re-import "' + id + '" from GitHub?\n\n' +
+                            var msg = 'Re-import "' + id + '"?\n\n' +
                                 (isActive ?
-                                    'This is your currently active config — it will be overwritten with the GitHub version.' :
-                                    'Your locally saved "' + id + '" profile will be overwritten with the GitHub version.') +
+                                    'This is your currently active config — it will be overwritten with the latest shared version.' :
+                                    'Your locally saved "' + id + '" profile will be overwritten with the latest shared version.') +
                                 '\n\nWhatever it currently holds will be saved as a backup profile first, so nothing is lost — but any local edits you made under this profile stop being the "' + id + '" profile once this runs.';
                             if (!confirm(msg)) return;
                         }
