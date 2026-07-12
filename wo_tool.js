@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.22';
+    var TOOL_VERSION = '0.20.23';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -5017,6 +5017,9 @@
         // away entirely whenever the card is collapsed, which is the
         // default state. Same pattern as the tab display-mode menu below.
         var openRuleMenu = null;
+        // Set true for one tick right after a card drag reorders and
+        // re-renders — see the comment in makeCollapsible().
+        var cardJustDragged = false;
 
         function closeRuleMenu() {
             if (openRuleMenu) {
@@ -5037,6 +5040,13 @@
             var arrow = header.querySelector('[data-coll-arrow]');
             if (arrow) arrow.textContent = startCollapsed ? '▶' : '▼';
             header.addEventListener('click', function() {
+                // A completed card drag re-renders the whole tab, and the
+                // browser then synthesizes a click against whatever now
+                // sits under the cursor — which can be a freshly rendered
+                // header. cardJustDragged (set by attachCardDrag, cleared
+                // next tick) swallows that stray click so a drag can never
+                // also toggle collapse as a side effect.
+                if (cardJustDragged) return;
                 var hidden = body.style.display === 'none';
                 body.style.display = hidden ? '' : 'none';
                 if (arrow) arrow.textContent = hidden ? '▼' : '▶';
@@ -5080,6 +5090,109 @@
                 arr[idx] = tmp;
                 rerenderFn();
             };
+        }
+
+        // Click-and-drag reorder by card header, with the other cards
+        // visually sliding out of the way as the dragged card passes over
+        // them. `container` holds all the `.wo-card` siblings (plus
+        // whatever trailing "+ Add" button); `arr` is the live array whose
+        // order backs the cards, in the same order they appear in the DOM.
+        //
+        // Deliberately does NOT start capturing the pointer on mousedown —
+        // that would eat the mouseup that makeCollapsible's click handler
+        // needs to toggle the card. Instead this only arms once the cursor
+        // has moved a few pixels past mousedown, so a plain click still
+        // reaches makeCollapsible untouched, and a real drag never lets a
+        // click reach it at all (the capture overlay owns the mouseup).
+        function attachCardDrag(headerEl, cardEl, container, arr, idx, rerenderFn) {
+            // A data attribute, not the .wo-card class, marks which of
+            // container's children are reorderable cards — so this works
+            // for tabs (Variables, Scan) whose cards don't use .wo-card
+            // styling without side-effects like inheriting its overflow:hidden.
+            cardEl.setAttribute('data-reorder-card', '');
+            headerEl.addEventListener('mousedown', function(downEvent) {
+                if (downEvent.button !== 0) return;
+                if (downEvent.target.closest('.wo-kebab-wrap,.wo-move-wrap,.wo-vis-btn,.wo-rule-title-input')) return;
+                var startX = downEvent.clientX;
+                var startY = downEvent.clientY;
+
+                function onEarlyMove(mv) {
+                    var dx = mv.clientX - startX;
+                    var dy = mv.clientY - startY;
+                    if ((dx * dx + dy * dy) < 25) return; // ~5px threshold
+                    document.removeEventListener('mousemove', onEarlyMove);
+                    document.removeEventListener('mouseup', onEarlyUp);
+                    beginDrag(startY);
+                }
+
+                function onEarlyUp() {
+                    document.removeEventListener('mousemove', onEarlyMove);
+                    document.removeEventListener('mouseup', onEarlyUp);
+                }
+                document.addEventListener('mousemove', onEarlyMove);
+                document.addEventListener('mouseup', onEarlyUp);
+            });
+
+            function beginDrag(startY) {
+                var cards = Array.prototype.filter.call(container.children, function(el) {
+                    return el.hasAttribute && el.hasAttribute('data-reorder-card');
+                });
+                var draggedRect = cardEl.getBoundingClientRect();
+                var draggedHeight = draggedRect.height;
+                var origRects = cards.map(function(c) {
+                    return c.getBoundingClientRect();
+                });
+                var targetIdx = idx;
+
+                cardEl.style.position = 'relative';
+                cardEl.style.zIndex = '10';
+                cardEl.style.boxShadow = '0 6px 18px rgba(0,0,0,0.45)';
+                cards.forEach(function(c, i) {
+                    if (i !== idx) c.style.transition = 'transform 150ms ease';
+                });
+
+                function applyShift(newTargetIdx) {
+                    targetIdx = newTargetIdx;
+                    cards.forEach(function(c, i) {
+                        if (i === idx) return;
+                        var shift = 0;
+                        if (idx < targetIdx && i > idx && i <= targetIdx) shift = -draggedHeight;
+                        else if (idx > targetIdx && i >= targetIdx && i < idx) shift = draggedHeight;
+                        c.style.transform = shift ? 'translateY(' + shift + 'px)' : '';
+                    });
+                }
+
+                startPointerCapture(function(mv) {
+                    var dy = mv.clientY - startY;
+                    cardEl.style.transform = 'translateY(' + dy + 'px)';
+                    var draggedCenter = draggedRect.top + draggedRect.height / 2 + dy;
+                    var newTarget = idx;
+                    for (var i = 0; i < cards.length; i++) {
+                        if (i === idx) continue;
+                        var center = origRects[i].top + origRects[i].height / 2;
+                        if (i < idx && draggedCenter < center) newTarget = Math.min(newTarget, i);
+                        if (i > idx && draggedCenter > center) newTarget = Math.max(newTarget, i);
+                    }
+                    if (newTarget !== targetIdx) applyShift(newTarget);
+                }, function() {
+                    cards.forEach(function(c) {
+                        c.style.transition = '';
+                        c.style.transform = '';
+                        c.style.position = '';
+                        c.style.zIndex = '';
+                        c.style.boxShadow = '';
+                    });
+                    if (targetIdx !== idx) {
+                        var moved = arr.splice(idx, 1)[0];
+                        arr.splice(targetIdx, 0, moved);
+                    }
+                    cardJustDragged = true;
+                    setTimeout(function() {
+                        cardJustDragged = false;
+                    }, 0);
+                    rerenderFn();
+                }, 'grabbing');
+            }
         }
 
         // Torn down both on an explicit Close/Save and, defensively, if a
@@ -5197,6 +5310,10 @@
                     varsTab();
                 };
                 wireMoveButtons(box, vars, idx, function() {
+                    saveVars(vars);
+                    varsTab();
+                });
+                attachCardDrag(box.querySelector('[data-coll-header]'), box, content, vars, idx, function() {
                     saveVars(vars);
                     varsTab();
                 });
@@ -5377,6 +5494,7 @@
                 msgWrap.appendChild(msgSection(rule, 'warn', '⚠ Warn — needs reviewer confirmation', '#d29922', true));
 
                 wireMoveButtons(box, cfg.rules, idx, rulesTab);
+                attachCardDrag(box.querySelector('[data-coll-header]'), box, content, cfg.rules, idx, rulesTab);
 
                 var fa = box.querySelector('[data-f]');
                 var titleInput = box.querySelector('[data-l]');
@@ -5659,6 +5777,19 @@
                         swapOrder(idx, idx + 1);
                     };
                 })();
+
+                // attachCardDrag splices orderedGrps in place before calling
+                // this callback, so reading it back out here to build the
+                // new gs.__order picks up the already-reordered result.
+                attachCardDrag(box.querySelector('[data-coll-header]'), box, content, orderedGrps, idx, function() {
+                    var ids = orderedGrps.map(function(g) {
+                        return g.id;
+                    });
+                    var g2 = getGS();
+                    g2.__order = ids;
+                    saveGS(g2);
+                    groupsTab();
+                });
 
                 var titleInput = box.querySelector('[data-ti]');
                 if (titleInput) {
@@ -6140,6 +6271,7 @@
                     scanTab();
                 };
                 wireMoveButtons(box, scan.scans, idx, scanTab);
+                attachCardDrag(box.querySelector('[data-coll-header]'), box, content, scan.scans, idx, scanTab);
             });
             var b = document.createElement('button');
             b.textContent = '+ Add Scan Target';

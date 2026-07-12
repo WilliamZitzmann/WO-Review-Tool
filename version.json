@@ -1,10 +1,19 @@
 {
-  "latest": "0.20.22",
+  "latest": "0.20.23",
   "channels": {
-    "stable": "0.20.22",
-    "beta": "0.20.22"
+    "stable": "0.20.23",
+    "beta": "0.20.23"
   },
   "versions": [
+    {
+      "version": "0.20.23",
+      "changes": [
+        "Rules, Groups, Variables, and Scan cards can now be reordered by clicking and dragging their header - other cards visually slide out of the way by the exact height of the card you're dragging (expanded or collapsed), snapping into the new order on release",
+        "A plain click on a card header still just expands/collapses it as before - dragging is only armed once the mouse has moved a few pixels, so the two gestures never fight each other or misfire into one another",
+        "The reorder drag survives the mouse crossing over Maximo's own page content underneath the Setup window, using the same pointer-capture technique already used for dragging/resizing the Setup window itself",
+        "Groups tab dragging updates the same shared order the main panel's group tiles use, so both stay in sync"
+      ]
+    },
     {
       "version": "0.20.22",
       "changes": [
