@@ -1,10 +1,18 @@
 {
-  "latest": "0.20.26",
+  "latest": "0.20.27",
   "channels": {
-    "stable": "0.20.26",
-    "beta": "0.20.26"
+    "stable": "0.20.27",
+    "beta": "0.20.27"
   },
   "versions": [
+    {
+      "version": "0.20.27",
+      "changes": [
+        "Main panel's group tiles now use the same click-and-drag reorder engine as Setup's Rules/Groups/Variables/Scan tabs, with other tiles visually collapsing and sliding out of the way, instead of the old native drag-and-drop's plain border-highlight",
+        "Profiles, Settings, and Update tabs restyled to match the dark card theme used everywhere else in Setup - every section is now a collapsible card with the same header/button/input/dropdown styling instead of old hardcoded grey boxes and colors",
+        "Renamed the \"Update\" tab to \"Install\" - it's a manual paste-and-install tool for the raw script, which was easy to confuse with the automatic channel/version updater in the Settings tab's own \"Updates\" section; a note now also explains the distinction on that tab"
+      ]
+    },
     {
       "version": "0.20.26",
       "changes": [

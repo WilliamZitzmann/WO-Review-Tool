@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.26';
+    var TOOL_VERSION = '0.20.27';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -2707,6 +2707,142 @@
     }
     var panel, bodyEl, footerAreaEl, statusEl, summaryEl, updateScrollShadows = function() {};
 
+    // Shared with openSetup()'s own (identical) copy of these three, used
+    // by the Setup modal's Rules/Groups/Variables/Scan card drag-reorder.
+    // Duplicated here rather than hoisted out of openSetup() so the main
+    // panel's group tiles (built by render(), which exists independently
+    // of whether Setup has ever been opened) can use the same click-and-
+    // drag reorder engine, with other tiles visually collapsing to
+    // header-only height and sliding out of the way while dragging —
+    // instead of the plain native-HTML5-drag-and-drop border highlight
+    // this used to have.
+    var cardJustDragged = false;
+
+    function startPointerCapture(onMove, onUp, cursor) {
+        var overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;cursor:' + (cursor || 'default') + ';';
+        document.body.appendChild(overlay);
+
+        function move(e) {
+            onMove(e);
+        }
+
+        function up(e) {
+            overlay.removeEventListener('mousemove', move);
+            overlay.removeEventListener('mouseup', up);
+            overlay.removeEventListener('mouseleave', up);
+            overlay.remove();
+            if (onUp) onUp(e);
+        }
+        overlay.addEventListener('mousemove', move);
+        overlay.addEventListener('mouseup', up);
+        overlay.addEventListener('mouseleave', up);
+    }
+
+    // Click-and-drag reorder by card header. `container` holds all the
+    // reorderable siblings (marked via data-reorder-card, set below);
+    // `arr` is the live array whose order backs the cards, in the same
+    // order they appear in the DOM. See the identical copy inside
+    // openSetup() for the full design rationale (threshold-gated arming,
+    // header-only collapse-during-drag, cursor-jump compensation).
+    function attachCardDrag(headerEl, cardEl, container, arr, idx, rerenderFn) {
+        cardEl.setAttribute('data-reorder-card', '');
+        headerEl.addEventListener('mousedown', function(downEvent) {
+            if (downEvent.button !== 0) return;
+            if (downEvent.target.closest('.wo-kebab-wrap,.wo-move-wrap,.wo-vis-btn,.wo-rule-title-input')) return;
+            var startX = downEvent.clientX;
+            var startY = downEvent.clientY;
+
+            function onEarlyMove(mv) {
+                var dx = mv.clientX - startX;
+                var dy = mv.clientY - startY;
+                if ((dx * dx + dy * dy) < 25) return; // ~5px threshold
+                document.removeEventListener('mousemove', onEarlyMove);
+                document.removeEventListener('mouseup', onEarlyUp);
+                beginDrag(startY);
+            }
+
+            function onEarlyUp() {
+                document.removeEventListener('mousemove', onEarlyMove);
+                document.removeEventListener('mouseup', onEarlyUp);
+            }
+            document.addEventListener('mousemove', onEarlyMove);
+            document.addEventListener('mouseup', onEarlyUp);
+        });
+
+        function beginDrag(startY) {
+            var cards = Array.prototype.filter.call(container.children, function(el) {
+                return el.hasAttribute && el.hasAttribute('data-reorder-card');
+            });
+            var preCollapseRect = cardEl.getBoundingClientRect();
+
+            cards.forEach(function(c, i) {
+                if (i === idx) return;
+                var body = c.querySelector('[data-coll-body]');
+                if (body) body.style.display = 'none';
+            });
+            var draggedBody = cardEl.querySelector('[data-coll-body]');
+            if (draggedBody) draggedBody.style.display = 'none';
+
+            var draggedRect = cardEl.getBoundingClientRect();
+            var collapseShift = draggedRect.top - preCollapseRect.top;
+            var headerShiftAmount = draggedRect.height;
+            var origRects = cards.map(function(c) {
+                return c.getBoundingClientRect();
+            });
+            var targetIdx = idx;
+
+            cardEl.style.position = 'relative';
+            cardEl.style.zIndex = '10';
+            cardEl.style.boxShadow = '0 6px 18px rgba(0,0,0,0.45)';
+            cards.forEach(function(c, i) {
+                if (i !== idx) c.style.transition = 'transform 150ms ease';
+            });
+
+            function applyShift(newTargetIdx) {
+                targetIdx = newTargetIdx;
+                cards.forEach(function(c, i) {
+                    if (i === idx) return;
+                    var shift = 0;
+                    if (idx < targetIdx && i > idx && i <= targetIdx) shift = -headerShiftAmount;
+                    else if (idx > targetIdx && i >= targetIdx && i < idx) shift = headerShiftAmount;
+                    c.style.transform = shift ? 'translateY(' + shift + 'px)' : '';
+                });
+            }
+
+            startPointerCapture(function(mv) {
+                var dy = (mv.clientY - startY) - collapseShift;
+                cardEl.style.transform = 'translateY(' + dy + 'px)';
+                var draggedCenter = draggedRect.top + draggedRect.height / 2 + dy;
+                var newTarget = idx;
+                for (var i = 0; i < cards.length; i++) {
+                    if (i === idx) continue;
+                    var center = origRects[i].top + origRects[i].height / 2;
+                    if (i < idx && draggedCenter < center) newTarget = Math.min(newTarget, i);
+                    if (i > idx && draggedCenter > center) newTarget = Math.max(newTarget, i);
+                }
+                if (newTarget !== targetIdx) applyShift(newTarget);
+            }, function() {
+                cards.forEach(function(c) {
+                    c.style.transition = '';
+                    c.style.transform = '';
+                    c.style.position = '';
+                    c.style.zIndex = '';
+                    c.style.boxShadow = '';
+                });
+                if (targetIdx !== idx) {
+                    var moved = arr.splice(idx, 1)[0];
+                    arr.splice(targetIdx, 0, moved);
+                }
+                cardJustDragged = true;
+                setTimeout(function() {
+                    cardJustDragged = false;
+                }, 0);
+                rerenderFn();
+            }, 'grabbing');
+        }
+    }
+
     function setStatus(t) {
         if (statusEl) statusEl.textContent = t;
     }
@@ -3493,10 +3629,18 @@
                 (res.value !== null ? String(res.value) : ''); // stringify for display only
         });
 
-        orderedGroups(cfg).forEach(function(group) {
+        // Filtered to visible groups (and captured as its own array) before
+        // the loop, rather than an early-return inside a plain forEach —
+        // attachCardDrag's drag-and-shift math needs a stable idx matching
+        // each tile's actual position among the tiles that get rendered,
+        // which a skip-hidden-groups early return can't give it.
+        var visibleGroups = orderedGroups(cfg).filter(function(g) {
+            var st2 = gs[g.id] || {};
+            return st2.visible !== false;
+        });
+        visibleGroups.forEach(function(group, groupIdx) {
             var varById = {};
             var st = gs[group.id] || {};
-            if (st.visible === false) return;
             var collapsed = st.hasOwnProperty('collapsed') ? st.collapsed : !!group.defaultCollapsed;
             var tile = document.createElement('div');
             tile.setAttribute('data-gid', group.id);
@@ -3745,7 +3889,7 @@
                     headerMsgHtml = '<span class="wo-header-msg" style="color:' + hmColor + ';">' + String(hmText).replace(/</g, '&lt;') + '</span>';
                 }
             }
-            tile.innerHTML = '<div class="__wo_th" role="button" tabindex="0" draggable="true" aria-expanded="' + (!collapsed) + '" aria-label="Toggle ' + String(group.title).replace(/"/g, '&quot;') + ' details">' +
+            tile.innerHTML = '<div class="__wo_th" role="button" tabindex="0" aria-expanded="' + (!collapsed) + '" aria-label="Toggle ' + String(group.title).replace(/"/g, '&quot;') + ' details">' +
                 '<span class="wo-th-title"><b>' + String(group.title).replace(/</g, '&lt;') + '</b></span>' +
                 headerMsgHtml +
                 '<span class="wo-th-actions">' + badgeHtml +
@@ -3758,8 +3902,9 @@
                 '</svg></button>' +
                 '</span>' +
                 '</span>' +
-                '</div>' + bannerHtml +
-                '<div class="__wo_tb">' + rulesHtml + bodyHtml + '</div>';
+                '</div>' +
+                '<div data-coll-body>' + bannerHtml +
+                '<div class="__wo_tb">' + rulesHtml + bodyHtml + '</div></div>';
 
             bodyEl.appendChild(tile);
 
@@ -3814,12 +3959,8 @@
                 saveGS(g2);
                 render();
             };
-            var headerJustDragged = false;
             head.addEventListener('click', function(e) {
-                if (headerJustDragged) {
-                    headerJustDragged = false;
-                    return;
-                }
+                if (cardJustDragged) return;
                 if (e.target.closest('.__wo_tx') || e.target.closest('.__wo_tip_icon')) return;
                 toggleGroupCollapse();
             });
@@ -3830,37 +3971,34 @@
                     toggleGroupCollapse();
                 }
             });
-            head.addEventListener('dragstart', function(e) {
-                headerJustDragged = true;
-                e.dataTransfer.setData('text/plain', group.id);
-            });
-            head.addEventListener('dragend', function() {
-                setTimeout(function() {
-                    headerJustDragged = false;
-                }, 0);
-            });
-            tile.addEventListener('dragover', function(e) {
-                e.preventDefault();
-                tile.style.borderColor = '#58a6ff';
-            });
-            tile.addEventListener('dragleave', function() {
-                tile.style.borderColor = '';
-            });
-            tile.addEventListener('drop', function(e) {
-                e.preventDefault();
-                tile.style.borderColor = '';
-                var dragged = e.dataTransfer.getData('text/plain');
-                if (!dragged || dragged === group.id) return;
-                var cfg2 = getCfg(),
-                    ids = orderedGroups(cfg2).map(function(g) {
-                        return g.id;
-                    });
-                var from = ids.indexOf(dragged),
-                    to = ids.indexOf(group.id);
-                ids.splice(from, 1);
-                ids.splice(to, 0, dragged);
+            // Same click-and-drag reorder engine used throughout Setup
+            // (attachCardDrag/startPointerCapture, hoisted to this outer
+            // scope so both this render() and openSetup() can share it) —
+            // other tiles visually collapse to header-only height and slide
+            // out of the way while dragging, instead of the old native
+            // HTML5 drag-and-drop's plain border-highlight-on-dragover.
+            // `visibleGroups` only contains tiles that actually got
+            // rendered (hidden groups never had a tile to drag in the
+            // first place), so the merge below has to fold its new order
+            // back into gs.__order without disturbing hidden groups'
+            // relative positions.
+            attachCardDrag(head, tile, bodyEl, visibleGroups, groupIdx, function() {
+                var newVisibleIds = visibleGroups.map(function(g) {
+                    return g.id;
+                });
+                var visibleIdSet = {};
+                newVisibleIds.forEach(function(id) {
+                    visibleIdSet[id] = true;
+                });
+                var fullOrder = orderedGroups(cfg).map(function(g) {
+                    return g.id;
+                });
+                var queue = newVisibleIds.slice();
+                var merged = fullOrder.map(function(id) {
+                    return visibleIdSet[id] ? queue.shift() : id;
+                });
                 var g2 = getGS();
-                g2.__order = ids;
+                g2.__order = merged;
                 saveGS(g2);
                 render();
             });
@@ -4389,6 +4527,7 @@
             "#__wo_setup_modal .wo-btn:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
             "#__wo_setup_modal .wo-btn-primary{background:var(--wo-accent);color:var(--wo-on-accent);border-color:var(--wo-accent);}" +
             "#__wo_setup_modal .wo-btn-danger{color:var(--wo-fail);border-color:var(--wo-fail);}" +
+            "#__wo_setup_modal .wo-btn-pass{background:var(--wo-pass);color:#04210c;border-color:var(--wo-pass);}" +
             "#__wo_setup_modal .wo-btn-ghost{background:none;border:1px solid transparent;color:var(--wo-muted);cursor:pointer;font:inherit;font-size:11px;padding:6px 8px;border-radius:var(--wo-r-ctl);}" +
             "#__wo_setup_modal .wo-btn-ghost:hover{color:var(--wo-text);background:var(--wo-field);}" +
             "#__wo_setup_modal input[type=text],#__wo_setup_modal input[type=number],#__wo_setup_modal textarea,#__wo_setup_modal select{font:inherit;font-size:11.5px;background:var(--wo-field);color:var(--wo-text);border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:5px 7px;}" +
@@ -4569,7 +4708,7 @@
             tabBtn('__s_scan', 'scan', 'Scan') +
             tabBtn('__s_profiles', 'profiles', 'Profiles') +
             tabBtn('__s_settings', 'settings', 'Settings') +
-            tabBtn('__s_update', 'update', 'Update') +
+            tabBtn('__s_update', 'update', 'Install') +
             '</div>' +
             '<div class="wo-tab-group wo-tab-group-end">' +
             tabBtn('__s_guide', 'guide', 'Guide', 'wo-tab-btn-ghost') +
@@ -6609,33 +6748,33 @@
             // per-rule return-message config now lives inline in the Rules tab
             // (see msgSection()'s "Include in return message" control).
             var qrDiv = document.createElement('div');
-            qrDiv.style.cssText = 'border:1px solid #333;border-radius:6px;margin-bottom:10px;';
+            qrDiv.className = 'wo-card';
             qrDiv.innerHTML =
-                '<div data-coll-header style="display:flex;align-items:center;gap:6px;padding:8px 10px;">' +
-                '<span data-coll-arrow style="font-size:10px;color:#aaa;min-width:10px;">▶</span>' +
-                '<b>Quick Return Message</b>' +
-                '</div>' +
-                '<div data-coll-body style="padding:0 10px 10px;">' +
-                '<div style="margin-top:6px;"><label style="color:#aaa;font-size:11px;">Prefix (e.g. Hi {name},)</label><br>' +
-                '<input id="__st_prefix" type="text" value="' + (st.msgPrefix || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;margin-top:2px;"></div>' +
-                '<div style="margin-top:6px;"><label style="color:#aaa;font-size:11px;">Suffix / Signature (e.g. - wz)</label><br>' +
-                '<input id="__st_suffix" type="text" value="' + (st.msgSuffix || '').replace(/"/g, '&quot;') + '" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;margin-top:2px;"></div>' +
-                '<div style="margin-top:6px;"><label style="color:#aaa;font-size:11px;">Delimiter between messages (default: space + period)</label><br>' +
-                '<input id="__st_delim" type="text" value="' + (st.msgDelim !== undefined ? st.msgDelim : '. ').replace(/"/g, '&quot;') + '" style="width:80px;background:#222;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;margin-top:2px;"></div>' +
-                '<div style="margin-top:8px;color:#666;font-size:10px;">Per-rule "include in return message" settings have moved to each rule\'s Fail/Warn section in the Rules tab.</div>' +
+                '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Quick Return Message</span></div>' +
+                '<div data-coll-body style="margin-top:7px;">' +
+                '<div style="margin-bottom:6px;"><label style="color:var(--wo-muted);font-size:11px;">Prefix (e.g. Hi {name},)</label><br>' +
+                '<input id="__st_prefix" type="text" value="' + (st.msgPrefix || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;margin-top:2px;"></div>' +
+                '<div style="margin-bottom:6px;"><label style="color:var(--wo-muted);font-size:11px;">Suffix / Signature (e.g. - wz)</label><br>' +
+                '<input id="__st_suffix" type="text" value="' + (st.msgSuffix || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;margin-top:2px;"></div>' +
+                '<div style="margin-bottom:6px;"><label style="color:var(--wo-muted);font-size:11px;">Delimiter between messages (default: space + period)</label><br>' +
+                '<input id="__st_delim" type="text" value="' + (st.msgDelim !== undefined ? st.msgDelim : '. ').replace(/"/g, '&quot;') + '" style="width:80px;font-size:11px;margin-top:2px;"></div>' +
+                '<div style="margin-top:8px;color:var(--wo-muted);font-size:10px;">Per-rule "include in return message" settings have moved to each rule\'s Fail/Warn section in the Rules tab.</div>' +
                 '</div>';
             content.appendChild(qrDiv);
             makeCollapsible(qrDiv, 'Quick Return Message');
 
             // Scan hotkey
             var hkDiv = document.createElement('div');
-            hkDiv.style.cssText = 'border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:10px;';
+            hkDiv.className = 'wo-card';
             var hkCurrent = (st.rescanHotkey !== undefined) ? st.rescanHotkey : DEFAULT_HOTKEY;
-            hkDiv.innerHTML = '<b>Scan Hotkey</b><br>' +
-                '<div style="margin-top:6px;color:#aaa;font-size:11px;">Current: <b id="__st_hk_display" style="color:#ff8;">' + (hkCurrent || 'not set') + '</b></div>' +
-                '<div style="margin-top:4px;"><input id="__st_hk_input" type="text" readonly placeholder="Click here, then press your key combo..." style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:3px 5px;border-radius:3px;font-size:11px;cursor:pointer;">' +
-                ' <button id="__st_hk_clear">Clear</button></div>';
+            hkDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Scan Hotkey</span></div>' +
+                '<div data-coll-body style="margin-top:7px;">' +
+                '<div style="color:var(--wo-muted);font-size:11px;">Current: <b id="__st_hk_display" style="color:var(--wo-accent);">' + (hkCurrent || 'not set') + '</b></div>' +
+                '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;"><input id="__st_hk_input" type="text" readonly placeholder="Click here, then press your key combo..." style="flex:1;font-size:11px;cursor:pointer;">' +
+                '<button id="__st_hk_clear" type="button" class="wo-btn-ghost">Clear</button></div>' +
+                '</div>';
             content.appendChild(hkDiv);
+            makeCollapsible(hkDiv, 'Scan Hotkey', false);
 
             var hkInput = hkDiv.querySelector('#__st_hk_input');
             var hkDisplay = hkDiv.querySelector('#__st_hk_display');
@@ -6663,16 +6802,17 @@
 
             // ── Auto-Scan on New WO ──
             var autoScanDiv = document.createElement('div');
-            autoScanDiv.style.cssText = 'border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:10px;';
-            autoScanDiv.innerHTML = '<b>Auto-Scan</b>' +
-                '<div style="margin-top:8px;">' +
+            autoScanDiv.className = 'wo-card';
+            autoScanDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Auto-Scan</span></div>' +
+                '<div data-coll-body style="margin-top:7px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_autoscan" ' + (st.autoScan ? 'checked' : '') + '>' +
-                '<span style="color:#aaa;font-size:11px;">Auto-scan when a new Work Order is opened</span>' +
+                '<span style="color:var(--wo-text);font-size:11px;">Auto-scan when a new Work Order is opened</span>' +
                 '</label>' +
-                '<div style="color:#555;font-size:10px;margin-top:4px;">Compares the current WO number on the page to the last scanned WO. If different, a scan starts automatically.</div>' +
+                '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;">Compares the current WO number on the page to the last scanned WO. If different, a scan starts automatically.</div>' +
                 '</div>';
             content.appendChild(autoScanDiv);
+            makeCollapsible(autoScanDiv, 'Auto-Scan', false);
 
             autoScanDiv.querySelector('#__st_autoscan').onchange = function(e) {
                 st.autoScan = e.target.checked;
@@ -6681,16 +6821,17 @@
 
             // ── Display ──
             var displayDiv = document.createElement('div');
-            displayDiv.style.cssText = 'border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:10px;';
-            displayDiv.innerHTML = '<b>Display</b>' +
-                '<div style="margin-top:8px;">' +
+            displayDiv.className = 'wo-card';
+            displayDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Display</span></div>' +
+                '<div data-coll-body style="margin-top:7px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_hide_summary" ' + (st.hideSummaryBar ? '' : 'checked') + '>' +
-                '<span style="color:#aaa;font-size:11px;">Show pass/fail/warn/error counts under the status line</span>' +
+                '<span style="color:var(--wo-text);font-size:11px;">Show pass/fail/warn/error counts under the status line</span>' +
                 '</label>' +
-                '<div style="color:#555;font-size:10px;margin-top:4px;">A quick at-a-glance summary across every rule, useful since scrolling can hide most groups from view at once.</div>' +
+                '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;">A quick at-a-glance summary across every rule, useful since scrolling can hide most groups from view at once.</div>' +
                 '</div>';
             content.appendChild(displayDiv);
+            makeCollapsible(displayDiv, 'Display', false);
 
             displayDiv.querySelector('#__st_hide_summary').onchange = function(e) {
                 st.hideSummaryBar = !e.target.checked;
@@ -6703,9 +6844,11 @@
             // Debug button (dev tier only — moved from panel)
             if (devTier === 'dev') {
                 var dbgDiv = document.createElement('div');
-                dbgDiv.style.cssText = 'border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:10px;';
-                dbgDiv.innerHTML = '<b>Debug</b><br><button id="__st_debug" style="margin-top:6px;">Run Debug Dump (check DevTools console)</button>';
+                dbgDiv.className = 'wo-card';
+                dbgDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Debug</span></div>' +
+                    '<div data-coll-body style="margin-top:7px;"><button id="__st_debug" type="button" class="wo-btn">Run Debug Dump (check DevTools console)</button></div>';
                 content.appendChild(dbgDiv);
+                makeCollapsible(dbgDiv, 'Debug', false);
                 dbgDiv.querySelector('#__st_debug').onclick = function() {
                     window.__woDebugTables();
                     window.__woDebugCache();
@@ -6737,27 +6880,30 @@
 
             // ── Auto-Backup section ──
             var backupSettDiv = document.createElement('div');
-            backupSettDiv.style.cssText = 'border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:10px;';
+            backupSettDiv.className = 'wo-card';
             var fsaSupported = typeof window.showSaveFilePicker !== 'undefined';
-            backupSettDiv.innerHTML = '<b>Auto-Backup</b>' +
-                '<div style="margin-top:4px;color:#555;font-size:10px;">' +
+            backupSettDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Auto-Backup</span></div>' +
+                '<div data-coll-body style="margin-top:7px;">' +
+                '<div style="color:var(--wo-muted);font-size:10px;">' +
                 (fsaSupported ? 'File System Access supported (Chrome/Edge)' : '⚠ Not supported in this browser — use manual Export/Import instead') +
                 '</div>' +
                 '<div style="margin-top:8px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_autobackup" ' + (st.autoBackup ? 'checked' : '') + '>' +
-                '<span style="color:#aaa;font-size:11px;">Auto-save config backup on changes</span>' +
+                '<span style="color:var(--wo-text);font-size:11px;">Auto-save config backup on changes</span>' +
                 '</label></div>' +
                 '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">' +
-                '<button id="__st_set_new_backup" style="background:#2980b9;color:#fff;border:none;padding:4px 10px;cursor:pointer;border-radius:4px;font-size:11px;">Set New Backup Location</button>' +
-                '<button id="__st_link_backup" style="background:#555;color:#fff;border:none;padding:4px 10px;cursor:pointer;border-radius:4px;font-size:11px;">Link Existing Backup</button>' +
+                '<button id="__st_set_new_backup" type="button" class="wo-btn" style="font-size:11px;">Set New Backup Location</button>' +
+                '<button id="__st_link_backup" type="button" class="wo-btn" style="font-size:11px;">Link Existing Backup</button>' +
                 '</div>' +
                 '<div style="margin-top:8px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_backup_prompt_reset" ' + (!st.backupPromptDismissed ? 'checked' : '') + '>' +
-                '<span style="color:#aaa;font-size:11px;">Show backup setup prompt if not configured</span>' +
-                '</label></div>';
+                '<span style="color:var(--wo-text);font-size:11px;">Show backup setup prompt if not configured</span>' +
+                '</label></div>' +
+                '</div>';
             content.appendChild(backupSettDiv);
+            makeCollapsible(backupSettDiv, 'Auto-Backup', false);
 
             backupSettDiv.querySelector('#__st_autobackup').onchange = function(e) {
                 st.autoBackup = e.target.checked;
@@ -6782,48 +6928,52 @@
             // ── Updates section — channel + version pin available to everyone;
             // beta/dev channel options and beta/dev-tagged pins need the console unlock. ──
             var updSettDiv = document.createElement('div');
-            updSettDiv.style.cssText = 'border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:10px;';
+            updSettDiv.className = 'wo-card';
             var chOptions = ['stable'];
             if (devTier === 'beta' || devTier === 'dev') chOptions.push('beta');
             if (devTier === 'dev') chOptions.push('dev');
             var curChannel = st.channel || 'stable';
             if (chOptions.indexOf(curChannel) === -1) curChannel = 'stable';
-            updSettDiv.innerHTML = '<b>Updates</b>' +
-                (devTier ? ' <span style="color:#7ec8e3;font-size:10px;">(' + devTier + ' mode unlocked)</span>' : '') +
-                '<div style="margin-top:8px;">' +
-                '<label style="color:#aaa;font-size:11px;">Channel:</label><br>' +
-                '<select id="__st_channel" style="background:#222;color:#eee;border:1px solid #444;padding:3px 6px;border-radius:3px;font-size:11px;margin-top:2px;">' +
+            updSettDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Updates' +
+                (devTier ? ' <span style="color:var(--wo-accent);font-weight:400;font-size:10px;">(' + devTier + ' mode unlocked)</span>' : '') +
+                '</span></div>' +
+                '<div data-coll-body style="margin-top:7px;">' +
+                '<div>' +
+                '<label style="color:var(--wo-muted);font-size:11px;">Channel:</label><br>' +
+                '<select id="__st_channel" style="margin-top:2px;">' +
                 chOptions.map(function(c) {
                     return '<option value="' + c + '"' + (c === curChannel ? ' selected' : '') + '>' + c + '</option>';
                 }).join('') +
                 '</select>' +
                 '</div>' +
                 '<div style="margin-top:8px;">' +
-                '<label style="color:#aaa;font-size:11px;">Version:</label><br>' +
-                '<select id="__st_pin" style="width:100%;background:#222;color:#eee;border:1px solid #444;padding:3px 6px;border-radius:3px;font-size:11px;margin-top:2px;"><option value="">— latest on channel —</option></select>' +
+                '<label style="color:var(--wo-muted);font-size:11px;">Version:</label><br>' +
+                '<select id="__st_pin" style="width:100%;margin-top:2px;"><option value="">— latest on channel —</option></select>' +
                 '</div>' +
                 '<div style="margin-top:10px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_upd_disable" ' + (st.updateDisabled ? 'checked' : '') + '>' +
-                '<span style="color:#aaa;font-size:11px;">Disable update check on launch</span>' +
+                '<span style="color:var(--wo-text);font-size:11px;">Disable update check on launch</span>' +
                 '</label></div>' +
                 '<div style="margin-top:6px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_upd_auto_patch" ' + (st.autoUpdatePatch !== false ? 'checked' : '') + '>' +
-                '<span style="color:#aaa;font-size:11px;">Auto-install patch fixes silently (same X.Y line — bug fixes only, on by default)</span>' +
+                '<span style="color:var(--wo-text);font-size:11px;">Auto-install patch fixes silently (same X.Y line — bug fixes only, on by default)</span>' +
                 '</label></div>' +
                 '<div style="margin-top:6px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_upd_auto" ' + (st.autoUpdate ? 'checked' : '') + '>' +
-                '<span style="color:#aaa;font-size:11px;">Also auto-install minor/major updates silently (new features, behavior changes — off by default)</span>' +
+                '<span style="color:var(--wo-text);font-size:11px;">Also auto-install minor/major updates silently (new features, behavior changes — off by default)</span>' +
                 '</label></div>' +
                 '<div style="margin-top:8px;">' +
-                '<button id="__st_check_now" style="background:#2c2c2c;color:#eee;border:1px solid #444;padding:4px 10px;cursor:pointer;border-radius:4px;font-size:11px;">Check for Updates Now</button>' +
+                '<button id="__st_check_now" type="button" class="wo-btn">Check for Updates Now</button>' +
                 '</div>' +
                 (devTier ?
-                    '<div style="margin-top:8px;color:#555;font-size:10px;">window.__woLockDev() in the console re-hides beta/dev options and resets to stable.</div>' :
-                    '');
+                    '<div style="margin-top:8px;color:var(--wo-muted);font-size:10px;">window.__woLockDev() in the console re-hides beta/dev options and resets to stable.</div>' :
+                    '') +
+                '</div>';
             content.appendChild(updSettDiv);
+            makeCollapsible(updSettDiv, 'Updates', false);
 
             updSettDiv.querySelector('#__st_channel').onchange = function(e) {
                 // Stage only — e.stopPropagation() keeps this from also
@@ -6920,15 +7070,16 @@
         function updateTab() {
             content.innerHTML = '';
             var div = document.createElement('div');
-            div.style.cssText = 'display:flex;flex-direction:column;height:100%;gap:6px;';
-            div.innerHTML = '<div style="color:#aaa;font-size:11px;">Paste or load the full tool script, then click Install.</div>' +
+            div.className = 'wo-card';
+            div.style.cssText = 'display:flex;flex-direction:column;height:100%;gap:8px;padding:10px;';
+            div.innerHTML = '<div style="color:var(--wo-muted);font-size:11px;">Paste or load the full tool script, then click Install. This is a manual, offline install path — separate from the automatic channel/version updater in the Settings tab.</div>' +
                 '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
-                '<button id="__upd_load" style="background:#2980b9;color:#fff;border:none;padding:4px 10px;cursor:pointer;border-radius:4px;">Load Saved Code</button>' +
-                '<label style="background:#555;color:#fff;padding:4px 10px;cursor:pointer;border-radius:4px;font-size:12px;">Open File… <input type="file" id="__upd_file" accept=".js,.txt,text/javascript,text/plain" style="display:none;"></label>' +
-                '<button id="__upd_save_file" style="background:#555;color:#fff;border:none;padding:4px 10px;cursor:pointer;border-radius:4px;">Save to File…</button>' +
+                '<button id="__upd_load" type="button" class="wo-btn wo-btn-primary">Load Saved Code</button>' +
+                '<label class="wo-btn" style="cursor:pointer;">Open File… <input type="file" id="__upd_file" accept=".js,.txt,text/javascript,text/plain" style="display:none;"></label>' +
+                '<button id="__upd_save_file" type="button" class="wo-btn">Save to File…</button>' +
                 '</div>' +
-                '<textarea id="__upd_ta" style="flex:1;width:100%;min-height:300px;background:#000;color:#0f0;font-family:monospace;font-size:12px;border:1px solid #333;padding:6px;box-sizing:border-box;" placeholder="Paste or open a .js file..."></textarea>' +
-                '<div><button id="__upd_go" style="padding:6px 16px;background:#2ecc71;color:#000;font-weight:bold;border:none;cursor:pointer;border-radius:4px;">Install</button> <span id="__upd_status" style="color:#fff;margin-left:10px;font-size:12px;"></span></div>';
+                '<textarea id="__upd_ta" class="wo-code" style="flex:1;width:100%;min-height:300px;" placeholder="Paste or open a .js file..."></textarea>' +
+                '<div><button id="__upd_go" type="button" class="wo-btn wo-btn-pass">Install</button> <span id="__upd_status" style="color:var(--wo-text);margin-left:10px;font-size:12px;"></span></div>';
             content.appendChild(div);
 
             var ta = content.querySelector('#__upd_ta');
@@ -6989,7 +7140,7 @@
                 try {
                     new Function(code);
                 } catch (e) {
-                    updStatusEl.style.color = '#f55';
+                    updStatusEl.style.color = 'var(--wo-fail)';
                     updStatusEl.textContent = 'SYNTAX ERROR: ' + e.message;
                     return;
                 }
@@ -7003,7 +7154,7 @@
                         localStorage.setItem('__wo_settings', JSON.stringify(pinSt));
                     }
                     localStorage.setItem('__wo_tool_src', code);
-                    updStatusEl.style.color = '#2ecc71';
+                    updStatusEl.style.color = 'var(--wo-pass)';
                     updStatusEl.textContent = 'Saved. Reloading...';
                     setTimeout(function() {
                         modal.remove();
@@ -7013,7 +7164,7 @@
 
 
                 } catch (e) {
-                    updStatusEl.style.color = '#f55';
+                    updStatusEl.style.color = 'var(--wo-fail)';
                     updStatusEl.textContent = 'Save failed: ' + e.message;
                 }
             };
@@ -7032,11 +7183,12 @@
 
             // ── Local profiles ──
             var localDiv = document.createElement('div');
-            localDiv.style.cssText = 'border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:10px;';
-            var localHtml = '<b>Local Profiles</b><div style="margin-top:8px;">';
+            localDiv.className = 'wo-card';
+            var localHtml = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Local Profiles</span></div>' +
+                '<div data-coll-body style="margin-top:7px;">';
             var ids = Object.keys(profiles);
             if (!ids.length) {
-                localHtml += '<div style="color:#888;">No saved profiles yet — save the current config as one below, or import a preset.</div>';
+                localHtml += '<div style="color:var(--wo-muted);font-size:11px;">No saved profiles yet — save the current config as one below, or import a preset.</div>';
             } else {
                 var onlyOne = ids.length === 1;
                 ids.forEach(function(id) {
@@ -7049,23 +7201,25 @@
                     var deleteReason = isActive ?
                         'Switch to another profile first' :
                         'This is your only saved profile';
-                    localHtml += '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px;border:1px solid ' + (isActive ? '#2ecc71' : '#333') + ';border-radius:4px;margin-bottom:6px;">' +
-                        '<div><b>' + (p.name || id) + '</b>' + (isActive ? ' <span style="color:#2ecc71;font-size:10px;">(active)</span>' : '') +
-                        '<br><span style="color:#888;font-size:10px;">' + (p.description || '') + '</span></div>' +
-                        '<div style="display:flex;gap:4px;">' +
-                        '<button class="__pf_switch" data-id="' + id + '" style="font-size:11px;" ' + (isActive ? 'disabled' : '') + '>Switch</button>' +
-                        '<button class="__pf_delete" data-id="' + id + '" style="font-size:11px;background:#5a2020;color:#fff;' + (deleteBlocked ? 'opacity:0.35;cursor:not-allowed;' : '') + '" ' +
+                    localHtml += '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px;border:1px solid ' + (isActive ? 'var(--wo-pass)' : 'var(--wo-border)') + ';border-radius:var(--wo-r-ctl);margin-bottom:6px;background:var(--wo-field);">' +
+                        '<div style="font-size:11px;"><b>' + (p.name || id) + '</b>' + (isActive ? ' <span style="color:var(--wo-pass);font-size:10px;">(active)</span>' : '') +
+                        '<br><span style="color:var(--wo-muted);font-size:10px;">' + (p.description || '') + '</span></div>' +
+                        '<div style="display:flex;gap:4px;flex-shrink:0;">' +
+                        '<button type="button" class="__pf_switch wo-btn" data-id="' + id + '" style="font-size:11px;padding:4px 9px;" ' + (isActive ? 'disabled' : '') + '>Switch</button>' +
+                        '<button type="button" class="__pf_delete wo-btn wo-kebab-item-danger" data-id="' + id + '" style="font-size:11px;padding:4px 9px;' + (deleteBlocked ? 'opacity:0.35;cursor:not-allowed;' : '') + '" ' +
                         (deleteBlocked ? 'disabled title="Can\'t delete — ' + deleteReason + '"' : '') + '>Delete</button>' +
                         '</div></div>';
                 });
             }
             localHtml += '</div>' +
                 '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">' +
-                '<button id="__pf_save_new" style="background:#2980b9;color:#fff;border:none;padding:4px 10px;cursor:pointer;border-radius:4px;font-size:11px;">Save Current As New Profile</button>' +
-                '<button id="__pf_blank" style="background:#555;color:#fff;border:none;padding:4px 10px;cursor:pointer;border-radius:4px;font-size:11px;">Start Blank Profile</button>' +
+                '<button id="__pf_save_new" type="button" class="wo-btn wo-btn-primary" style="font-size:11px;">Save Current As New Profile</button>' +
+                '<button id="__pf_blank" type="button" class="wo-btn" style="font-size:11px;">Start Blank Profile</button>' +
+                '</div>' +
                 '</div>';
             localDiv.innerHTML = localHtml;
             content.appendChild(localDiv);
+            makeCollapsible(localDiv, 'Local Profiles', false);
 
             localDiv.querySelectorAll('.__pf_switch').forEach(function(btn) {
                 btn.onclick = function() {
@@ -7139,21 +7293,23 @@
 
             // ── GitHub presets ──
             var ghDiv = document.createElement('div');
-            ghDiv.style.cssText = 'border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:10px;';
-            ghDiv.innerHTML = '<b>Import Preset from GitHub</b><div id="__pf_gh_list" style="margin-top:8px;color:#888;">Loading…</div>';
+            ghDiv.className = 'wo-card';
+            ghDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Import Preset from GitHub</span></div>' +
+                '<div data-coll-body style="margin-top:7px;"><div id="__pf_gh_list" style="color:var(--wo-muted);font-size:11px;">Loading…</div></div>';
             content.appendChild(ghDiv);
+            makeCollapsible(ghDiv, 'Import Preset from GitHub', false);
 
             fetchProfileIndex().then(function(list) {
                 var listDiv = ghDiv.querySelector('#__pf_gh_list');
                 if (!list || !list.length) {
-                    listDiv.innerHTML = '<div style="color:#e74c3c;">Could not load presets (offline?).</div>';
+                    listDiv.innerHTML = '<div style="color:var(--wo-fail);font-size:11px;">Could not load presets (offline?).</div>';
                     return;
                 }
                 listDiv.innerHTML = list.map(function(p) {
                     var already = !!profiles[p.id];
-                    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px;border:1px solid #333;border-radius:4px;margin-bottom:6px;">' +
-                        '<div><b>' + p.name + '</b><br><span style="color:#888;font-size:10px;">' + (p.description || '') + '</span></div>' +
-                        '<button class="__pf_import" data-id="' + p.id + '" style="font-size:11px;">' + (already ? 'Re-import &amp; Switch' : 'Import &amp; Switch') + '</button>' +
+                    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);margin-bottom:6px;background:var(--wo-field);">' +
+                        '<div style="font-size:11px;"><b>' + p.name + '</b><br><span style="color:var(--wo-muted);font-size:10px;">' + (p.description || '') + '</span></div>' +
+                        '<button type="button" class="__pf_import wo-btn" data-id="' + p.id + '" style="font-size:11px;padding:4px 9px;">' + (already ? 'Re-import &amp; Switch' : 'Import &amp; Switch') + '</button>' +
                         '</div>';
                 }).join('');
                 listDiv.querySelectorAll('.__pf_import').forEach(function(btn) {
