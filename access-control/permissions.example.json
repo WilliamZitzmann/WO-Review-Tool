@@ -1,0 +1,50 @@
+{
+  "_comment": "TEMPLATE ONLY. The real file must NOT live in this public repo — it belongs only in the private repo the Worker reads from (see access-control/README.md). Every condition's 'field' must be one of the canonical whoami fields loader.js sends: username, email, country, insertSite, langcode, displayName.",
+
+  "maximoHosts": [
+    {
+      "hostname": "masws.manage.mas.apps.rhos.abbvienet.com",
+      "url": "https://masws.manage.mas.apps.rhos.abbvienet.com/maximo/oslc/graphite/manage-shell/index.html#/main"
+    }
+  ],
+
+  "override": [
+    { "username": "KIMX", "tier": "user" }
+  ],
+
+  "blacklist": [
+    [
+      { "field": "username", "op": "eq", "value": "JAMESXW" }
+    ],
+    [
+      { "field": "country", "op": "neq", "value": "IE" },
+      { "field": "insertSite", "op": "neq", "value": "AVWP" }
+    ]
+  ],
+
+  "allow": [
+    {
+      "tier": "user",
+      "conditions": [
+        { "field": "insertSite", "op": "eq", "value": "AVWP" }
+      ]
+    },
+    {
+      "tier": "user",
+      "conditions": [
+        { "field": "email", "op": "endsWith", "value": "@abbvie.com" }
+      ]
+    },
+    {
+      "tier": "user",
+      "conditions": [
+        { "field": "country", "op": "eq", "value": "IE" }
+      ]
+    }
+  ],
+
+  "tiers": {
+    "dev": ["ZITZMWX"],
+    "beta": []
+  }
+}

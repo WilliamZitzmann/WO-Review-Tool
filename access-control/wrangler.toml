@@ -1,0 +1,13 @@
+name = "wo-review-tool-access"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+GITHUB_OWNER = "WilliamZitzmann"
+GITHUB_REPO = "WO-Review-Tool-Private"
+GITHUB_BRANCH = "main"
+
+# Secrets are NOT set here — set them with:
+#   wrangler secret put GITHUB_PAT
+#   wrangler secret put TOKEN_SECRET
+# See README.md for the full deploy walkthrough.
