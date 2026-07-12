@@ -1,10 +1,18 @@
 {
-  "latest": "0.20.33",
+  "latest": "0.20.34",
   "channels": {
-    "stable": "0.20.33",
-    "beta": "0.20.33"
+    "stable": "0.20.34",
+    "beta": "0.20.34"
   },
   "versions": [
+    {
+      "version": "0.20.34",
+      "name": "Config Version Control",
+      "changes": [
+        "Config version control is now actually wired up - configVersion was stored on every profile but never read; there's now a real migration mechanism (CURRENT_CONFIG_VERSION + a version-keyed migration table) that runs on every profile load/import and stamps the result. No migrations exist yet since only one config shape has ever shipped, but the plumbing is live",
+        "version.json entries can now carry an optional display name shown alongside the version number in the update banner and the version picker dropdown"
+      ]
+    },
     {
       "version": "0.20.33",
       "changes": [

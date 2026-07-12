@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.33';
+    var TOOL_VERSION = '0.20.34';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -1058,6 +1058,38 @@
     // needs its own profile-settings key.
     var PROFILE_SETTINGS_KEYS = ['msgPrefix', 'msgSuffix', 'msgDelim', 'autoScan'];
 
+    // ── Config version control ──
+    // configVersion has existed on every profile since it was added, but
+    // nothing ever read it — it was a number that got carried around and
+    // never compared against anything. Only shape 1 has ever shipped, so
+    // there's nothing to migrate FROM yet; this establishes the mechanism
+    // (a version-keyed table of migration steps, run in order, stamping the
+    // result) so the day a real breaking change ships, there's already a
+    // place to put it instead of another silent shape-sniff like
+    // normalizeCfg()'s legacy-rule-shape detection.
+    var CURRENT_CONFIG_VERSION = 1;
+
+    // Keyed by the version a migration step upgrades FROM. Add an entry
+    // here (and bump CURRENT_CONFIG_VERSION) the next time a profile's
+    // on-disk shape needs a real breaking change.
+    var CONFIG_MIGRATIONS = {};
+
+    // Runs any migrations needed to bring a profile blob up to
+    // CURRENT_CONFIG_VERSION, in order, and stamps the result. No-ops today
+    // (CONFIG_MIGRATIONS is empty) but every profile passes through this
+    // before being applied, so it's live infrastructure, not a stub.
+    function migrateProfile(p) {
+        if (!p) return p;
+        var v = p.configVersion || 1;
+        while (v < CURRENT_CONFIG_VERSION && CONFIG_MIGRATIONS[v]) {
+            p = CONFIG_MIGRATIONS[v](p);
+            v++;
+            setStatus('Config migrated to v' + v + '.');
+        }
+        p.configVersion = CURRENT_CONFIG_VERSION;
+        return p;
+    }
+
     function getProfiles() {
         try {
             return JSON.parse(localStorage.getItem(PROFILES_KEY) || '{}');
@@ -1106,6 +1138,7 @@
     // version, auto-update/backup prefs, hotkey) is never touched by a profile.
     function applyProfile(p) {
         if (!p) return;
+        p = migrateProfile(p);
         if (p.rules) {
             // Normalize using THIS profile's own legacy ruleReturnCfg (if any),
             // not whatever's currently in live __wo_settings — otherwise
@@ -1153,7 +1186,7 @@
     // switching to it.
     function registerProfile(p) {
         var profiles = getProfiles();
-        profiles[p.id] = p;
+        profiles[p.id] = migrateProfile(p);
         saveProfiles(profiles);
     }
 
@@ -1815,6 +1848,7 @@
         var changelogHtml = relevantVersions.map(function(v) {
             return '<div style="margin-bottom:6px;">' +
                 '<span style="color:var(--wo-pass);font-weight:700;">v' + v.version + '</span>' +
+                (v.name ? ' <span style="color:var(--wo-muted);font-weight:400;">— ' + v.name + '</span>' : '') +
                 '<ul style="margin:2px 0 0 16px;padding:0 0 0 16px;color:var(--wo-muted);list-style:disc;">' +
                 (v.changes || []).map(function(c) {
                     return '<li>' + c + '</li>';
@@ -7336,7 +7370,8 @@
                     // every exact patch underneath for the "the newest patch
                     // broke something, freeze at the previous one" rollback case.
                     var lines = [],
-                        byLine = {};
+                        byLine = {},
+                        nameByVersion = {};
                     (remoteV.versions || []).forEach(function(v) {
                         var isPre = isPrerelease(v.version);
                         if (isPre && devTier !== 'beta' && devTier !== 'dev') return; // beta/dev builds stay hidden
@@ -7346,6 +7381,7 @@
                             lines.push(key);
                         }
                         byLine[key].push(v.version);
+                        if (v.name) nameByVersion[v.version] = v.name;
                     });
                     // Flat list, not <optgroup> — an optgroup's own label
                     // isn't selectable, which fought the "auto-patch is the
@@ -7363,7 +7399,7 @@
                         byLine[key].forEach(function(vstr) {
                             var opt = document.createElement('option');
                             opt.value = vstr;
-                            opt.textContent = '    ' + vstr;
+                            opt.textContent = '    ' + vstr + (nameByVersion[vstr] ? ' — ' + nameByVersion[vstr] : '');
                             if (st.pinnedVersion === vstr) opt.selected = true;
                             pinSel.appendChild(opt);
                         });
