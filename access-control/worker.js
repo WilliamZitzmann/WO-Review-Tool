@@ -18,8 +18,14 @@
  *                          /bootstrap said were required). Evaluates
  *                          override -> blacklist -> allow -> deny and
  *                          returns { granted, tier, token? }.
- *   GET  /tool?token=...  — redeems a short-lived signed token and proxies
- *                          the real wo_tool.js from the private repo.
+ *   GET  /tool?token=...&version=X.Y.Z (version optional)
+ *                        — redeems a short-lived signed token and proxies
+ *                          wo_tool.js from the private repo. With no
+ *                          version, serves whatever GITHUB_BRANCH currently
+ *                          holds; with one, serves that exact "vX.Y.Z" tag
+ *                          (the private repo needs the same tags pushed to
+ *                          it as the public repo, for every release, so
+ *                          version pinning/rollback keeps working).
  *
  * Required secrets (wrangler secret put ...):
  *   GITHUB_PAT     — fine-grained PAT, read-only, Contents:read on the
@@ -49,8 +55,13 @@ function json(data, status) {
 }
 
 // ── GitHub private-repo fetch (server-side only — the PAT never reaches the client) ──
-async function fetchPrivateFile(env, path) {
-    const url = `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/contents/${path}?ref=${env.GITHUB_BRANCH}`;
+// `ref` defaults to the configured branch (used for permissions.json, and
+// for wo_tool.js on the "dev channel"/unpinned case) — passing a specific
+// tag (e.g. "v0.20.34") serves an exact pinned release instead, mirroring
+// the public repo's existing tag-per-version convention. The private repo
+// needs the same tags pushed to it for this to resolve.
+async function fetchPrivateFile(env, path, ref) {
+    const url = `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/contents/${path}?ref=${ref || env.GITHUB_BRANCH}`;
     const res = await fetch(url, {
         headers: {
             'Authorization': `Bearer ${env.GITHUB_PAT}`,
@@ -58,7 +69,7 @@ async function fetchPrivateFile(env, path) {
             'User-Agent': 'wo-review-tool-worker',
         },
     });
-    if (!res.ok) throw new Error(`GitHub fetch failed for ${path}: HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`GitHub fetch failed for ${path}${ref ? '@' + ref : ''}: HTTP ${res.status}`);
     return res.text();
 }
 
@@ -224,7 +235,13 @@ async function handleGetTool(request, env) {
     if (!data) {
         return new Response('Access token invalid or expired.', { status: 403, headers: corsHeaders() });
     }
-    var src = await fetchPrivateFile(env, 'wo_tool.js');
+    // No version = whatever the default branch currently holds (the
+    // "dev channel"/unpinned case). A version requests that exact tagged
+    // release instead — the private repo needs the matching "vX.Y.Z" tag
+    // pushed to it, same as the public repo already does on every release.
+    var version = url.searchParams.get('version');
+    var ref = version ? 'v' + version.replace(/^v/, '') : null;
+    var src = await fetchPrivateFile(env, 'wo_tool.js', ref);
     return new Response(src, {
         status: 200,
         headers: Object.assign({ 'Content-Type': 'application/javascript; charset=utf-8' }, corsHeaders()),

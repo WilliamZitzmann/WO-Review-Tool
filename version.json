@@ -1,10 +1,19 @@
 {
-  "latest": "0.20.34",
+  "latest": "0.20.35",
   "channels": {
-    "stable": "0.20.34",
-    "beta": "0.20.34"
+    "stable": "0.20.35",
+    "beta": "0.20.35"
   },
   "versions": [
+    {
+      "version": "0.20.35",
+      "name": "Access-Controlled Updates",
+      "changes": [
+        "The tool's own self-update mechanism (checking for and installing new versions, and the dev-channel tracker) now goes through the access-control Worker instead of fetching directly from a public URL - every update re-validates access, not just the bookmarklet's first load. A revoked user's already-running tool can no longer just keep self-updating forever with no check.",
+        "If a self-update check comes back as a confirmed access revoke (not just a network hiccup), the tool now tears itself down and clears its local config on the spot, instead of silently continuing to run.",
+        "Version pinning, channel selection, and the changelog banner all still work exactly as before - only where the actual source comes from changed."
+      ]
+    },
     {
       "version": "0.20.34",
       "name": "Config Version Control",

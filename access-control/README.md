@@ -92,6 +92,22 @@ Set `WORKER_BASE_URL` at the top of `loader.js` to your deployed Worker URL, com
 
 Once you've verified the new flow end-to-end (a real login on the real Maximo instance, not just curl), you can stop pushing `wo_tool.js` updates to the public repo and rely on the private one exclusively. Existing users' bookmarklets don't need to change — `bookmarklet.js` (the actual thing pasted into a browser bookmark) now just fetches `loader.js`, and that's the piece doing the domain-check/access-check/token dance before ever touching `wo_tool.js`.
 
+## Releasing a new version — what's different now
+
+`wo_tool.js`'s own self-update mechanism (the in-tool "check for updates" / "install update" flow, not just the bookmarklet's first load) now also goes through this Worker — it re-runs the same whoami/access-check dance and fetches the new source via `/tool`, instead of pulling straight from a public raw URL like it used to. That closes the gap where a revoked user's already-running tool could just keep self-updating forever with no access check. The consequence: **every release now needs tagging in *both* repos, not just the public one.**
+
+Per release, in addition to whatever you already do in the public repo:
+```
+cd path/to/WO-Review-Tool-Private
+cp path/to/wo_tool.js .
+git add wo_tool.js && git commit -m "vX.Y.Z"
+git tag vX.Y.Z
+git push origin main && git push origin vX.Y.Z
+```
+Skipping this means anyone pinned to an exact version, or anyone whose auto-patch install tries to fetch that tag, gets a clear `GitHub fetch failed for wo_tool.js@vX.Y.Z: HTTP 404` from the Worker instead of the update — the currently-running tool keeps working either way (it never overwrites itself until the new source downloads successfully), it just won't update until the tag exists.
+
+The "dev channel" (unpinned tip-of-branch) doesn't need a tag at all — it always reads whatever `GITHUB_BRANCH` (`main` by default) currently holds in the private repo, same as before.
+
 ## Rotating things later
 
 - **PAT expired/compromised**: revoke it on GitHub, generate a new one, `wrangler secret put GITHUB_PAT` again, no redeploy needed (secrets update live).

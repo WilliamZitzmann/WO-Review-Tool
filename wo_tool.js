@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.34';
+    var TOOL_VERSION = '0.20.35';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -1617,6 +1617,133 @@
     // Stored outside __wo_settings so it never rides along in a shared/exported backup.
     var DEV_UNLOCK_KEY = '__wo_dev_unlock';
     var REPO_RAW_BASE = 'https://raw.githubusercontent.com/WilliamZitzmann/WO-Review-Tool';
+    // Same Worker loader.js talks to for the bookmarklet's first load — the
+    // tool's own source now lives in a private repo the Worker gates, so
+    // every self-update fetch has to go through here too. Without this,
+    // once someone had ANY copy running, its own "check for updates" flow
+    // would keep pulling fresh versions straight from a public URL forever,
+    // with no access check at all — the private-repo gating would only
+    // ever have covered the very first install.
+    var WORKER_BASE_URL = 'https://wo-review-tool-access.williamzitzmann.workers.dev';
+
+    function xhrGetText(url) {
+        return new Promise(function(resolve, reject) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', url, true);
+            xhr.onload = function() {
+                if (xhr.status === 200) resolve(xhr.responseText);
+                else reject(new Error('HTTP ' + xhr.status));
+            };
+            xhr.onerror = function() {
+                reject(new Error('network error'));
+            };
+            xhr.send();
+        });
+    }
+
+    function xhrPostJSON(url, body) {
+        return new Promise(function(resolve, reject) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', url, true);
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    try {
+                        resolve(JSON.parse(xhr.responseText));
+                    } catch (e) {
+                        reject(e);
+                    }
+                } else {
+                    reject(new Error('HTTP ' + xhr.status));
+                }
+            };
+            xhr.onerror = function() {
+                reject(new Error('network error'));
+            };
+            xhr.send(JSON.stringify(body));
+        });
+    }
+
+    // Same whoami-field mapping as loader.js's readWhoami() — duplicated
+    // rather than shared since this file and loader.js are fetched/run
+    // completely independently of each other.
+    function readWhoamiCanonical() {
+        return xhrGetText('/maximo/oslc/whoami').then(function(text) {
+            var d = JSON.parse(text);
+            return {
+                username: d.loginID || d.userName || d.personId || d.personid || '',
+                email: d.email || d.primaryemail || '',
+                country: d.country || '',
+                insertSite: d.insertSite || d.defaultSite || '',
+                langcode: d.langcode || '',
+                displayName: d.displayName || d.displayname || ''
+            };
+        });
+    }
+
+    // Clears the tool + its config on a confirmed revoke — deliberately
+    // leaves IndexedDB (the linked backup-file handle) untouched, same
+    // policy as loader.js, so a config file link survives a revoke.
+    function revokeAccessLocally() {
+        Object.keys(localStorage).filter(function(k) {
+            return k.indexOf('__wo_') === 0;
+        }).forEach(function(k) {
+            localStorage.removeItem(k);
+        });
+        var setupModal = document.getElementById('__wo_setup_modal');
+        if (setupModal) setupModal.remove();
+        var installerModal = document.getElementById('__wo_installer_modal');
+        if (installerModal) installerModal.remove();
+        teardown();
+        var banner = document.createElement('div');
+        banner.style.cssText = 'position:fixed;top:10px;right:10px;z-index:2147483647;background:#2c2c2c;color:#e74c3c;padding:10px 16px;border-radius:6px;font-family:Arial,sans-serif;font-size:13px;max-width:320px;';
+        banner.textContent = 'Access no longer granted. Contact williamzitzmann@abbvie.com for access.';
+        document.body.appendChild(banner);
+    }
+
+    // Re-runs the same domain-agnostic access check loader.js does on first
+    // load, and returns a fresh short-lived token for the Worker's /tool
+    // endpoint. Only a POSITIVE deny revokes anything — a network hiccup or
+    // an unreachable Worker just rejects this promise, leaving the
+    // currently-running tool untouched (caught by whichever self-update
+    // path called this).
+    function getWorkerAccessToken() {
+        return xhrGetText(WORKER_BASE_URL + '/bootstrap').then(function(bootText) {
+            var boot = JSON.parse(bootText);
+            return readWhoamiCanonical().then(function(whoamiData) {
+                var fields = {};
+                (boot.requiredFields || []).forEach(function(f) {
+                    fields[f] = whoamiData[f];
+                });
+                return xhrPostJSON(WORKER_BASE_URL + '/check-access', {
+                    fields: fields
+                });
+            });
+        }).then(function(decision) {
+            if (decision.granted) {
+                if (decision.tier === 'beta' || decision.tier === 'dev') {
+                    localStorage.setItem(DEV_UNLOCK_KEY, decision.tier);
+                } else {
+                    localStorage.removeItem(DEV_UNLOCK_KEY);
+                }
+                return decision.token;
+            }
+            revokeAccessLocally();
+            throw new Error('access revoked');
+        });
+    }
+
+    // Fetches the tool's own source through the Worker instead of a public
+    // raw URL — version omitted/null means "whatever the Worker's default
+    // ref currently serves" (the dev-channel case); a specific version
+    // string requests that exact tagged release from the private repo.
+    function fetchToolSourceViaWorker(version) {
+        return getWorkerAccessToken().then(function(token) {
+            var url = WORKER_BASE_URL + '/tool?token=' + encodeURIComponent(token);
+            if (version) url += '&version=' + encodeURIComponent(version);
+            return xhrGetText(url);
+        });
+    }
 
     function getDevTier() {
         var t = '';
@@ -1691,7 +1818,6 @@
             return {
                 channel: 'dev',
                 version: null,
-                codeUrl: REPO_RAW_BASE + '/main/wo_tool.js',
                 pinned: false
             };
         }
@@ -1714,7 +1840,6 @@
         return {
             channel: channel,
             version: version,
-            codeUrl: REPO_RAW_BASE + '/v' + version + '/wo_tool.js',
             pinned: pinned,
             pinKind: pinned ? (isFloatingMinorPin(pin) ? 'floating' : 'exact') : null,
             pinRaw: pin
@@ -1747,7 +1872,7 @@
                 var target = resolveUpdateTarget(remote);
 
                 if (target.channel === 'dev') {
-                    checkDevUpdate(target.codeUrl);
+                    checkDevUpdate();
                     return;
                 }
 
@@ -1773,7 +1898,7 @@
                     setStatus(target.pinKind === 'floating' ?
                         'Installing v' + target.version + ' (latest ' + target.pinRaw + '.x)...' :
                         'Installing pinned v' + target.version + '...');
-                    installUpdate(target.version, target.codeUrl);
+                    installUpdate(target.version);
                     return;
                 }
 
@@ -1787,10 +1912,10 @@
                 var patchAutoUpdate = st.autoUpdatePatch !== false;
                 if (isPatchOnly && patchAutoUpdate) {
                     setStatus('Installing patch update v' + target.version + '...');
-                    installUpdate(target.version, target.codeUrl);
+                    installUpdate(target.version);
                 } else if (st.autoUpdate) {
                     setStatus('Auto-installing update v' + target.version + '...');
-                    installUpdate(target.version, target.codeUrl);
+                    installUpdate(target.version);
                 } else {
                     var skipped = st.skippedVersion || '';
                     if (skipped === target.version) {
@@ -1811,16 +1936,9 @@
         xhr.send();
     }
 
-    // ── Dev channel: tracks tip of main directly, no version numbers to compare ──
-    function checkDevUpdate(codeUrl) {
-        var xhr = new XMLHttpRequest();
-        xhr.open('GET', codeUrl, true);
-        xhr.onload = function() {
-            if (xhr.status !== 200) {
-                setStatus('Dev channel check failed (HTTP ' + xhr.status + ') — running v' + TOOL_VERSION);
-                return;
-            }
-            var code = xhr.responseText;
+    // ── Dev channel: tracks tip of the Worker's default ref directly, no version numbers to compare ──
+    function checkDevUpdate() {
+        fetchToolSourceViaWorker(null).then(function(code) {
             var cached = localStorage.getItem('__wo_tool_src') || '';
             if (code === cached) {
                 setStatus('Running latest dev build (main) — v' + TOOL_VERSION);
@@ -1828,11 +1946,10 @@
             }
             setStatus('Installing latest dev build...');
             rawInstall(code, 'dev (main)');
-        };
-        xhr.onerror = function() {
-            setStatus('Dev channel check: no connection — running v' + TOOL_VERSION);
-        };
-        xhr.send();
+        }).catch(function(err) {
+            if (err && err.message === 'access revoked') return; // already handled/torn down
+            setStatus('Dev channel check failed: ' + err.message + ' — running v' + TOOL_VERSION);
+        });
     }
 
     // ── Show update prompt with cumulative changelog ──
@@ -1869,7 +1986,7 @@
 
         if (bodyEl) bodyEl.insertBefore(banner, bodyEl.firstChild);
         document.getElementById('__wo_update_btn').onclick = function() {
-            installUpdate(target.version, target.codeUrl);
+            installUpdate(target.version);
         };
         document.getElementById('__wo_update_skip').onclick = function() {
             var s = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
@@ -1916,15 +2033,9 @@
     }
 
     // ── Install update from GitHub ──
-    function installUpdate(newVersion, codeUrl) {
+    function installUpdate(newVersion) {
         setStatus('Downloading v' + newVersion + '...');
-        var xhr = new XMLHttpRequest();
-        xhr.open('GET', codeUrl, true);
-        xhr.onload = function() {
-            if (xhr.status !== 200) {
-                setStatus('Update download failed (HTTP ' + xhr.status + ') — still running v' + TOOL_VERSION);
-                return;
-            }
+        fetchToolSourceViaWorker(newVersion).then(function(src) {
             // Reconcile an active pin to whatever's actually being installed. This
             // is the single choke point every install path (banner, pinned auto-
             // install, future affordances) goes through — without it, a pinned
@@ -1947,12 +2058,11 @@
                     localStorage.setItem('__wo_settings', JSON.stringify(pinSt));
                 }
             }
-            rawInstall(xhr.responseText, 'v' + newVersion);
-        };
-        xhr.onerror = function() {
-            setStatus('Network error during update — still running v' + TOOL_VERSION);
-        };
-        xhr.send();
+            rawInstall(src, 'v' + newVersion);
+        }).catch(function(err) {
+            if (err && err.message === 'access revoked') return; // already handled/torn down
+            setStatus('Update download failed: ' + err.message + ' — still running v' + TOOL_VERSION);
+        });
     }
 
     function statusColor(s) {
