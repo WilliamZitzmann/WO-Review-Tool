@@ -400,7 +400,14 @@ pinned-version installs / the Worker's `?version=` param silently fail to
 resolve on whichever repo is missing it. Order that's been safe in practice:
 
 1. Bump `TOOL_VERSION` in `wo_tool.js`, add a `version.json` entry (public repo).
-2. Copy `wo_tool.js` into the private repo checkout, commit, tag `vX.Y.Z`, push (main + tag).
+2. **There is no persistent local checkout of the private repo** — `gh repo
+   clone WilliamZitzmann/WO-Review-Tool-Private` into a scratch/tmp dir each
+   release, copy the updated `wo_tool.js` in (don't touch its
+   `permissions.json`), set local `git config user.name`/`user.email` in that
+   fresh clone (it won't inherit global config), commit, tag `vX.Y.Z`, push
+   (main + tag), then delete the scratch clone. Confirmed with the user this
+   is the actual workflow (v0.22.0) — don't go looking for a local checkout
+   that isn't there.
 3. If `access-control/worker.js` changed: `wrangler deploy` (needs
    `CLOUDFLARE_API_TOKEN` set — not persisted across sessions, the user
    re-provides it each time it's needed).
