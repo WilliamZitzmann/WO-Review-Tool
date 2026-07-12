@@ -1,10 +1,19 @@
 {
-  "latest": "0.20.30",
+  "latest": "0.20.31",
   "channels": {
-    "stable": "0.20.30",
-    "beta": "0.20.30"
+    "stable": "0.20.31",
+    "beta": "0.20.31"
   },
   "versions": [
+    {
+      "version": "0.20.31",
+      "changes": [
+        "Main panel: starting a drag on a group tile no longer instantly snaps other expanded tiles shut - they now collapse smoothly, and the reorder itself doesn't engage until that settles, instead of both happening at once before you've even moved the mouse",
+        "Main panel: clicking a group's header to expand/collapse it now animates smoothly too, not just during drag",
+        "Settings version picker: dropped the \"(auto-patch)\" wording from each minor-version entry, and the default \"Latest\" option now shows the actual latest version number instead of just saying \"current version\"",
+        "Fixed a second spot where the textarea resize-grip's box artifact could still show up - the grip icon has its own background separate from the scrollbar corner, which wasn't covered before"
+      ]
+    },
     {
       "version": "0.20.30",
       "changes": [

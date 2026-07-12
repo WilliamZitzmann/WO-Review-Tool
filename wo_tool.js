@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.30';
+    var TOOL_VERSION = '0.20.31';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -2728,6 +2728,41 @@
     // this used to have.
     var cardJustDragged = false;
 
+    // Shared with openSetup()'s own (identical) copy — animates a
+    // [data-coll-body] open/closed via a height transition instead of an
+    // instant display:none toggle. See that copy for the full rationale.
+    function animateBodyToggle(body, expand) {
+        if (body._woAnimCleanup) body._woAnimCleanup();
+        body.style.overflow = 'hidden';
+        if (expand) {
+            body.style.display = '';
+            var target = body.scrollHeight;
+            body.style.height = '0px';
+            body.getBoundingClientRect(); // force reflow before transitioning
+            body.style.transition = 'height 160ms ease';
+            body.style.height = target + 'px';
+        } else {
+            var current = body.scrollHeight;
+            body.style.height = current + 'px';
+            body.getBoundingClientRect(); // force reflow before transitioning
+            body.style.transition = 'height 160ms ease';
+            body.style.height = '0px';
+        }
+        function onEnd(e) {
+            if (e && e.propertyName !== 'height') return;
+            clearTimeout(fallbackTimer);
+            body.style.transition = '';
+            body.style.height = '';
+            body.style.overflow = '';
+            if (!expand) body.style.display = 'none';
+            body.removeEventListener('transitionend', onEnd);
+            body._woAnimCleanup = null;
+        }
+        body.addEventListener('transitionend', onEnd);
+        var fallbackTimer = setTimeout(onEnd, 220);
+        body._woAnimCleanup = onEnd;
+    }
+
     function startPointerCapture(onMove, onUp, cursor) {
         var overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;cursor:' + (cursor || 'default') + ';';
@@ -2784,29 +2819,24 @@
             var cards = Array.prototype.filter.call(container.children, function(el) {
                 return el.hasAttribute && el.hasAttribute('data-reorder-card');
             });
-            var preCollapseRect = cardEl.getBoundingClientRect();
 
+            // Smoothly close every OTHER card's body (plus the dragged
+            // card's own) instead of an instant display:none snap — with
+            // "always open" tiles at the top of the main page, an instant
+            // collapse of a couple tall expanded cards is a jarring, whole-
+            // page-jumps-under-you moment. The reorder-threshold math below
+            // needs the FINAL settled geometry, not a mid-transition one,
+            // so arming (measuring rects, enabling the shift logic) waits
+            // until the collapse animation has actually finished — until
+            // then the dragged card is visually lifted (shadow/elevation)
+            // but doesn't yet track the cursor or trigger a reorder.
             cards.forEach(function(c, i) {
                 if (i === idx) return;
                 var body = c.querySelector('[data-coll-body]');
-                if (body) body.style.display = 'none';
+                if (body && body.style.display !== 'none') animateBodyToggle(body, false);
             });
             var draggedBody = cardEl.querySelector('[data-coll-body]');
-            if (draggedBody) draggedBody.style.display = 'none';
-
-            var draggedRect = cardEl.getBoundingClientRect();
-            var collapseShift = draggedRect.top - preCollapseRect.top;
-            // A shifted sibling needs to land in the dragged card's whole
-            // slot, not just its content box — getBoundingClientRect()
-            // doesn't include margin-bottom, so omitting it here left every
-            // shifted sibling short by exactly one card's margin until the
-            // drop-triggered rerender snapped it the rest of the way.
-            var cardMarginBottom = parseFloat(getComputedStyle(cardEl).marginBottom) || 0;
-            var headerShiftAmount = draggedRect.height + cardMarginBottom;
-            var origRects = cards.map(function(c) {
-                return c.getBoundingClientRect();
-            });
-            var targetIdx = idx;
+            if (draggedBody && draggedBody.style.display !== 'none') animateBodyToggle(draggedBody, false);
 
             cardEl.style.position = 'relative';
             cardEl.style.zIndex = '10';
@@ -2814,6 +2844,30 @@
             cards.forEach(function(c, i) {
                 if (i !== idx) c.style.transition = 'transform 150ms ease';
             });
+
+            var armed = false,
+                aborted = false;
+            var lastMouseY = startY,
+                armStartY = startY;
+            var draggedRect, headerShiftAmount, origRects, targetIdx = idx;
+
+            var armTimer = setTimeout(function() {
+                if (aborted) return;
+                armStartY = lastMouseY;
+                draggedRect = cardEl.getBoundingClientRect();
+                // A shifted sibling needs to land in the dragged card's
+                // whole slot, not just its content box — getBoundingClientRect()
+                // doesn't include margin-bottom, so omitting it here left
+                // every shifted sibling short by exactly one card's margin
+                // until the drop-triggered rerender snapped it the rest of
+                // the way.
+                var cardMarginBottom = parseFloat(getComputedStyle(cardEl).marginBottom) || 0;
+                headerShiftAmount = draggedRect.height + cardMarginBottom;
+                origRects = cards.map(function(c) {
+                    return c.getBoundingClientRect();
+                });
+                armed = true;
+            }, 180);
 
             function applyShift(newTargetIdx) {
                 targetIdx = newTargetIdx;
@@ -2827,7 +2881,9 @@
             }
 
             startPointerCapture(function(mv) {
-                var dy = (mv.clientY - startY) - collapseShift;
+                lastMouseY = mv.clientY;
+                if (!armed) return;
+                var dy = mv.clientY - armStartY;
                 cardEl.style.transform = 'translateY(' + dy + 'px)';
                 var draggedCenter = draggedRect.top + draggedRect.height / 2 + dy;
                 var newTarget = idx;
@@ -2839,6 +2895,8 @@
                 }
                 if (newTarget !== targetIdx) applyShift(newTarget);
             }, function() {
+                aborted = true;
+                clearTimeout(armTimer);
                 cards.forEach(function(c) {
                     c.style.transition = '';
                     c.style.transform = '';
@@ -2846,7 +2904,7 @@
                     c.style.zIndex = '';
                     c.style.boxShadow = '';
                 });
-                if (targetIdx !== idx) {
+                if (armed && targetIdx !== idx) {
                     var moved = arr.splice(idx, 1)[0];
                     arr.splice(targetIdx, 0, moved);
                 }
@@ -3383,7 +3441,6 @@
             "#__wo_dock .__wo_tx{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;padding:0;border:1px solid transparent;border-radius:3px;background:transparent;color:var(--wo-muted);cursor:pointer;flex-shrink:0;}" +
             "#__wo_dock .__wo_tx:hover,#__wo_dock .__wo_tx:focus-visible{color:#fff;background:var(--wo-field);}" +
             "#__wo_dock .__wo_tx:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
-            "#__wo_dock .wo-card.is-collapsed .__wo_tb,#__wo_dock .wo-card.is-collapsed .__wo_banner{display:none;}" +
             "#__wo_dock .__wo_banner{padding:7px 10px;font-size:11px;color:var(--wo-accent);background:var(--wo-field);border-bottom:1px solid var(--wo-border);}" +
             "#__wo_dock .__wo_tb{padding:10px;display:flex;flex-direction:column;gap:8px;}" +
             "#__wo_dock .wo-rule{display:flex;flex-direction:column;gap:3px;padding:8px 9px;border-radius:var(--wo-r-ctl);background:var(--wo-surface-2);border-left:4px solid var(--wo-border);}" +
@@ -3978,7 +4035,7 @@
                 '</span>' +
                 '</span>' +
                 '</div>' +
-                '<div data-coll-body>' + bannerHtml +
+                '<div data-coll-body' + (collapsed ? ' style="display:none;"' : '') + '>' + bannerHtml +
                 '<div class="__wo_tb">' + rulesHtml + bodyHtml + '</div></div>';
 
             bodyEl.appendChild(tile);
@@ -4017,14 +4074,26 @@
             var head = tile.querySelector('.__wo_th');
 
             function toggleGroupCollapse() {
-                var nowCollapsed = !tile.classList.contains('is-collapsed');
+                var body = tile.querySelector('[data-coll-body]');
+                var hidden = body.style.display === 'none';
+                animateBodyToggle(body, hidden);
+                var nowCollapsed = !hidden;
                 tile.classList.toggle('is-collapsed', nowCollapsed);
                 head.setAttribute('aria-expanded', String(!nowCollapsed));
                 var g2 = getGS();
                 if (!g2[group.id]) g2[group.id] = {};
                 g2[group.id].collapsed = nowCollapsed;
                 saveGS(g2);
+                // The animated height transition changes the tile's own
+                // (and everything below it's) layout position gradually —
+                // keep the scroll-shadow visibility in sync throughout,
+                // not just once at the start.
                 updateScrollShadows();
+                var shadowTimer = setInterval(updateScrollShadows, 16);
+                setTimeout(function() {
+                    clearInterval(shadowTimer);
+                    updateScrollShadows();
+                }, 200);
             }
             tile.querySelector('.__wo_tx').onclick = function(e) {
                 e.stopPropagation();
@@ -4629,9 +4698,14 @@
             "#__wo_setup_modal textarea::-webkit-scrollbar-thumb{background:#30363d;border-radius:4px;}" +
             "#__wo_setup_modal textarea::-webkit-scrollbar-thumb:hover{background:#454d59;}" +
             "#__wo_setup_modal textarea::-webkit-scrollbar-corner{background:var(--wo-field);}" +
+            // The resize grip itself is a SEPARATE pseudo-element from the
+            // scrollbar corner (::-webkit-resizer, not ::-webkit-scrollbar-
+            // corner) — flattening only the corner left this one still
+            // drawing its own boxy default backing behind the grip icon.
+            "#__wo_setup_modal textarea::-webkit-resizer{background:var(--wo-field);}" +
             "#__wo_setup_modal input[type=text]:focus,#__wo_setup_modal input[type=number]:focus,#__wo_setup_modal textarea:focus,#__wo_setup_modal select:focus{outline:2px solid var(--wo-accent);outline-offset:-1px;border-color:var(--wo-accent);}" +
             "#__wo_setup_modal textarea.wo-code{font-family:Consolas,'Cascadia Mono',monospace;background:#010409;color:#7ee787;border-color:var(--wo-border);resize:vertical;scrollbar-color:#30363d #010409;}" +
-            "#__wo_setup_modal textarea.wo-code::-webkit-scrollbar-track,#__wo_setup_modal textarea.wo-code::-webkit-scrollbar-corner{background:#010409;}" +
+            "#__wo_setup_modal textarea.wo-code::-webkit-scrollbar-track,#__wo_setup_modal textarea.wo-code::-webkit-scrollbar-corner,#__wo_setup_modal textarea.wo-code::-webkit-resizer{background:#010409;}" +
             // Padding lives on the head and body separately, NOT on .wo-card
             // itself — a card that's collapsed only renders its head, so if
             // the card carried the padding, a collapsed card would show a
@@ -5610,48 +5684,24 @@
                 var cards = Array.prototype.filter.call(container.children, function(el) {
                     return el.hasAttribute && el.hasAttribute('data-reorder-card');
                 });
-                var preCollapseRect = cardEl.getBoundingClientRect();
 
-                // Temporarily collapse every OTHER card to header-only
-                // height so reordering only needs to cross header-sized
-                // increments instead of each entry's full (possibly huge)
-                // expanded height: dragging past a neighbor only needs to
-                // clear its header, and the displaced neighbor "collapses
-                // to fit in that space". Purely a transient DOM style, not
-                // the real persisted expand/collapse state, so it's
-                // discarded for free by rerenderFn()'s full re-render.
+                // Smoothly close every OTHER card's body (plus the dragged
+                // card's own) instead of an instant display:none snap, so
+                // reordering past a tall expanded neighbor doesn't yank the
+                // whole tab shut with no transition. The reorder-threshold
+                // math below needs the FINAL settled geometry, not a mid-
+                // transition one, so arming (measuring rects, enabling the
+                // shift logic) waits until the collapse animation has
+                // actually finished — until then the dragged card is
+                // visually lifted (shadow/elevation) but doesn't yet track
+                // the cursor or trigger a reorder.
                 cards.forEach(function(c, i) {
                     if (i === idx) return;
                     var body = c.querySelector('[data-coll-body]');
-                    if (body) body.style.display = 'none';
+                    if (body && body.style.display !== 'none') animateBodyToggle(body, false);
                 });
-                // Also collapse the DRAGGED card's own body. Not explicitly
-                // asked for, but without it the threshold math below is
-                // still anchored to the dragged card's own (possibly huge)
-                // expanded height, reproducing the same bug from the other
-                // side — and dragging a full expanded panel around by the
-                // cursor is heavy to look at regardless.
                 var draggedBody = cardEl.querySelector('[data-coll-body]');
-                if (draggedBody) draggedBody.style.display = 'none';
-
-                // Collapsing cards ABOVE the dragged one shrinks them,
-                // which shifts everything below (including the dragged
-                // card) upward — re-measure post-collapse and compensate,
-                // or the card visibly jumps away from the cursor the
-                // instant the drag arms.
-                var draggedRect = cardEl.getBoundingClientRect();
-                var collapseShift = draggedRect.top - preCollapseRect.top;
-                // A shifted sibling needs to land in the dragged card's whole
-                // slot, not just its content box — getBoundingClientRect()
-                // doesn't include margin-bottom, so omitting it here left every
-                // shifted sibling short by exactly one card's margin until the
-                // drop-triggered rerender snapped it the rest of the way.
-                var cardMarginBottom = parseFloat(getComputedStyle(cardEl).marginBottom) || 0;
-                var headerShiftAmount = draggedRect.height + cardMarginBottom;
-                var origRects = cards.map(function(c) {
-                    return c.getBoundingClientRect();
-                });
-                var targetIdx = idx;
+                if (draggedBody && draggedBody.style.display !== 'none') animateBodyToggle(draggedBody, false);
 
                 cardEl.style.position = 'relative';
                 cardEl.style.zIndex = '10';
@@ -5659,6 +5709,30 @@
                 cards.forEach(function(c, i) {
                     if (i !== idx) c.style.transition = 'transform 150ms ease';
                 });
+
+                var armed = false,
+                    aborted = false;
+                var lastMouseY = startY,
+                    armStartY = startY;
+                var draggedRect, headerShiftAmount, origRects, targetIdx = idx;
+
+                var armTimer = setTimeout(function() {
+                    if (aborted) return;
+                    armStartY = lastMouseY;
+                    draggedRect = cardEl.getBoundingClientRect();
+                    // A shifted sibling needs to land in the dragged card's
+                    // whole slot, not just its content box — getBoundingClientRect()
+                    // doesn't include margin-bottom, so omitting it here left
+                    // every shifted sibling short by exactly one card's
+                    // margin until the drop-triggered rerender snapped it
+                    // the rest of the way.
+                    var cardMarginBottom = parseFloat(getComputedStyle(cardEl).marginBottom) || 0;
+                    headerShiftAmount = draggedRect.height + cardMarginBottom;
+                    origRects = cards.map(function(c) {
+                        return c.getBoundingClientRect();
+                    });
+                    armed = true;
+                }, 180);
 
                 function applyShift(newTargetIdx) {
                     targetIdx = newTargetIdx;
@@ -5672,7 +5746,9 @@
                 }
 
                 startPointerCapture(function(mv) {
-                    var dy = (mv.clientY - startY) - collapseShift;
+                    lastMouseY = mv.clientY;
+                    if (!armed) return;
+                    var dy = mv.clientY - armStartY;
                     cardEl.style.transform = 'translateY(' + dy + 'px)';
                     var draggedCenter = draggedRect.top + draggedRect.height / 2 + dy;
                     var newTarget = idx;
@@ -5684,6 +5760,8 @@
                     }
                     if (newTarget !== targetIdx) applyShift(newTarget);
                 }, function() {
+                    aborted = true;
+                    clearTimeout(armTimer);
                     cards.forEach(function(c) {
                         c.style.transition = '';
                         c.style.transform = '';
@@ -5691,7 +5769,7 @@
                         c.style.zIndex = '';
                         c.style.boxShadow = '';
                     });
-                    if (targetIdx !== idx) {
+                    if (armed && targetIdx !== idx) {
                         var moved = arr.splice(idx, 1)[0];
                         arr.splice(targetIdx, 0, moved);
                     }
@@ -7248,12 +7326,16 @@
                 if (xhrV.status !== 200) return;
                 try {
                     var remoteV = JSON.parse(xhrV.responseText);
+                    // The default option is a placeholder until this fetch
+                    // resolves — once it does, say which version "Latest"
+                    // actually means instead of leaving that unstated.
+                    var defaultOpt = pinSel.querySelector('option[value=""]');
+                    if (defaultOpt && remoteV.latest) defaultOpt.textContent = 'Latest (' + remoteV.latest + ')';
                     // Group by major.minor, preserving remoteV.versions' existing
-                    // newest-first order. Each line gets a floating "X.Y.x
-                    // (auto-patch)" option — always tracks that line's newest
-                    // patch — plus every exact patch underneath for the "the
-                    // newest patch broke something, freeze at the previous one"
-                    // rollback case.
+                    // newest-first order. Each line gets a floating "X.Y.x"
+                    // option — always tracks that line's newest patch — plus
+                    // every exact patch underneath for the "the newest patch
+                    // broke something, freeze at the previous one" rollback case.
                     var lines = [],
                         byLine = {};
                     (remoteV.versions || []).forEach(function(v) {
@@ -7276,7 +7358,7 @@
                     lines.forEach(function(key) {
                         var floatOpt = document.createElement('option');
                         floatOpt.value = key;
-                        floatOpt.textContent = key + '.x (auto-patch)';
+                        floatOpt.textContent = key + '.x';
                         if (st.pinnedVersion === key) floatOpt.selected = true;
                         pinSel.appendChild(floatOpt);
                         byLine[key].forEach(function(vstr) {
