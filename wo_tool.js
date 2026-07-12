@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.22.0';
+    var TOOL_VERSION = '0.23.0';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -40,19 +40,24 @@
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
     // is left alone, not overridden.
-    var DEFAULT_HOTKEY = 'Ctrl+Shift+S';
+    // Changed from 'Ctrl+Shift+S' to 'Alt+S' in v0.23.0 — anyone who never
+    // customized their Scan hotkey (still on the undefined -> fallback path)
+    // gets bumped onto the new combo. Worth a changelog callout, not a
+    // silent change.
+    var DEFAULT_HOTKEY = 'Alt+S';
 
     // ── Hotkey registry ──
     // Each action's combo lives as its own plain top-level __wo_settings
     // field (matching the pre-existing rescanHotkey convention) rather than
     // a nested object, so it stays device-level automatically — none of
     // these are in PROFILE_SETTINGS_KEYS, so switching profiles never
-    // touches them. Return/Approve ship with NO default combo (only Scan
-    // does) since they're destructive actions a user should opt into
-    // assigning, not something that could fire from a stray keystroke on a
-    // fresh install. The Settings UI is the only place that enforces "no
-    // two actions share a combo" — this registry and applyHotkeys() just
-    // trust that invariant already holds.
+    // touches them. Approve ships with NO default combo — it's the one
+    // destructive action here a user should still opt into assigning, not
+    // something that could fire from a stray keystroke on a fresh install.
+    // Return now DOES default to a combo (Alt+R, added in v0.23.0) since its
+    // own confirm() dialog is what makes that safe. The Settings UI is the
+    // only place that enforces "no two actions share a combo" — this
+    // registry and applyHotkeys() just trust that invariant already holds.
     var HOTKEY_ACTIONS = [{
         id: 'rescan',
         settingsKey: 'rescanHotkey',
@@ -65,7 +70,7 @@
         id: 'return',
         settingsKey: 'returnHotkey',
         label: 'Return',
-        defaultHotkey: '',
+        defaultHotkey: 'Alt+R',
         run: function() {
             if (!confirm('Return this Work Order?\n\nThe return message will be filled into the Memo field.')) return;
             routeWorkflow('return');
@@ -87,6 +92,14 @@
         betaFeature: 'beta_1', // only registered/assignable at all while this beta feature is on
         run: function() {
             runScan(render, 'fix');
+        }
+    }, {
+        id: 'copyReturn',
+        settingsKey: 'copyReturnHotkey',
+        label: 'Copy Return Message',
+        defaultHotkey: 'Alt+C',
+        run: function() {
+            copyReturnMessage();
         }
     }];
 
@@ -2392,6 +2405,14 @@
     }
     var scanning = false;
     var scanLog = [];
+    // null = no manual edit yet, so Return/Copy use the freshly computed
+    // buildReturnMessage() as-is. Once the user types in the return-message
+    // box, this holds their exact text instead — the single source of truth
+    // both routeWorkflow('return') and copyReturnMessage() read from, since
+    // a hotkey can fire while the box itself isn't even rendered (panel
+    // collapsed). Reset to null at the top of runScan() so a fresh scan
+    // always starts from a freshly computed message again.
+    var currentReturnMsg = null;
     window.__wo_laborTypeCache = [];
 
     // mode is 'scan' (default) or 'fix' — Fix is the beta_1-only rescan
@@ -2801,6 +2822,7 @@
         mode = mode || 'scan';
         scanning = true;
         scanLog = [];
+        currentReturnMsg = null;
         cache = {
             fields: {},
             tables: {},
@@ -3313,7 +3335,7 @@
 
 
     function routeWorkflow(action) {
-        var retMsg = action === 'return' ? buildReturnMessage() : '';
+        var retMsg = action === 'return' ? currentOrComputedReturnMessage() : '';
 
         var sew = findSendEventWin();
         if (sew) {
@@ -3812,8 +3834,16 @@
             "#__wo_dock .wo-btn-ghost:hover{color:var(--wo-text);}" +
             "#__wo_dock .wo-btn-ghost:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
             "#__wo_dock .wo-qr-wrap{margin-bottom:2px;}" +
-            "#__wo_dock .wo-qr-box{position:relative;background:var(--wo-surface);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);padding:9px 34px 9px 11px;min-height:40px;font-size:11.5px;color:var(--wo-text);word-break:break-word;}" +
+            // The box is a <textarea> (editable — see the Alt+C/Route
+            // wiring below), so the copy button can no longer live INSIDE
+            // it (a textarea can't contain child elements); it's an
+            // absolutely-positioned sibling inside this wrapper instead.
+            "#__wo_dock .wo-qr-box-wrap{position:relative;}" +
+            "#__wo_dock .wo-qr-box{display:block;width:100%;box-sizing:border-box;resize:vertical;background:var(--wo-surface);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);padding:9px 34px 9px 11px;min-height:40px;font:inherit;font-size:11.5px;color:var(--wo-text);word-break:break-word;}" +
+            "#__wo_dock .wo-qr-box:focus{outline:2px solid var(--wo-accent);outline-offset:-1px;}" +
+            "#__wo_dock .wo-qr-box::placeholder{color:var(--wo-muted);font-style:italic;}" +
             "#__wo_dock .wo-qr-box.wo-empty-text{color:var(--wo-muted);}" +
+            "#__wo_dock .wo-qr-box:disabled{opacity:.7;resize:none;}" +
             "#__wo_dock .wo-qr-copy{position:absolute;top:6px;right:6px;display:flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border-radius:var(--wo-r-ctl);}" +
             "#__wo_dock .wo-qr-copy:hover{background:var(--wo-field);color:var(--wo-text);}" +
             "#__wo_dock .wo-qr-copy:disabled{opacity:.35;cursor:default;}" +
@@ -3825,7 +3855,7 @@
             // beta_1-only: a plain non-interactive glyph, never a button —
             // no background/border/hover, no click handler. Purely a visual
             // label ahead of Return/Fix/Approve, not one of the actions.
-            "#__wo_dock .wo-route-symbol{display:flex;align-items:center;justify-content:center;flex:0 0 auto;width:36px;color:var(--wo-muted);cursor:default;}" +
+            "#__wo_dock .wo-route-symbol{display:flex;align-items:center;justify-content:center;flex:0 0 auto;width:70px;color:var(--wo-muted);cursor:default;}" +
             "#__wo_dock .wo-btn-block.wo-btn-icon{display:inline-flex;align-items:center;justify-content:center;gap:7px;}" +
             "#__wo_dock .wo-btn-pass{background:var(--wo-pass);color:#04210c;border-color:var(--wo-pass);}" +
             "#__wo_dock .wo-btn-warn{background:var(--wo-warn);color:#241900;border-color:var(--wo-warn);}" +
@@ -4000,6 +4030,42 @@
         if (!body) return '';
         var full = (prefix ? prefix + delim : '') + body + (suffix ? ' ' + suffix : '');
         return full.trim();
+    }
+
+    // Single source of truth for "what return message is currently active" —
+    // the user's edit if they've made one this scan cycle, otherwise the
+    // freshly computed one. Shared by the Copy button, the Alt+C hotkey, and
+    // routeWorkflow('return') so all three can never disagree.
+    function currentOrComputedReturnMessage() {
+        return currentReturnMsg !== null ? currentReturnMsg : buildReturnMessage();
+    }
+
+    // Shared by the Copy button's click handler and the Alt+C hotkey action —
+    // one clipboard/animation implementation instead of two copies of the
+    // temp-textarea/execCommand dance.
+    function copyReturnMessage() {
+        var msg = currentOrComputedReturnMessage();
+        if (!msg) return;
+        var ta = document.createElement('textarea');
+        ta.value = msg;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+        var btn = panel && panel.querySelector('.__wo_qr_copy');
+        if (btn) {
+            var copyIcon = btn.querySelector('.wo-icon-copy');
+            var checkIcon = btn.querySelector('.wo-icon-check');
+            if (copyIcon && checkIcon) {
+                copyIcon.style.display = 'none';
+                checkIcon.style.display = '';
+                setTimeout(function() {
+                    copyIcon.style.display = '';
+                    checkIcon.style.display = 'none';
+                }, 1500);
+            }
+        }
+        setStatus('Return message copied to clipboard.');
     }
 
     function render() {
@@ -4513,14 +4579,23 @@
             });
         });
         // ── Quick Return preview box ──
+        // Editable — whatever's in this box when Return/Alt+R or the Copy
+        // button/Alt+C fires is exactly what gets used (see
+        // currentOrComputedReturnMessage()). `currentReturnMsg` (module
+        // scope) is the source of truth, not this box's DOM value: it has
+        // to be, since Alt+C/Alt+R can fire via hotkey while the panel is
+        // collapsed and this box doesn't even exist.
         var qrWrap = document.createElement('div');
         qrWrap.className = 'wo-qr-wrap';
 
-        var retMsg = preScan ? '' : buildReturnMessage();
-        qrWrap.innerHTML = '<div class="wo-qr-box' + (retMsg ? '' : ' wo-empty-text') + '">' +
-            (preScan ?
-                '<i>Scan first to generate return message</i>' :
-                (retMsg ? retMsg.replace(/</g, '&lt;') : '<i>No failed rules — return message will appear here</i>')) +
+        var retMsg = preScan ? '' : currentOrComputedReturnMessage();
+        var qrPlaceholder = preScan ?
+            'Scan first to generate return message' :
+            'No failed rules — type a message here if you want to include one';
+        qrWrap.innerHTML = '<div class="wo-qr-box-wrap">' +
+            '<textarea class="wo-qr-box' + (retMsg ? '' : ' wo-empty-text') + '"' + (preScan ? ' disabled' : '') + ' placeholder="' + qrPlaceholder.replace(/"/g, '&quot;') + '">' +
+            (retMsg ? retMsg.replace(/&/g, '&amp;').replace(/</g, '&lt;') : '') +
+            '</textarea>' +
             '<button class="__wo_qr_copy wo-btn-ghost wo-qr-copy" type="button" aria-label="Copy return message"' + (retMsg ? '' : ' disabled') + '>' +
             '<svg class="wo-icon-copy" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
             '<rect x="5.5" y="5.5" width="8" height="8" rx="1.3" stroke="currentColor" stroke-width="1.3"/>' +
@@ -4547,7 +4622,7 @@
             // Three nodes converging into one checked final node — a
             // visual label, not a control: no button element, no
             // border/background, no click handler.
-            routeSymbol.innerHTML = '<svg width="24" height="24" viewBox="0 0 320 320" fill="none">' +
+            routeSymbol.innerHTML = '<svg width="60" height="60" viewBox="0 0 320 320" fill="none">' +
                 '<g stroke="currentColor" stroke-width="10" stroke-linecap="round">' +
                 '<line x1="65" y1="50" x2="95" y2="50"/>' +
                 '<line x1="100" y1="60" x2="60" y2="100"/>' +
@@ -4577,7 +4652,12 @@
         if (betaRouteOn) {
             var fixBtn = document.createElement('button');
             fixBtn.type = 'button';
-            fixBtn.textContent = '🔧 Fix';
+            // A color emoji glyph here (the previous 🔧) renders in the
+            // system emoji font, visibly mismatched against the button's own
+            // Segoe UI Semibold text — same reasoning as every other icon in
+            // the tool being a stroke-only inline SVG instead of a Unicode
+            // symbol or emoji.
+            fixBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" style="vertical-align:-2px;margin-right:4px;" aria-hidden="true"><path d="M11.6 2.7C10.3 2.1 8.7 2.4 7.7 3.4C6.6 4.5 6.4 6.1 7.1 7.4L2.5 12C2 12.5 2 13.3 2.5 13.8C3 14.3 3.8 14.3 4.3 13.8L8.9 9.2C10.2 9.9 11.8 9.7 12.9 8.6C13.9 7.6 14.2 6 13.6 4.7L11.2 7.1C10.6 7.7 9.6 7.7 9 7.1C8.4 6.5 8.4 5.5 9 4.9L11.6 2.7Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/></svg>Fix';
             fixBtn.className = 'wo-btn wo-btn-warn wo-btn-block';
             fixBtn.onclick = function() {
                 runScan(render, 'fix');
@@ -4597,30 +4677,22 @@
 
         footerAreaEl.appendChild(actionRow);
 
+        var qrBox = qrWrap.querySelector('.wo-qr-box');
         var qrCopyBtn = qrWrap.querySelector('.__wo_qr_copy');
-        attachTooltip(qrCopyBtn, retMsg ? 'Copy to clipboard' : 'Nothing to copy yet');
-        qrCopyBtn.onclick = function() {
-            // Copies exactly what's already displayed in the box (the
-            // closure's `retMsg`, computed once for this render) rather than
-            // recomputing — recomputing here could disagree with what's on
-            // screen (e.g. mid-edit state), and pre-scan the button is
-            // disabled anyway so this can't fire with nothing to copy.
-            var msg = retMsg;
-            if (!msg) return;
-            var ta = document.createElement('textarea');
-            ta.value = msg;
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand('copy');
-            ta.remove();
-            var copyIcon = qrCopyBtn.querySelector('.wo-icon-copy');
-            var checkIcon = qrCopyBtn.querySelector('.wo-icon-check');
-            copyIcon.style.display = 'none';
-            checkIcon.style.display = '';
-            setTimeout(function() {
-                copyIcon.style.display = '';
-                checkIcon.style.display = 'none';
-            }, 1500);
+        attachTooltip(qrCopyBtn, function() {
+            return qrCopyBtn.disabled ? 'Nothing to copy yet' : 'Copy to clipboard';
+        });
+        qrCopyBtn.onclick = copyReturnMessage;
+        // Typing directly updates the single source of truth Return/Copy
+        // both read from (see currentOrComputedReturnMessage()), and keeps
+        // the Copy button's enabled state in sync live — typing into an
+        // empty ("no failed rules") box should re-enable it immediately,
+        // not just on the next render.
+        qrBox.oninput = function() {
+            currentReturnMsg = qrBox.value;
+            var hasMsg = !!qrBox.value;
+            qrBox.classList.toggle('wo-empty-text', !hasMsg);
+            qrCopyBtn.disabled = !hasMsg;
         };
 
 

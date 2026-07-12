@@ -1,10 +1,21 @@
 {
-  "latest": "0.22.0",
+  "latest": "0.23.0",
   "channels": {
-    "stable": "0.22.0",
-    "beta": "0.22.0"
+    "stable": "0.23.0",
+    "beta": "0.23.0"
   },
   "versions": [
+    {
+      "version": "0.23.0",
+      "name": "Editable Return Message + New Default Hotkeys",
+      "changes": [
+        "New: the return-message box is now editable - whatever's in it when you hit Return or Copy (button or hotkey) is exactly what gets used, not a value recomputed behind your back.",
+        "New: Alt+C hotkey to copy the return message, alongside Scan and Return.",
+        "Changed default hotkeys: Scan is now Alt+S (was Ctrl+Shift+S - if you never customized it, your Scan hotkey just changed), Return now defaults to Alt+R. Approve still has no default. Check Settings > Hotkeys if any of these conflict with something else you use.",
+        "Fixed: the Fix button's wrench showed as a color emoji that didn't match the rest of the tool's icons - it's now a plain line-art icon like everything else.",
+        "The Route symbol is significantly larger (was still too small after the last pass) - note the whole button row is now a bit taller to match."
+      ]
+    },
     {
       "version": "0.22.0",
       "name": "Entry Tooltips + Setup Polish",

@@ -306,6 +306,31 @@ alongside the other three items.
 - **Table capture** — read directly off the live DOM (`findAllDocs()` walks
   every frame), keyed by column header, exposed via `T()`/`rowCount()`/`col()`/`has()`.
 
+### 5.1 Editable return message
+
+The Quick Return box (`.wo-qr-box`, a `<textarea>` since v0.23.0) is
+editable — Return (button or Alt+R) and Copy (button or Alt+C) both use
+exactly what's in the box, not a value recomputed fresh.
+`currentReturnMsg` (module scope, `null` until the user types) is the single
+source of truth, read via `currentOrComputedReturnMessage()` — **never read
+the DOM textarea directly** for this: Alt+C/Alt+R are hotkeys and can fire
+while the panel is collapsed and the textarea doesn't exist at all.
+- `null` → `buildReturnMessage()` (freshly computed from current rule
+  results) is used.
+- Non-null → the user's exact edited text is used, verbatim, until the next
+  real scan.
+- Reset point: the top of `runScan()`, alongside the `cache`/`scanLog`
+  reset — a fresh scan always starts from a freshly computed message again,
+  but an *incidental* re-render (toggling a group, Setup Save & Apply, etc.)
+  does NOT reset it, so an in-progress edit survives those.
+- The textarea's `oninput` is what keeps `currentReturnMsg`, the box's empty/
+  non-empty styling, AND the Copy button's disabled state all in sync live —
+  typing into an empty ("no failed rules") box has to re-enable Copy
+  immediately, not just on the next render.
+- `copyReturnMessage()` is the one clipboard implementation, shared by the
+  Copy button's click handler and the `copyReturn` hotkey action — don't
+  duplicate the temp-textarea/execCommand dance a second time anywhere.
+
 ---
 
 ## 6. Beta feature framework
@@ -348,6 +373,13 @@ add a `HOTKEY_ACTIONS` entry with `betaFeature: newId` (see `hotkeyActionActive(
 `settingsKey` (its own top-level `__wo_settings` field, not nested — matches
 the original single-hotkey convention so it stays device-level
 automatically), `label`, `defaultHotkey`, optional `betaFeature`, `run()`.
+Current actions: `rescan` (default `Alt+S`, was `Ctrl+Shift+S` before
+v0.23.0 — a real reassignment for anyone who never customized it, not just
+a new option), `return` (default `Alt+R`, added v0.23.0 — safe to
+default-bind because `run()` still gates on its own `confirm()`), `approve`
+(no default — the one action still opt-in only), `fix` (no default,
+beta_1-gated), `copyReturn` (default `Alt+C`, added v0.23.0, calls
+`copyReturnMessage()` — see §5.1).
 
 `applyHotkeys()` builds one `document`-level keydown listener covering every
 *currently active* action (`hotkeyActionActive()` — always true for a
