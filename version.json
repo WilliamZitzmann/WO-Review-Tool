@@ -1,10 +1,24 @@
 {
-  "latest": "0.20.19",
+  "latest": "0.20.20",
   "channels": {
-    "stable": "0.20.19",
-    "beta": "0.20.19"
+    "stable": "0.20.20",
+    "beta": "0.20.20"
   },
   "versions": [
+    {
+      "version": "0.20.20",
+      "changes": [
+        "Setup window can now be resized wider/narrower from the east edge while pinned left, without unsnapping - Maximo keeps getting pushed to match the new width, and the width is remembered for next time",
+        "Groups & Display tab now matches Rules exactly: no more arrow triangle (click anywhere on the header to expand), plain title text instead of an always-editable boxed input, and a Rename/Duplicate/Delete kebab menu instead of a lone Delete button",
+        "Visible checkbox replaced with an eye/eye-slash icon toggle - bright white when shown, dimmed when hidden",
+        "Removed the Layout (Vertical/Horizontal) dropdown - it never actually affected anything, it was dead UI with no wiring behind it",
+        "Removed the separate \"Variable Fields\" checklist - a variable added there rendered identically to one added via a field row, so it was pure duplication of a feature that already exists",
+        "All Setup textareas (not just the Rules formula box) are now vertical-resize only",
+        "Groups tab cards now remember which ones are expanded across tab switches, matching Rules; both tabs also remember scroll position per tab until Setup is closed",
+        "The field-row editor's +field/x row text buttons are now plain +/x icons with hover tooltips",
+        "Browse Page Fields popup restyled to match the rest of Setup instead of its old flat grey look"
+      ]
+    },
     {
       "version": "0.20.19",
       "changes": [

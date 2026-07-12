@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.19';
+    var TOOL_VERSION = '0.20.20';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -3928,7 +3928,38 @@
         };
     }
 
+    // A standalone popup (not nested inside #__wo_dock or #__wo_setup_modal),
+    // so it redeclares the same --wo-* palette on its own root — same
+    // pattern as the other two top-level containers, each independently
+    // isolated from host-page CSS and from each other.
+    function injectFieldBrowserStyles() {
+        if (document.getElementById('__wo_fb_style')) return;
+        var css = "" +
+            "#__wo_field_browser,#__wo_field_browser *:not(svg):not(svg *){all:revert;box-sizing:border-box;}" +
+            "#__wo_field_browser svg{fill:none;color:inherit;}" +
+            "#__wo_field_browser svg [stroke]{stroke:currentColor;}" +
+            "#__wo_field_browser{--wo-bg:#0d1117;--wo-surface:#161b22;--wo-surface-2:#1f2630;--wo-field:#1f2630;--wo-border:#30363d;--wo-text:#f0f3f6;--wo-muted:#9aa4af;--wo-accent:#58a6ff;--wo-on-accent:#04101f;--wo-pass:#3fb950;--wo-fail:#f85149;--wo-warn:#d29922;--wo-r-panel:10px;--wo-r-card:6px;--wo-r-ctl:6px;font-family:'Segoe UI',system-ui,sans-serif;background:var(--wo-bg);color:var(--wo-text);}" +
+            "#__wo_field_browser input[type=text],#__wo_field_browser select{font:inherit;font-size:11.5px;background:var(--wo-field);color:var(--wo-text);border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:5px 7px;}" +
+            "#__wo_field_browser input[type=text]:focus,#__wo_field_browser select:focus{outline:2px solid var(--wo-accent);outline-offset:-1px;border-color:var(--wo-accent);}" +
+            "#__wo_field_browser .wo-btn{font:inherit;font-weight:700;font-size:11.5px;padding:6px 12px;border-radius:var(--wo-r-ctl);border:1px solid var(--wo-border);background:var(--wo-surface-2);color:var(--wo-text);cursor:pointer;}" +
+            "#__wo_field_browser .wo-btn:hover{background:var(--wo-field);}" +
+            "#__wo_field_browser .wo-btn-ghost{background:none;border:1px solid transparent;color:var(--wo-muted);cursor:pointer;font:inherit;font-size:11px;padding:6px 8px;border-radius:var(--wo-r-ctl);}" +
+            "#__wo_field_browser .wo-btn-ghost:hover{color:var(--wo-text);background:var(--wo-field);}" +
+            "#__wo_field_browser .wo-btn-pass{background:var(--wo-pass);color:#04210c;border-color:var(--wo-pass);font-weight:800;padding:7px 16px;}" +
+            "#__wo_field_browser .wo-fb-row{display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:var(--wo-r-ctl);cursor:pointer;margin-bottom:2px;background:var(--wo-field);}" +
+            "#__wo_field_browser .wo-fb-row.is-registered{background:rgba(63,185,80,.12);}" +
+            "#__wo_field_browser .wo-fb-row:hover{background:var(--wo-surface-2);}" +
+            "#__wo_field_browser .wo-fb-label{flex:1;font-size:11px;color:var(--wo-text);}" +
+            "#__wo_field_browser .wo-fb-label.is-registered{color:var(--wo-pass);}" +
+            "#__wo_field_browser .wo-fb-value{color:var(--wo-muted);font-size:10px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}";
+        var styleEl = document.createElement('style');
+        styleEl.id = '__wo_fb_style';
+        styleEl.textContent = css;
+        document.head.appendChild(styleEl);
+    }
+
     function openFieldBrowser(cfg, opts, onSave) {
+        injectFieldBrowserStyles();
         // Scan all frames for label elements and resolve their current values
         var docs = findAllDocs();
         var existing = {};
@@ -3995,7 +4026,7 @@
         if (old) old.remove();
         var bModal = document.createElement('div');
         bModal.id = '__wo_field_browser';
-        bModal.style.cssText = 'position:fixed;top:4%;left:8%;width:78%;height:88%;background:#111;color:#eee;z-index:10000000;border-radius:8px;box-shadow:0 6px 30px rgba(0,0,0,.8);display:flex;flex-direction:column;font-family:Segoe UI,Arial,sans-serif;font-size:12px;padding:10px;';
+        bModal.style.cssText = 'position:fixed;top:4%;left:8%;width:78%;height:88%;z-index:10000000;border-radius:var(--wo-r-panel,10px);box-shadow:0 6px 30px rgba(0,0,0,.8);display:flex;flex-direction:column;font-size:12px;padding:10px;';
 
         // Group selector for target
         var grpOptions = '<option value="">-- no group --</option>' +
@@ -4005,22 +4036,22 @@
 
         bModal.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
             '<b style="font-size:13px;">Browse Page Fields</b>' +
-            '<button id="__fb_close" style="background:#333;color:#eee;border:none;padding:4px 10px;cursor:pointer;border-radius:4px;">✕ Close</button>' +
+            '<button id="__fb_close" type="button" class="wo-btn-ghost">✕ Close</button>' +
             '</div>' +
             '<div style="margin-bottom:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
-            '<input id="__fb_search" type="text" placeholder="Filter fields..." style="flex:1;min-width:150px;background:#222;color:#eee;border:1px solid #444;padding:4px 8px;border-radius:4px;font-size:12px;">' +
-            '<span style="color:#aaa;font-size:11px;">Add checked fields to group:</span>' +
-            '<select id="__fb_grp" style="background:#222;color:#eee;border:1px solid #444;padding:3px 6px;border-radius:4px;">' + grpOptions + '</select>' +
+            '<input id="__fb_search" type="text" placeholder="Filter fields..." style="flex:1;min-width:150px;">' +
+            '<span style="color:var(--wo-muted);font-size:11px;">Add checked fields to group:</span>' +
+            '<select id="__fb_grp">' + grpOptions + '</select>' +
             '</div>' +
-            '<div style="color:#777;font-size:10px;margin-bottom:4px;">' +
-            '<span style="color:#2ecc71;">■</span> Already registered &nbsp;' +
-            '<span style="color:#eee;">■</span> New field &nbsp;' +
+            '<div style="color:var(--wo-muted);font-size:10px;margin-bottom:4px;">' +
+            '<span style="color:var(--wo-pass);">■</span> Already registered &nbsp;' +
+            '<span style="color:var(--wo-text);">■</span> New field &nbsp;' +
             'Tick fields to add, then click Save.</div>' +
-            '<div id="__fb_list" style="flex:1;overflow:auto;border:1px solid #333;border-radius:4px;padding:4px;"></div>' +
+            '<div id="__fb_list" style="flex:1;overflow:auto;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:4px;"></div>' +
             '<div style="margin-top:8px;display:flex;justify-content:flex-end;gap:8px;">' +
-            '<button id="__fb_selall" style="background:#444;color:#eee;border:none;padding:4px 10px;cursor:pointer;border-radius:4px;">Select All Visible</button>' +
-            '<button id="__fb_selnone" style="background:#444;color:#eee;border:none;padding:4px 10px;cursor:pointer;border-radius:4px;">Deselect All</button>' +
-            '<button id="__fb_save" style="background:#2ecc71;color:#000;font-weight:bold;border:none;padding:6px 18px;cursor:pointer;border-radius:4px;">Save Selected</button>' +
+            '<button id="__fb_selall" type="button" class="wo-btn">Select All Visible</button>' +
+            '<button id="__fb_selnone" type="button" class="wo-btn">Deselect All</button>' +
+            '<button id="__fb_save" type="button" class="wo-btn wo-btn-pass">Save Selected</button>' +
             '</div>';
         document.body.appendChild(bModal);
 
@@ -4034,15 +4065,14 @@
                 if (fl && (f.tab + ' :: ' + f.label).toLowerCase().indexOf(fl) < 0) return;
                 var isReg = !!alreadyKeys[f.key];
                 var row = document.createElement('label');
-                row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:3px;cursor:pointer;' +
-                    (isReg ? 'background:#1a2e1a;' : 'background:#1a1a1a;') + 'margin-bottom:2px;';
+                row.className = 'wo-fb-row' + (isReg ? ' is-registered' : '');
                 row.innerHTML =
                     '<input type="checkbox" data-fkey="' + f.key.replace(/"/g, '&quot;') + '" ' + (isReg ? 'checked disabled style="opacity:0.5;"' : '') + '>' +
-                    '<span style="color:' + (isReg ? '#2ecc71' : '#eee') + ';flex:1;font-size:11px;">' +
+                    '<span class="wo-fb-label' + (isReg ? ' is-registered' : '') + '">' +
                     f.tab.replace(/</g, '&lt;') + ' :: ' + f.label.replace(/</g, '&lt;') +
                     '</span>' +
-                    '<span style="color:#888;font-size:10px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + String(f.value).replace(/"/g, '&quot;') + '">' +
-                    (f.value ? String(f.value).replace(/</g, '&lt;') : '<i style="color:#555;">empty</i>') +
+                    '<span class="wo-fb-value" title="' + String(f.value).replace(/"/g, '&quot;') + '">' +
+                    (f.value ? String(f.value).replace(/</g, '&lt;') : '<i style="color:var(--wo-muted);">empty</i>') +
                     '</span>' +
                     '<input type="hidden" data-ftab="' + f.tab.replace(/"/g, '&quot;') + '" data-flabel="' + f.label.replace(/"/g, '&quot;') + '" data-fid="' + f.id.replace(/"/g, '&quot;') + '">';
                 listEl.appendChild(row);
@@ -4310,6 +4340,11 @@
             "#__wo_setup_modal .wo-btn-ghost{background:none;border:1px solid transparent;color:var(--wo-muted);cursor:pointer;font:inherit;font-size:11px;padding:6px 8px;border-radius:var(--wo-r-ctl);}" +
             "#__wo_setup_modal .wo-btn-ghost:hover{color:var(--wo-text);background:var(--wo-field);}" +
             "#__wo_setup_modal input[type=text],#__wo_setup_modal input[type=number],#__wo_setup_modal textarea,#__wo_setup_modal select{font:inherit;font-size:11.5px;background:var(--wo-field);color:var(--wo-text);border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:5px 7px;}" +
+            // Every plain textarea only grows/shrinks vertically — a
+            // textarea that can also stretch wider than its container
+            // (the browser default) breaks the panel's own width and looks
+            // broken when snapped narrow.
+            "#__wo_setup_modal textarea{resize:vertical;}" +
             "#__wo_setup_modal input[type=text]:focus,#__wo_setup_modal input[type=number]:focus,#__wo_setup_modal textarea:focus,#__wo_setup_modal select:focus{outline:2px solid var(--wo-accent);outline-offset:-1px;border-color:var(--wo-accent);}" +
             "#__wo_setup_modal textarea.wo-code{font-family:Consolas,'Cascadia Mono',monospace;background:#010409;color:#7ee787;border-color:var(--wo-border);resize:vertical;}" +
             // Padding lives on the head and body separately, NOT on .wo-card
@@ -4330,6 +4365,11 @@
             // its own ad hoc bordered div.
             "#__wo_setup_modal .wo-subbox{border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:8px;background:var(--wo-field);}" +
             "#__wo_setup_modal .wo-subbox-accent{border-color:var(--wo-accent);}" +
+            // Visibility toggle: bright/white when the group is currently
+            // shown (an "on" state should read as emphasized, not muted),
+            // dim once it's hidden.
+            "#__wo_setup_modal .wo-vis-btn{color:var(--wo-text);}" +
+            "#__wo_setup_modal .wo-vis-btn.is-hidden{color:var(--wo-muted);}" +
             "#__wo_setup_modal .wo-kebab-wrap{position:relative;flex-shrink:0;margin-left:auto;}" +
             "#__wo_setup_modal .wo-kebab-btn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid transparent;border-radius:var(--wo-r-ctl);background:transparent;color:var(--wo-muted);cursor:pointer;flex-shrink:0;}" +
             "#__wo_setup_modal .wo-kebab-btn:hover,#__wo_setup_modal .wo-kebab-btn:focus-visible{color:var(--wo-text);background:var(--wo-border);}" +
@@ -4609,14 +4649,20 @@
                 startL = 0,
                 startT = 0,
                 mx = 0,
-                my = 0;
+                my = 0,
+                pinnedLeftResize = false;
             handleEl.addEventListener('mousedown', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
-                // A manual resize opts back out of whatever snap is active
-                // (a snapped rect is meant to track the zone, not a
-                // hand-picked size).
-                clearSnap();
+                // Resizing the east edge while pinned left is a deliberate
+                // exception: it stays pinned (still full height, still
+                // pushing Maximo) and just changes how wide that pin is,
+                // rather than treating every resize as "opt out of the
+                // snap" — every other handle still clears the snap, since a
+                // snapped rect is otherwise meant to track its zone, not a
+                // hand-picked size.
+                pinnedLeftResize = currentSnap === 'left' && mode === 'e';
+                if (!pinnedLeftResize) clearSnap();
                 var r = modal.getBoundingClientRect();
                 startW = r.width;
                 startH = r.height;
@@ -4624,7 +4670,7 @@
                 startT = modal.offsetTop;
                 mx = e.clientX;
                 my = e.clientY;
-                startPointerCapture(resize, null, cursor);
+                startPointerCapture(resize, pinnedLeftResize ? stopPinnedResize : null, cursor);
             });
 
             function resize(e) {
@@ -4655,6 +4701,14 @@
                 modal.style.top = newT + 'px';
                 modal.style.width = newW + 'px';
                 modal.style.height = newH + 'px';
+                if (pinnedLeftResize) {
+                    leftSnapWidth = newW;
+                    document.body.style.marginLeft = newW + 'px';
+                }
+            }
+
+            function stopPinnedResize() {
+                saveLeftSnapWidth(leftSnapWidth);
             }
         }
         attachResizeHandle(modal.querySelector('#__s_resize'), 'se', 'nwse-resize');
@@ -4767,11 +4821,19 @@
 
         var content = modal.querySelector('#__s_content');
         var renamingRuleId = null;
-        // Rule id -> expanded (true/false). Lives for the lifetime of this
-        // modal instance so switching tabs away from Rules and back doesn't
+        var renamingGroupId = null;
+        // Rule/group id -> expanded (true/false). Lives for the lifetime of
+        // this modal instance so switching tabs away and back doesn't
         // re-collapse everything; only a fresh openSetup() (new closure) or
-        // an explicit re-click of the already-active Rules tab clears it.
+        // an explicit re-click of the already-active tab's header clears it.
         var ruleExpandState = {};
+        var groupExpandState = {};
+        // Tab id -> scrollTop of #__s_content, saved just before switching
+        // away from a tab and restored right after switching back to it, so
+        // returning to a tab doesn't dump you back at the top. Reset only
+        // by a fresh openSetup() (i.e. leaving and reopening Setup).
+        var tabScrollPos = {};
+        var currentTabId = '__s_rules';
 
         // --- edge snapping ---
         // null | 'left' | 'right' | 'top-left' | 'top-right'. Restored from
@@ -4785,6 +4847,18 @@
         // between the tab groups that resizing can never close.
         var MODAL_MIN_W = 360,
             MODAL_MIN_H = 320;
+        // Width used while snapped 'left' — resizable via the east edge
+        // without unsnapping (see attachResizeHandle), so it's tracked and
+        // persisted separately from the one-time initial snap width.
+        var leftSnapWidth = st.leftSnapWidth || MODAL_MIN_W;
+
+        function saveLeftSnapWidth(w) {
+            leftSnapWidth = w;
+            st.leftSnapWidth = w;
+            var liveSt = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+            liveSt.leftSnapWidth = w;
+            localStorage.setItem('__wo_settings', JSON.stringify(liveSt));
+        }
 
         function getMainPanelWidth() {
             var dock = document.getElementById('__wo_dock');
@@ -4802,7 +4876,7 @@
             if (zone === 'left') return {
                 left: 0,
                 top: 0,
-                width: MODAL_MIN_W,
+                width: leftSnapWidth,
                 height: vh
             };
             if (zone === 'right') return {
@@ -4855,7 +4929,7 @@
             modal.style.top = rect.top + 'px';
             modal.style.width = rect.width + 'px';
             modal.style.height = rect.height + 'px';
-            document.body.style.marginLeft = zone === 'left' ? MODAL_MIN_W + 'px' : '';
+            document.body.style.marginLeft = zone === 'left' ? leftSnapWidth + 'px' : '';
             currentSnap = zone;
             saveSetupSnap(zone);
         }
@@ -5407,31 +5481,35 @@
                     group.fieldRows = rowsConfig;
                 }
 
+                var isRenaming = renamingGroupId === group.id;
+                var titleHtml = isRenaming ?
+                    '<input type="text" value="' + group.title.replace(/"/g, '&quot;') + '" data-ti class="wo-rule-title-input" onclick="event.stopPropagation()">' :
+                    '<span class="wo-rule-title">' + String(group.title).replace(/</g, '&lt;') + '</span>';
+                // Same eye path as the main panel's "Hide this group" — plus
+                // the diagonal slash only when currently hidden, so the two
+                // states share one glyph instead of two unrelated icons.
+                var EYE_PATH = '<path d="M1.5 8.4C3 5.6 5.4 3.6 8 3.6C10.6 3.6 13 5.6 14.5 8.4C13 11.2 10.6 13.2 8 13.2C5.4 13.2 3 11.2 1.5 8.4Z" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8.4" r="1.9" stroke="currentColor" stroke-width="1.3"/>';
+                var visIconSvg = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">' + EYE_PATH + (vis ? '' : '<path d="M2.5 2.5L13.5 14.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>') + '</svg>';
+
                 box.innerHTML =
                     '<div data-coll-header class="wo-card-head">' +
-                    '<span data-coll-arrow class="wo-card-arrow">▶</span>' +
-                    '<input type="text" value="' + group.title.replace(/"/g, '&quot;') + '" data-ti class="wo-rule-title-input" style="flex:0 1 45%;" onclick="event.stopPropagation()"> ' +
-                    '<label onclick="event.stopPropagation()"><input type="checkbox" data-v ' + (vis ? 'checked' : '') + '> Visible</label> ' +
-                    '<button data-d type="button" class="wo-btn-ghost wo-kebab-item-danger" style="margin-left:auto;" onclick="event.stopPropagation()">Delete</button>' +
+                    titleHtml +
+                    '<button data-vis type="button" class="wo-btn-ghost wo-vis-btn' + (vis ? '' : ' is-hidden') + '" aria-label="' + (vis ? 'Hide this group' : 'Show this group') + '" onclick="event.stopPropagation()">' + visIconSvg + '</button>' +
+                    '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
+                    '<button data-kebab type="button" class="wo-kebab-btn" aria-label="Group actions" aria-haspopup="true">' +
+                    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="3" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="13" r="0.7" stroke="currentColor" stroke-width="1.4"/></svg>' +
+                    '</button>' +
+                    '</span>' +
                     '</div>' +
                     '<div data-coll-body>' +
-                    '<div style="margin-top:4px;">Layout: <select data-la><option value="vertical" ' + (group.layout === 'vertical' ? 'selected' : '') + '>Vertical</option><option value="horizontal" ' + (group.layout === 'horizontal' ? 'selected' : '') + '>Horizontal</option></select> <label><input type="checkbox" data-c ' + (group.defaultCollapsed ? 'checked' : '') + '> Collapsed by default</label></div>' +
                     '<div style="margin-top:4px;"><label>Tooltip:</label><br><input type="text" data-tt value="' + (group.tooltip || '').replace(/"/g, '&quot;') + '" style="width:100%;margin-top:2px;"></div>' +
                     '<div style="margin-top:4px;"><label>Expanded Message:</label><br><textarea data-em style="width:100%;height:44px;margin-top:2px;color:var(--wo-accent);">' + (group.expandedMsg || '').replace(/</g, '&lt;') + '</textarea></div>' +
+                    '<div style="margin-top:6px;"><label><input type="checkbox" data-c ' + (group.defaultCollapsed ? 'checked' : '') + '> Collapsed by default</label></div>' +
                     '<div style="margin-top:6px;"><b>Table:</b> <select data-tb>' + to + '</select></div>' +
                     '<div style="margin-top:6px;" id="__roweditor_' + idx + '"><b>Field Rows</b> <button data-addrow type="button" class="wo-btn-ghost" style="margin-left:6px;">+ Add Row</button><div data-rowlist style="margin-top:4px;"></div></div>' +
                     '<div style="margin-top:6px;max-height:90px;overflow:auto;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:4px;"><b>Rules:</b>' + rc + '</div>' +
                     '<div class="wo-subbox" style="margin-top:8px;" id="__hm_block_' + idx + '">' +
                     '<label style="display:flex;align-items:center;gap:6px;font-size:11px;"><input type="checkbox" id="__hm_en_' + idx + '" ' + (group.headerMsg && group.headerMsg.enabled ? 'checked' : '') + '><b>Show inline header message</b></label>' +
-                    '<div class="wo-subbox wo-subbox-accent" style="margin-top:6px;">' +
-                    '<b style="color:var(--wo-accent);font-size:11px;">Variable Fields</b> <span style="color:var(--wo-muted);font-size:10px;">(shown in expanded group body)</span><br>' +
-                    '<div id="__vf_list_' + idx + '" style="margin-top:4px;">' +
-                    (getVars().map(function(v) {
-                        var checked = (group.varFields || []).indexOf(v.id) >= 0;
-                        return '<label style="display:block;font-size:11px;"><input type="checkbox" data-vref="' + v.id + '" ' + (checked ? 'checked' : '') + '> ' + v.label + ' <code style="color:var(--wo-muted);font-size:9px;">' + v.id + '</code></label>';
-                    }).join('') || '<span style="color:var(--wo-muted);font-size:10px;">No variables defined — create them in the Variables tab.</span>') +
-                    '</div>' +
-                    '</div>' +
                     '<div id="__hm_opts_' + idx + '" style="margin-top:6px;' + (group.headerMsg && group.headerMsg.enabled ? '' : 'display:none;') + '">' +
                     '<div style="margin-bottom:4px;">Type: ' +
                     '<select id="__hm_type_' + idx + '">' +
@@ -5472,7 +5550,87 @@
 
 
                 content.appendChild(box);
-                makeCollapsible(box, group.title);
+                makeCollapsible(box, group.title, !groupExpandState[group.id], function(expandedNow) {
+                    groupExpandState[group.id] = expandedNow;
+                });
+
+                var titleInput = box.querySelector('[data-ti]');
+                if (titleInput) {
+                    titleInput.oninput = function(e) {
+                        group.title = e.target.value;
+                    };
+                    titleInput.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            titleInput.blur();
+                        }
+                    });
+                    titleInput.addEventListener('blur', function() {
+                        renamingGroupId = null;
+                        groupsTab();
+                    });
+                    titleInput.focus();
+                    titleInput.select();
+                }
+
+                box.querySelector('[data-vis]').onclick = function() {
+                    var g2 = getGS();
+                    if (!g2[group.id]) g2[group.id] = {};
+                    g2[group.id].visible = !vis;
+                    saveGS(g2);
+                    groupsTab();
+                };
+
+                var kebabBtn = box.querySelector('[data-kebab]');
+                kebabBtn.onclick = function() {
+                    var wasOpen = !!openRuleMenu;
+                    closeRuleMenu();
+                    if (wasOpen) return;
+                    var menu = document.createElement('div');
+                    menu.className = 'wo-kebab-menu';
+                    menu.innerHTML =
+                        '<button data-rename type="button" class="wo-kebab-item">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M11 2.5L13.5 5L5.5 13H3V10.5L11 2.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
+                        '<span>Rename</span>' +
+                        '</button>' +
+                        '<button data-dup type="button" class="wo-kebab-item">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
+                        '<span>Duplicate</span>' +
+                        '</button>' +
+                        '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
+                        '<span>Delete</span>' +
+                        '</button>';
+                    menu.style.position = 'fixed';
+                    var btnRect = kebabBtn.getBoundingClientRect();
+                    menu.style.top = (btnRect.bottom + 4) + 'px';
+                    menu.style.right = (window.innerWidth - btnRect.right) + 'px';
+                    modal.appendChild(menu);
+                    var mr = menu.getBoundingClientRect();
+                    if (mr.bottom > window.innerHeight) menu.style.top = Math.max(4, btnRect.top - mr.height - 4) + 'px';
+                    menu.querySelector('[data-rename]').onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        renamingGroupId = group.id;
+                        groupsTab();
+                    };
+                    menu.querySelector('[data-dup]').onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        var copy = JSON.parse(JSON.stringify(group));
+                        copy.id = 'g_' + Date.now();
+                        copy.title = group.title + ' (copy)';
+                        cfg.groups.splice(idx + 1, 0, copy);
+                        groupsTab();
+                    };
+                    menu.querySelector('[data-del]').onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        cfg.groups.splice(idx, 1);
+                        groupsTab();
+                    };
+                    openRuleMenu = menu;
+                };
 
                 // ── header message controls ──
                 (function(grp, i) {
@@ -5572,9 +5730,10 @@
                         });
                         var addBtn = document.createElement('button');
                         addBtn.type = 'button';
-                        addBtn.textContent = '+field';
+                        addBtn.textContent = '+';
                         addBtn.className = 'wo-btn-ghost';
-                        addBtn.style.cssText = 'font-size:10px;flex-shrink:0;';
+                        addBtn.style.cssText = 'font-size:12px;flex-shrink:0;padding:3px 7px;';
+                        attachTooltip(addBtn, 'Add field');
                         addBtn.onclick = function() {
                             row.push(opts.fields[0] || '');
                             group.fields = [].concat.apply([], group.fieldRows);
@@ -5582,9 +5741,10 @@
                         };
                         var delBtn = document.createElement('button');
                         delBtn.type = 'button';
-                        delBtn.textContent = '✕row';
+                        delBtn.textContent = '✕';
                         delBtn.className = 'wo-btn-ghost wo-kebab-item-danger';
-                        delBtn.style.cssText = 'font-size:10px;flex-shrink:0;';
+                        delBtn.style.cssText = 'font-size:12px;flex-shrink:0;padding:3px 7px;';
+                        attachTooltip(delBtn, 'Delete row');
                         delBtn.onclick = function() {
                             group.fieldRows.splice(ri, 1);
                             group.fields = [].concat.apply([], group.fieldRows);
@@ -5604,23 +5764,11 @@
                     renderRows();
                 };
 
-                box.querySelector('[data-ti]').oninput = function(e) {
-                    group.title = e.target.value;
-                };
-                box.querySelector('[data-la]').onchange = function(e) {
-                    group.layout = e.target.value;
-                };
                 box.querySelector('[data-c]').onchange = function(e) {
                     group.defaultCollapsed = e.target.checked;
                 };
                 box.querySelector('[data-tb]').onchange = function(e) {
                     group.table = e.target.value || null;
-                };
-                box.querySelector('[data-v]').onchange = function(e) {
-                    var g2 = getGS();
-                    if (!g2[group.id]) g2[group.id] = {};
-                    g2[group.id].visible = e.target.checked;
-                    saveGS(g2);
                 };
                 box.querySelector('[data-tt]').oninput = function(e) {
                     group.tooltip = e.target.value || undefined;
@@ -5637,20 +5785,6 @@
                         if (!cb.checked && i >= 0) group.ruleRefs.splice(i, 1);
                     };
                 });
-                box.querySelectorAll('[data-vref]').forEach(function(cb) {
-                    cb.onchange = function() {
-                        if (!group.varFields) group.varFields = [];
-                        var vid = cb.getAttribute('data-vref');
-                        var i = group.varFields.indexOf(vid);
-                        if (cb.checked && i < 0) group.varFields.push(vid);
-                        if (!cb.checked && i >= 0) group.varFields.splice(i, 1);
-                    };
-                });
-
-                box.querySelector('[data-d]').onclick = function() {
-                    cfg.groups.splice(idx, 1);
-                    groupsTab();
-                };
             });
             var b = document.createElement('button');
             b.type = 'button';
@@ -6519,8 +6653,11 @@
                 // everything else (switching away and back) must leave it
                 // alone, so this only fires on a genuine re-click.
                 if (onReclick && this.classList.contains('is-active')) onReclick();
+                tabScrollPos[currentTabId] = content.scrollTop;
                 activateTab(id);
                 fn();
+                currentTabId = id;
+                content.scrollTop = tabScrollPos[id] || 0;
             };
         }
         bindTab('__s_guide', guideTab);
@@ -6528,7 +6665,9 @@
             ruleExpandState = {};
         });
         bindTab('__s_vars', varsTab);
-        bindTab('__s_groups', groupsTab);
+        bindTab('__s_groups', groupsTab, function() {
+            groupExpandState = {};
+        });
         bindTab('__s_scan', scanTab);
         bindTab('__s_profiles', profilesTab);
         bindTab('__s_settings', settingsTab);
