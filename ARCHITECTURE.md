@@ -206,6 +206,77 @@ persists the *shared* object back to localStorage. (This exact bug shipped
 once, in the Beta tab, and was fixed in v0.21.2 — see the version.json
 changelog for that release before repeating it.)
 
+### 4.2 Save & Apply dirty-tracking
+
+`#__s_save` is disabled whenever `JSON.stringify({cfg, scan, st})` still
+matches the snapshot taken at `openSetup()` time — a whole-object compare,
+not per-field dirty flags, so it **automatically covers any setting added
+later with no extra wiring**. Re-checked via a debounced (150ms)
+`MutationObserver` on `#__s_content` (catches drag-reorder, add/delete rows,
+toggles) plus a plain `input`/`change` listener (catches keystrokes, which
+don't touch the DOM tree). One harmless quirk: a few settings (e.g.
+`settingsTab`'s hotkey/message fields) already auto-persist on `input` via
+their own listener, so the button can go "dirty" even though that particular
+edit is already saved — clicking Save & Apply again just re-saves the same
+data.
+
+**Save & Apply no longer closes the modal** — it persists, re-renders the
+main panel, then refreshes whichever Setup tab is currently active in place
+(via a `tabFns` map populated by `bindTab`), restoring scroll position, then
+re-takes `__woSetupSnapshot` and re-runs `updateSaveButtonState()` so the
+button goes grey again immediately rather than staying enabled. Guide and
+Feedback are excluded from the refresh: Guide's "render" is `window.open()`
+(would spawn a new tab on every save), and Feedback would wipe an
+in-progress draft. **Any future change to this handler must keep
+re-snapshotting after save** — skip it and the grey-out from §4.2 breaks
+(the button would stay permanently enabled after the first save, since the
+snapshot would never again match the live objects).
+
+### 4.3 Reset / Uninstall (Settings tab)
+
+Two buttons, both explicitly framed as resets, not permanent removal — the
+bookmarklet always reinstalls on the next click, so nothing can be removed
+from a page you don't control:
+- **Reset Tool (Keep My Config)** — same snapshot-then-wipe-all-`__wo_`-keys
+  pattern as `revokeAccessLocally()`/`revokeLocal()` (§3), reusing
+  `EPHEMERAL_KEYS`/`REVOKED_BACKUP_KEY`. `loader.js`'s
+  `restoreFromRevokedBackupIfAny()` picks the snapshot back up automatically
+  on the next successful grant check — no separate restore path needed.
+- **Full Reset (Erase Everything)** — same as the existing `window.__woReset()`
+  console helper: wipes every `__wo_` key AND deletes the `__wo_tool_db`
+  IndexedDB database (forgets the linked backup-file handle), no snapshot.
+  Double-confirms since there's no way back.
+
+### 4.4 Per-entry tooltips (Rules/Groups/Variables/Scan)
+
+Each entry can carry an optional `.tooltip` string (`rule.tooltip`,
+`group.tooltip`, `v.tooltip`, `s.tooltip`) — same property name everywhere,
+including Groups' pre-existing `tooltip` field (already used for the main
+panel's group-header hover icon; the Setup-tab icon added alongside it is a
+separate, new location, not a duplicate feature). Three shared helpers
+(defined once, right after `thWithTip`, reused by all four tabs):
+- `entryTipIconHtml(entry)` — returns the icon's HTML, or `''` if the entry
+  has no tooltip text. **The icon is never emitted as hidden-but-present**;
+  an entry with nothing set gets no icon in the DOM at all.
+- `wireEntryTipIcon(box, entry)` — attaches the floating tooltip to whatever
+  `entryTipIconHtml()` rendered (a no-op if it rendered nothing).
+- `wireEditTooltipKebabItem(menu, entry, entryLabel, rerenderFn)` — wires the
+  4th kebab-menu item (`EDIT_TOOLTIP_KEBAB_HTML`, alongside Rename/
+  Duplicate/Delete) to a `prompt()`-based editor. A plain prompt rather than
+  an inline field — four near-identical call sites, not worth a richer
+  editor for one short text value.
+
+The icon itself only becomes visible on `[data-reorder-card]:hover` /
+`:focus-within` (`.wo-entry-tip-icon`, CSS), the same show-on-card-hover
+treatment as the existing drag-handle/move-buttons — so a long list of
+entries with tooltips set doesn't look any busier at rest than one without.
+
+**Adding tooltip support to a new Setup entry type**: give it a `.tooltip`
+field, call `entryTipIconHtml(entry)` right after the title in its header
+markup, call `wireEntryTipIcon(box, entry)` after the card is built, and add
+`EDIT_TOOLTIP_KEBAB_HTML` + `wireEditTooltipKebabItem(...)` to its kebab menu
+alongside the other three items.
+
 ---
 
 ## 5. Rule / scan engine
@@ -225,10 +296,13 @@ changelog for that release before repeating it.)
   `actions` (post-scan field-fill actions).
 - **`runActions(step, mode)`** — executes `step.actions`. Each action has
   `fieldId`, `value` (a formula string), `condition` (optional gate), and
-  `runOn` (`'both'` default / `'scan'` / `'fix'` — only rendered/editable in
-  the Scan tab UI when beta_1 is on, but the field itself is preserved
-  untouched in a non-beta user's config either way — it just never gates
-  anything if beta_1 is off, since `mode` is always `'scan'` for them).
+  `runOn` (`'both'` default / `'scan'` / `'fix'`). The entire Post-Scan
+  Actions feature — editor AND execution — is gated behind `beta_1`
+  (`runActions()` no-ops immediately if `!isBetaFeatureOn('beta_1')`, and the
+  Scan tab renders a "enable Fix beta feature" notice instead of the editor).
+  Untested alongside Fix, same reasoning. A non-beta user's existing
+  `s.actions` config is left untouched in storage — it just goes dormant,
+  never deleted.
 - **Table capture** — read directly off the live DOM (`findAllDocs()` walks
   every frame), keyed by column header, exposed via `T()`/`rowCount()`/`col()`/`has()`.
 
@@ -256,9 +330,11 @@ Fix hotkey sits right next to the Scan hotkey), marked with a `.wo-beta-pill`
 
 Current features:
 - `beta_1` — Route symbol + Fix action (rescan + reapply "Fix"/"both"
-  actions) next to Return/Approve, plus the Scan tab's per-action "Run on"
-  option. See `HOTKEY_ACTIONS`'s `fix` entry and the `betaRouteOn` branch in
-  the main panel's footer-building code.
+  actions) next to Return/Approve, plus the entire Post-Scan Actions feature
+  (editor in the Scan tab + `runActions()` execution — see §5). All bundled
+  under one flag since they're the same untested code path. See
+  `HOTKEY_ACTIONS`'s `fix` entry and the `betaRouteOn` branch in the main
+  panel's footer-building code.
 
 **Adding a new feature**: add a `BETA_FEATURES` entry, gate every bit of its
 UI/behavior behind `isBetaFeatureOn(newId)`, and if it needs its own hotkey
@@ -305,6 +381,15 @@ overwrite fields with no confirmation, unlike Return/Approve which confirm.
 - `animateBodyToggle(body, expand)` — shared expand/collapse height
   transition, duplicated the same way (outer scope + inside `openSetup()`).
 - `animateSwap(...)` — FLIP-style animation for move-up/down button clicks.
+- `applyResponsiveTabFit()` — two escalating tiers as the Setup tab bar runs
+  out of room, always recomputed from a clean baseline (never just delta'd)
+  so growing the modal back out correctly reverses both: (1) shrink AUTO
+  then BOTH-pinned tabs to icon-only, lowest-priority (rightmost) first; (2)
+  if the bar *still* overflows even fully icon-shrunk, hide all four
+  `.wo-tab-group-end` tabs (Guide/Feedback/Export/Import) and show `#__s_more`
+  instead — a single button that opens a `.wo-kebab-menu`-styled list; each
+  item just calls `.click()` on the real (hidden) tab button rather than
+  duplicating its `bindTab()`-wired switch logic.
 
 ---
 
@@ -333,8 +418,30 @@ mistake — check both tags exist before considering a release done.
 
 - `EPHEMERAL_KEYS` (the "don't back this up on revoke" exclude-list) is
   hand-duplicated between `loader.js` and `wo_tool.js` — any new
-  ephemeral-but-not-real-config key has to be added to both manually.
+  ephemeral-but-not-real-config key has to be added to both manually. (Both
+  copies list the same 6 keys as of v0.21.2 — `__wo_grant_cache` was missing
+  from `wo_tool.js`'s copy until then, added for consistency.)
 - `caches.default` (Worker edge cache) is regional, not global — see §3.1.
-- `version.json` grows unbounded — nothing trims old entries.
+- `version.json` grows unbounded — nothing trims old entries. **Trimming old
+  `versions` array entries is safe** for exact pins and unpinned
+  channels — `resolveUpdateTarget()` fetches by git tag (`/tool?version=X`),
+  independent of whether the manifest still lists that version. The one path
+  that isn't safe: a **floating minor pin** (`"0.20"`) whose entire line has
+  no entries left in `versions` — `resolveFloatingMinor()` used to silently
+  fall back to the channel/latest version while the UI kept saying "pinned to
+  0.20.x," a real track-jump with no warning. Fixed (see the `pinMissing`
+  flag on `resolveUpdateTarget()`'s return value): it now holds at the
+  currently-installed version and reports "pin has no builds left in the
+  manifest" instead. **Rule for future manifest cleanup: never delete the git
+  tag; trimming the changelog entry is fine except it can strand a floating
+  pin exactly as described above** — if trimming an entire minor line that
+  someone might have floating-pinned to, expect them to see that message.
 - Feedback issues get no labels — could auto-tag `type:bug`/`type:suggestion`
   in the private repo if labels are ever set up there.
+- `settingsTab()` adds a fresh `content.addEventListener('input', saveSettings)`
+  every time the tab is (re-)rendered, and never removes the previous one —
+  `content` itself is never replaced (only its `innerHTML`), so listeners
+  stack across repeated visits to the Settings tab within the same Setup
+  session. Harmless today since `saveSettings` is idempotent (just re-writes
+  the same `st` object per keystroke), but worth fixing if it ever stops
+  being idempotent.

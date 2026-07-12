@@ -1,10 +1,28 @@
 {
-  "latest": "0.21.2",
+  "latest": "0.22.0",
   "channels": {
-    "stable": "0.21.2",
-    "beta": "0.21.2"
+    "stable": "0.22.0",
+    "beta": "0.22.0"
   },
   "versions": [
+    {
+      "version": "0.22.0",
+      "name": "Entry Tooltips + Setup Polish",
+      "changes": [
+        "New: Rules, Groups, Variables, and Scan entries can each have a plain-English tooltip (info icon next to the title, visible on hover) - set via the kebab menu's new \"Edit Tooltip\" action, or Groups' existing inline Tooltip field.",
+        "New: when the Setup window gets too narrow for the tab bar even after icon-shrinking every tab, Guide/Feedback/Export/Import collapse into a single \"...\" menu instead of overflowing off the edge.",
+        "Save & Apply no longer closes Setup - it saves, refreshes the active tab in place, and stays open.",
+        "Save & Apply now greys out automatically whenever there's nothing to save.",
+        "Fixed: the return-message Copy button could copy a stale/previous message before the first scan instead of what's actually shown - it's now disabled until there's something real to copy, and always copies exactly what's displayed.",
+        "Fixed: a return message prefix/suffix (greeting/signature) no longer appears on its own with no actual message in between.",
+        "Fixed: a floating version pin (e.g. \"0.20.x\") whose whole line got trimmed from the changelog was silently jumping to the latest version instead of saying so.",
+        "All hotkeys now live under one \"Hotkeys\" section in Settings instead of one card each.",
+        "Post-Scan Actions (the whole feature, not just \"Run on\") is now gated behind the same beta flag as Fix, since both are the same untested code path.",
+        "Beta tab: removed the explanation text, added a compact \"Your access\" line; Fix button is now yellow with a wrench icon; the Route symbol is larger.",
+        "Settings now has a Reset/Uninstall section: reset the tool while keeping your config, or erase everything for a fresh start.",
+        "Every tooltip in the tool (including the ones that were still using the browser's native hover text) now uses the same floating style."
+      ]
+    },
     {
       "version": "0.21.2",
       "name": "Audit Fixes",

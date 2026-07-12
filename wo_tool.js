@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.21.2';
+    var TOOL_VERSION = '0.22.0';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -1757,7 +1757,7 @@
     // time the bookmarklet runs) comes back whole. Same exclude-list and
     // same REVOKED_BACKUP_KEY as loader.js's revokeLocal() — kept in sync
     // manually since the two files are fetched/run independently.
-    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_grants', '__wo_known_hosts', '__wo_last_scanned_wo'];
+    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_grants', '__wo_known_hosts', '__wo_last_scanned_wo', '__wo_grant_cache'];
     var REVOKED_BACKUP_KEY = '__wo_revoked_backup';
 
     function revokeAccessLocally() {
@@ -1966,12 +1966,24 @@
         var channels = remote.channels || {};
         var pinned = !!pin;
         var version;
+        var pinMissing = false;
         if (pinned && isFloatingMinorPin(pin)) {
-            // Resolve to the newest patch in that line. If the line has no
-            // entries in the manifest at all (shouldn't normally happen),
-            // fall back to the channel rather than stranding the user on a
-            // pin that resolves to nothing.
-            version = resolveFloatingMinor(pin, remote.versions) || channels[channel] || channels.stable || remote.latest;
+            version = resolveFloatingMinor(pin, remote.versions);
+            if (!version) {
+                // The manifest's `versions` array no longer has ANY entry
+                // for this minor line — e.g. an admin trimmed old changelog
+                // entries. Falling back to channels/latest here would
+                // silently jump the user onto a different line than the one
+                // they explicitly pinned to, while the UI kept saying
+                // "pinned to X.Y (floating)" — a real bug caught in review.
+                // Holding at the currently-installed version is the safe
+                // default: worst case is a stale build kept one version
+                // longer, not an unannounced track-jump. Manifest trimming
+                // is otherwise always safe — see ARCHITECTURE.md's update
+                // section — this is the one path that isn't.
+                version = TOOL_VERSION;
+                pinMissing = true;
+            }
         } else {
             version = pin || channels[channel] || channels.stable || remote.latest;
         }
@@ -1980,7 +1992,8 @@
             version: version,
             pinned: pinned,
             pinKind: pinned ? (isFloatingMinorPin(pin) ? 'floating' : 'exact') : null,
-            pinRaw: pin
+            pinRaw: pin,
+            pinMissing: pinMissing
         };
     }
 
@@ -2016,9 +2029,11 @@
 
                 if (target.version === TOOL_VERSION) {
                     dismissUpdateBanner();
-                    var pinnedLabel = target.pinKind === 'floating' ?
-                        'Pinned to ' + target.pinRaw + '.x (v' + TOOL_VERSION + ')' :
-                        'Pinned to v' + TOOL_VERSION;
+                    var pinnedLabel = target.pinMissing ?
+                        'Pin ' + target.pinRaw + '.x has no builds left in the manifest — staying on v' + TOOL_VERSION :
+                        (target.pinKind === 'floating' ?
+                            'Pinned to ' + target.pinRaw + '.x (v' + TOOL_VERSION + ')' :
+                            'Pinned to v' + TOOL_VERSION);
                     setStatus((target.pinned ?
                         pinnedLabel :
                         'Running the latest ' + target.channel + ' version (v' + TOOL_VERSION + ')') + grantsStatusLine());
@@ -2384,6 +2399,12 @@
     // the default, 'scan', or 'fix') decides whether it's eligible to fire
     // on this particular run, independent of its condition formula.
     function runActions(step, mode) {
+        // Post-Scan Actions is beta_1-gated end to end (editor + execution)
+        // alongside Fix — same reasoning as Fix itself: unproven, so it
+        // shouldn't silently write to Maximo for anyone who hasn't
+        // opted in. Existing action config is left alone in storage either
+        // way; it just goes dormant instead of being deleted.
+        if (!isBetaFeatureOn('beta_1')) return;
         var actions = (step && step.actions) || [];
         if (!actions.length) return;
         actions.forEach(function(action) {
@@ -3630,8 +3651,7 @@
         window.dispatchEvent(new Event('resize'));
         var btn = panel.querySelector('#__wo_collapse_btn');
         if (btn) {
-            btn.title = collapsed ? 'Expand panel' : 'Collapse panel';
-            btn.setAttribute('aria-label', btn.title);
+            btn.setAttribute('aria-label', collapsed ? 'Expand panel' : 'Collapse panel');
             btn.textContent = collapsed ? '◀' : '▶';
         }
         var s = {};
@@ -3796,6 +3816,8 @@
             "#__wo_dock .wo-qr-box.wo-empty-text{color:var(--wo-muted);}" +
             "#__wo_dock .wo-qr-copy{position:absolute;top:6px;right:6px;display:flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border-radius:var(--wo-r-ctl);}" +
             "#__wo_dock .wo-qr-copy:hover{background:var(--wo-field);color:var(--wo-text);}" +
+            "#__wo_dock .wo-qr-copy:disabled{opacity:.35;cursor:default;}" +
+            "#__wo_dock .wo-qr-copy:disabled:hover{background:none;}" +
             "#__wo_dock .wo-icon-copy,#__wo_dock .wo-icon-check{display:block;}" +
             "#__wo_dock .wo-icon-check{color:var(--wo-pass);}" +
             "#__wo_dock .wo-action-row{display:flex;gap:7px;margin:8px 0 4px;align-items:stretch;}" +
@@ -3803,9 +3825,10 @@
             // beta_1-only: a plain non-interactive glyph, never a button —
             // no background/border/hover, no click handler. Purely a visual
             // label ahead of Return/Fix/Approve, not one of the actions.
-            "#__wo_dock .wo-route-symbol{display:flex;align-items:center;justify-content:center;flex:0 0 auto;width:28px;color:var(--wo-muted);cursor:default;}" +
+            "#__wo_dock .wo-route-symbol{display:flex;align-items:center;justify-content:center;flex:0 0 auto;width:36px;color:var(--wo-muted);cursor:default;}" +
             "#__wo_dock .wo-btn-block.wo-btn-icon{display:inline-flex;align-items:center;justify-content:center;gap:7px;}" +
             "#__wo_dock .wo-btn-pass{background:var(--wo-pass);color:#04210c;border-color:var(--wo-pass);}" +
+            "#__wo_dock .wo-btn-warn{background:var(--wo-warn);color:#241900;border-color:var(--wo-warn);}" +
             "#__wo_dock .wo-btn-fail{background:var(--wo-fail);color:#2b0705;border-color:var(--wo-fail);}" +
             "#__wo_dock .wo-showall{width:100%;margin-top:4px;text-align:center;}" +
             "#__wo_dock .wo-footer{text-align:center;color:var(--wo-muted);font-size:10px;padding:8px 0 2px;opacity:.7;}" +
@@ -3851,7 +3874,7 @@
         panel.style.cssText = 'position:fixed;top:0;right:0;width:' + (startCollapsed ? 0 : PANEL_W) + 'px;height:100vh;background:#0d1117;z-index:999999;font-size:12px;display:flex;flex-direction:column;box-shadow:-4px 0 14px rgba(0,0,0,.5);';
         panel.style.setProperty('--wo-header-h', getHostHeaderHeight() + 'px');
         panel.innerHTML =
-            '<button id="__wo_collapse_btn" class="wo-collapse-btn" type="button" title="' + (startCollapsed ? 'Expand panel' : 'Collapse panel') + '" aria-label="' + (startCollapsed ? 'Expand panel' : 'Collapse panel') + '">' + (startCollapsed ? '◀' : '▶') + '</button>' +
+            '<button id="__wo_collapse_btn" class="wo-collapse-btn" type="button" aria-label="' + (startCollapsed ? 'Expand panel' : 'Collapse panel') + '">' + (startCollapsed ? '◀' : '▶') + '</button>' +
             '<div class="wo-head">' +
             '<div class="wo-head-title"><b>Will\'s WO</b><span>Review Tool</span></div>' +
             '<div class="wo-head-ver">v' + TOOL_VERSION + '</div>' +
@@ -3912,6 +3935,9 @@
         // recomputed fresh on every hover, so it can never go stale the way
         // a one-time title= string could.
         attachTooltip(panel.querySelector('#__wo_rescan'), scanBtnTooltipText);
+        attachTooltip(panel.querySelector('#__wo_collapse_btn'), function() {
+            return panel.classList.contains('is-collapsed') ? 'Expand panel' : 'Collapse panel';
+        });
     }
 
     function renderScanLog() {
@@ -3968,7 +3994,11 @@
             if (msg) parts.push(msg);
         });
         var body = parts.join(delim);
-        var full = (prefix ? prefix + (body ? delim : '') : '') + body + (suffix ? (body || prefix ? ' ' : '') + suffix : '');
+        // Prefix/suffix only ever wrap an actual message — showing just a
+        // greeting + signature with nothing in between reads as broken, not
+        // like a real return message.
+        if (!body) return '';
+        var full = (prefix ? prefix + delim : '') + body + (suffix ? ' ' + suffix : '');
         return full.trim();
     }
 
@@ -4075,17 +4105,19 @@
                 statuses.sort(function(a, b) {
                     return STATUS_PRIORITY.indexOf(a.status) - STATUS_PRIORITY.indexOf(b.status);
                 });
+                var badgeTip = '';
                 if (statuses.length === 1) {
                     var only = statuses[0];
                     var badgeText = only.status === 'error' ? 'ERR' : only.status;
-                    badgeHtml = '<span class="wo-group-badge" style="background:' + statusColor(only.status) + ';" title="' + only.label.replace(/"/g, '&quot;') + ': ' + badgeText + '">' + badgeText + '</span>';
+                    badgeTip = only.label + ': ' + badgeText;
+                    badgeHtml = '<span class="wo-group-badge" style="background:' + statusColor(only.status) + ';">' + badgeText + '</span>';
                 } else if (statuses.length === 2) {
                     // Even split, thin divider, symbols instead of text —
                     // there's still room for both to read clearly at 21px.
-                    var tip2 = statuses.map(function(s) {
+                    badgeTip = statuses.map(function(s) {
                         return s.label + ': ' + s.status;
                     }).join(' • ');
-                    badgeHtml = '<span class="wo-badge-multi" title="' + tip2.replace(/"/g, '&quot;') + '">' +
+                    badgeHtml = '<span class="wo-badge-multi">' +
                         statuses.map(function(s) {
                             return '<span class="wo-badge-seg" style="background:' + statusColor(s.status) + ';">' + statusSymbol(s.status) + '</span>';
                         }).join('') +
@@ -4099,7 +4131,7 @@
                     // peeks out from behind the block in front of it — a
                     // fanned stack rather than literal equal slices, still
                     // exactly as wide overall as the 1-rule badge.
-                    var tipN = statuses.map(function(s) {
+                    badgeTip = statuses.map(function(s) {
                         return s.label + ': ' + s.status;
                     }).join(' • ');
                     var BADGE_W = 42,
@@ -4110,7 +4142,7 @@
                         var isPrimary = i === 0;
                         return '<span class="wo-badge-pill' + (isPrimary ? ' is-primary' : '') + '" style="left:' + left + 'px;width:' + PILL_W + 'px;background:' + statusColor(s.status) + ';z-index:' + (n - i) + ';">' + (isPrimary ? statusSymbol(s.status) : '') + '</span>';
                     }).join('');
-                    badgeHtml = '<span class="wo-badge-pills" title="' + tipN.replace(/"/g, '&quot;') + '">' + pillsHtml + '</span>';
+                    badgeHtml = '<span class="wo-badge-pills">' + pillsHtml + '</span>';
                 }
             }
             var tipHtml = '';
@@ -4250,7 +4282,7 @@
                     var visCols = allCols.filter(function(c) {
                         return hiddenCols.indexOf(c) < 0;
                     });
-                    bodyHtml += '<div class="wo-table-bar"><span class="wo-table-count">' + rows.length + ' row' + (rows.length !== 1 ? 's' : '') + '</span>' + '<button class="__wo_col_toggle_btn" title="Toggle visible columns">⚙ Cols</button></div>';
+                    bodyHtml += '<div class="wo-table-bar"><span class="wo-table-count">' + rows.length + ' row' + (rows.length !== 1 ? 's' : '') + '</span>' + '<button class="__wo_col_toggle_btn">⚙ Cols</button></div>';
                     bodyHtml += '<div class="__wo_col_panel" style="display:none;">';
                     allCols.forEach(function(c) {
                         var checked = hiddenCols.indexOf(c) < 0;
@@ -4374,9 +4406,11 @@
             attachTooltip(tile.querySelector('.__wo_tip_icon'), group.tooltip);
             attachTooltip(tile.querySelector('.__wo_tx'), 'Hide this group');
             if (hmText) attachTooltip(tile.querySelector('.wo-header-msg'), hmText, true);
+            if (badgeTip) attachTooltip(tile.querySelector('.wo-group-badge,.wo-badge-multi,.wo-badge-pills'), badgeTip);
             var colBtn = tile.querySelector('.__wo_col_toggle_btn');
             var colPanel = tile.querySelector('.__wo_col_panel');
             if (colBtn && colPanel) {
+                attachTooltip(colBtn, 'Toggle visible columns');
                 colBtn.onclick = function(e) {
                     e.stopPropagation();
                     colPanel.style.display = colPanel.style.display === 'none' ? 'block' : 'none';
@@ -4487,7 +4521,7 @@
             (preScan ?
                 '<i>Scan first to generate return message</i>' :
                 (retMsg ? retMsg.replace(/</g, '&lt;') : '<i>No failed rules — return message will appear here</i>')) +
-            '<button class="__wo_qr_copy wo-btn-ghost wo-qr-copy" type="button" aria-label="Copy return message">' +
+            '<button class="__wo_qr_copy wo-btn-ghost wo-qr-copy" type="button" aria-label="Copy return message"' + (retMsg ? '' : ' disabled') + '>' +
             '<svg class="wo-icon-copy" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
             '<rect x="5.5" y="5.5" width="8" height="8" rx="1.3" stroke="currentColor" stroke-width="1.3"/>' +
             '<path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/>' +
@@ -4513,7 +4547,7 @@
             // Three nodes converging into one checked final node — a
             // visual label, not a control: no button element, no
             // border/background, no click handler.
-            routeSymbol.innerHTML = '<svg width="16" height="16" viewBox="0 0 320 320" fill="none">' +
+            routeSymbol.innerHTML = '<svg width="24" height="24" viewBox="0 0 320 320" fill="none">' +
                 '<g stroke="currentColor" stroke-width="10" stroke-linecap="round">' +
                 '<line x1="65" y1="50" x2="95" y2="50"/>' +
                 '<line x1="100" y1="60" x2="60" y2="100"/>' +
@@ -4543,8 +4577,8 @@
         if (betaRouteOn) {
             var fixBtn = document.createElement('button');
             fixBtn.type = 'button';
-            fixBtn.textContent = '⚙ Fix';
-            fixBtn.className = 'wo-btn wo-btn-block';
+            fixBtn.textContent = '🔧 Fix';
+            fixBtn.className = 'wo-btn wo-btn-warn wo-btn-block';
             fixBtn.onclick = function() {
                 runScan(render, 'fix');
             };
@@ -4564,13 +4598,15 @@
         footerAreaEl.appendChild(actionRow);
 
         var qrCopyBtn = qrWrap.querySelector('.__wo_qr_copy');
-        attachTooltip(qrCopyBtn, 'Copy to clipboard');
+        attachTooltip(qrCopyBtn, retMsg ? 'Copy to clipboard' : 'Nothing to copy yet');
         qrCopyBtn.onclick = function() {
-            var msg = buildReturnMessage();
-            if (!msg) {
-                alert('No failed rules to copy.');
-                return;
-            }
+            // Copies exactly what's already displayed in the box (the
+            // closure's `retMsg`, computed once for this render) rather than
+            // recomputing — recomputing here could disagree with what's on
+            // screen (e.g. mid-edit state), and pre-scan the button is
+            // disabled anyway so this can't fire with nothing to copy.
+            var msg = retMsg;
+            if (!msg) return;
             var ta = document.createElement('textarea');
             ta.value = msg;
             document.body.appendChild(ta);
@@ -5046,6 +5082,7 @@
             "#__wo_setup_modal .wo-btn:hover{border-color:var(--wo-accent);}" +
             "#__wo_setup_modal .wo-btn:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
             "#__wo_setup_modal .wo-btn-primary{background:var(--wo-accent);color:var(--wo-on-accent);border-color:var(--wo-accent);}" +
+            "#__wo_setup_modal .wo-btn-primary:disabled{background:var(--wo-surface-2);color:var(--wo-muted);border-color:var(--wo-border);cursor:default;opacity:.6;}" +
             "#__wo_setup_modal .wo-btn-danger{color:var(--wo-fail);border-color:var(--wo-fail);}" +
             "#__wo_setup_modal .wo-btn-pass{background:var(--wo-pass);color:#04210c;border-color:var(--wo-pass);}" +
             "#__wo_setup_modal .wo-btn-ghost{background:none;border:1px solid transparent;color:var(--wo-muted);cursor:pointer;font:inherit;font-size:11px;padding:6px 8px;border-radius:var(--wo-r-ctl);}" +
@@ -5124,6 +5161,15 @@
             "#__wo_setup_modal .wo-edit-table .wo-edit-table-del{width:26px;text-align:center;padding-left:2px;padding-right:2px;}" +
             "#__wo_setup_modal .wo-th-tip{display:inline-flex;vertical-align:middle;margin-left:5px;color:var(--wo-muted);cursor:default;}" +
             "#__wo_setup_modal .wo-th-tip:hover{color:var(--wo-text);}" +
+            // Same show-on-card-hover treatment as .wo-drag-handle/.wo-move-wrap
+            // just below — an entry's tooltip icon only exists in the markup
+            // at all when it HAS tooltip text (see entryTipIconHtml()), and
+            // even then stays invisible until the card (header or body) is
+            // hovered/focused, so collapsed lists don't get visually busier
+            // for entries that happen to have one set.
+            "#__wo_setup_modal .wo-entry-tip-icon{display:inline-flex;vertical-align:middle;margin-left:5px;flex-shrink:0;color:var(--wo-muted);cursor:default;opacity:0!important;}" +
+            "#__wo_setup_modal [data-reorder-card]:hover .wo-entry-tip-icon,#__wo_setup_modal [data-reorder-card]:focus-within .wo-entry-tip-icon{opacity:1!important;}" +
+            "#__wo_setup_modal .wo-entry-tip-icon:hover{color:var(--wo-text);}" +
             // Visibility toggle: bright/white when the group is currently
             // shown (an "on" state should read as emphasized, not muted),
             // dim once it's hidden.
@@ -5261,7 +5307,7 @@
             '<span class="wo-modal-title">Setup</span>' +
             '<span class="wo-modal-title-actions">' +
             '<button id="__s_save" class="wo-btn wo-btn-primary">Save &amp; Apply</button>' +
-            '<button id="__s_close" class="wo-btn-ghost" title="Close" aria-label="Close">✕</button>' +
+            '<button id="__s_close" class="wo-btn-ghost" aria-label="Close">✕</button>' +
             '</span>' +
             '</div>' +
             '<div class="wo-modal-tabs">' +
@@ -5280,6 +5326,12 @@
             tabBtn('__s_feedback', 'feedback', 'Feedback', 'wo-tab-btn-ghost') +
             tabBtn('__s_exp', 'exp', 'Export', 'wo-tab-btn-ghost') +
             tabBtn('__s_imp', 'imp', 'Import', 'wo-tab-btn-ghost') +
+            // Hidden until applyResponsiveTabFit() decides even icon-only
+            // mode isn't enough room — then it replaces all 4 buttons above,
+            // same "..." overflow treatment as a kebab "More actions" menu.
+            '<button id="__s_more" type="button" class="wo-tab-btn wo-tab-btn-ghost wo-tab-more-btn" aria-label="More" aria-haspopup="true" style="display:none;">' +
+            '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="3" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="13" r="0.7" stroke="currentColor" stroke-width="1.4"/></svg>' +
+            '</button>' +
             '</div>' +
             '</div>' +
             '<div id="__s_content" class="wo-modal-content"></div>' +
@@ -5301,9 +5353,13 @@
             '<div class="wo-resize-corner wo-resize-corner-sw" id="__s_resize_sw"></div>';
         document.body.appendChild(modal);
         attachTooltip(modal.querySelector('#__s_resize'), 'Drag to resize');
+        attachTooltip(modal.querySelector('#__s_close'), 'Close');
         modal.querySelectorAll('.wo-tab-btn[data-tab-key]').forEach(function(b) {
+            var isGuideTab = b.getAttribute('data-tab-key') === 'guide';
             attachTooltip(b, function() {
-                return b.classList.contains('wo-tab-mode-icon') ? b.getAttribute('data-tab-label') : '';
+                var label = b.classList.contains('wo-tab-mode-icon') ? b.getAttribute('data-tab-label') : '';
+                if (isGuideTab) return (label ? label + ' — ' : '') + 'Opens in a new browser tab';
+                return label;
             });
         });
 
@@ -5362,6 +5418,17 @@
             if (!force && bar.clientWidth === lastTabFitWidth) return;
             lastTabFitWidth = bar.clientWidth;
             applyTabModeClasses();
+            // Clean baseline before recomputing, same reasoning as the
+            // icon-shrink pass below: growing the modal back out has to
+            // correctly un-collapse this too, not just leave it collapsed
+            // forever once it's ever kicked in once.
+            var moreBtn = modal.querySelector('#__s_more');
+            var endGroupTabs = Array.prototype.slice.call(modal.querySelectorAll('.wo-tab-group-end .wo-tab-btn[data-tab-key]'));
+            endGroupTabs.forEach(function(b) {
+                b.style.display = '';
+            });
+            if (moreBtn) moreBtn.style.display = 'none';
+
             var tabs = Array.prototype.slice.call(modal.querySelectorAll('.wo-tab-btn[data-tab-key]'));
             var autoCandidates = tabs.filter(function(b) {
                 return !tabModes[b.getAttribute('data-tab-key')];
@@ -5376,6 +5443,58 @@
                 next.classList.add('wo-tab-mode-icon');
                 guard++;
             }
+            // Last resort: even with every tab icon-shrunk, the bar still
+            // doesn't fit — merge Guide/Feedback/Export/Import into one
+            // "..." button (same idea as a kebab "More actions" menu)
+            // instead of letting them silently overflow off the edge.
+            if (bar.scrollWidth > bar.clientWidth + 1 && moreBtn) {
+                endGroupTabs.forEach(function(b) {
+                    b.style.display = 'none';
+                });
+                moreBtn.style.display = '';
+            }
+        }
+
+        var moreTabBtn = modal.querySelector('#__s_more');
+        if (moreTabBtn) {
+            attachTooltip(moreTabBtn, 'More');
+            moreTabBtn.onclick = function() {
+                var wasOpen = !!openRuleMenu;
+                closeRuleMenu();
+                if (wasOpen) return;
+                var hiddenTabs = Array.prototype.slice.call(modal.querySelectorAll('.wo-tab-group-end .wo-tab-btn[data-tab-key]'));
+                var menu = document.createElement('div');
+                menu.className = 'wo-kebab-menu';
+                menu.innerHTML = hiddenTabs.map(function(b) {
+                    var key = b.getAttribute('data-tab-key');
+                    return '<button type="button" class="wo-kebab-item" data-more-key="' + key + '">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">' + (TAB_ICONS[key] || '') + '</svg>' +
+                        '<span>' + b.getAttribute('data-tab-label') + '</span>' +
+                        '</button>';
+                }).join('');
+                menu.style.position = 'fixed';
+                var btnRect = moreTabBtn.getBoundingClientRect();
+                menu.style.top = (btnRect.bottom + 4) + 'px';
+                menu.style.right = (window.innerWidth - btnRect.right) + 'px';
+                modal.appendChild(menu);
+                var mr = menu.getBoundingClientRect();
+                if (mr.bottom > window.innerHeight) menu.style.top = Math.max(4, btnRect.top - mr.height - 4) + 'px';
+                menu.querySelectorAll('[data-more-key]').forEach(function(item) {
+                    item.onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        var key = item.getAttribute('data-more-key');
+                        var realBtn = hiddenTabs.filter(function(b) {
+                            return b.getAttribute('data-tab-key') === key;
+                        })[0];
+                        // Clicking the real (hidden) button reuses its full
+                        // bindTab()-wired onclick — no separate switch-tab
+                        // logic to duplicate/keep in sync here.
+                        if (realBtn) realBtn.click();
+                    };
+                });
+                openRuleMenu = menu;
+            };
         }
         var tabBarResizeObserver = new ResizeObserver(function() {
             applyResponsiveTabFit();
@@ -5640,6 +5759,46 @@
         })();
 
         var content = modal.querySelector('#__s_content');
+        // Whole-object snapshot rather than per-field dirty flags — every
+        // tab mutates cfg/scan/st in place via this same closure, so a
+        // straight JSON comparison against the snapshot taken at open time
+        // automatically covers any setting added later with no extra
+        // wiring required.
+        var __woSetupSnapshot = JSON.stringify({
+            cfg: cfg,
+            scan: scan,
+            st: st
+        });
+        var saveBtn = modal.querySelector('#__s_save');
+
+        function updateSaveButtonState() {
+            var dirty = JSON.stringify({
+                cfg: cfg,
+                scan: scan,
+                st: st
+            }) !== __woSetupSnapshot;
+            saveBtn.disabled = !dirty;
+        }
+        updateSaveButtonState();
+        // MutationObserver catches structural edits (add/delete/reorder rows,
+        // drag-and-drop, toggle clicks that don't fire input/change) with no
+        // per-control wiring; the input/change listener catches keystrokes,
+        // which don't touch the DOM tree and so wouldn't trip the observer.
+        // Debounced — drag-reorder animations mutate style attributes many
+        // times per second, and re-stringifying cfg/scan/st on every single
+        // one of those would be wasted work and could jank the drag.
+        var __woSaveCheckTimer = null;
+        new MutationObserver(function() {
+            clearTimeout(__woSaveCheckTimer);
+            __woSaveCheckTimer = setTimeout(updateSaveButtonState, 150);
+        }).observe(content, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            characterData: true
+        });
+        content.addEventListener('input', updateSaveButtonState);
+        content.addEventListener('change', updateSaveButtonState);
         var renamingRuleId = null;
         var renamingGroupId = null;
         var renamingVarId = null;
@@ -5943,13 +6102,53 @@
             return '<span>' + label + '<span class="wo-th-tip" data-th-tip="' + tip.replace(/"/g, '&quot;') + '">' + TH_TIP_SVG + '</span></span>';
         }
 
+        // ── Per-entry tooltip (Rules/Groups/Variables/Scan) ──
+        // Same "i" glyph as thWithTip's column-header tooltip, reused so
+        // every tooltip affordance in Setup looks identical. Only emitted
+        // into the header markup at all when the entry actually HAS tooltip
+        // text — an entry with none gets no icon, not a hidden/disabled one
+        // (see the "Hide tooltip symbol if no tooltip exists" requirement).
+        function entryTipIconHtml(entry) {
+            if (!entry || !entry.tooltip) return '';
+            return '<span class="wo-entry-tip-icon" data-entry-tip>' + TH_TIP_SVG + '</span>';
+        }
+
+        // Wires the floating tooltip onto whichever icon entryTipIconHtml()
+        // rendered for this box (a no-op if it rendered nothing).
+        function wireEntryTipIcon(box, entry) {
+            var el = box.querySelector('[data-entry-tip]');
+            if (el) attachTooltip(el, entry.tooltip);
+        }
+
+        // Markup for the 4th kebab-menu item every Rules/Groups/Variables/Scan
+        // entry gets, alongside Rename/Duplicate/Delete.
+        var EDIT_TOOLTIP_KEBAB_HTML = '<button data-edit-tip type="button" class="wo-kebab-item">' + TH_TIP_SVG + '<span>Edit Tooltip</span></button>';
+
+        // Wires that item: prompts for the entry's plain-English explanation
+        // (shown on hover via entryTipIconHtml/wireEntryTipIcon above),
+        // trims it, and re-renders. A plain prompt() rather than an inline
+        // editor — this is 4 near-identical call sites and a full inline
+        // editor isn't worth the duplication for a single short text field.
+        function wireEditTooltipKebabItem(menu, entry, entryLabel, rerenderFn) {
+            var btn = menu.querySelector('[data-edit-tip]');
+            if (!btn) return;
+            btn.onclick = function(ev) {
+                ev.stopPropagation();
+                closeRuleMenu();
+                var next = prompt('Tooltip for "' + entryLabel + '" — a short, plain-English explanation shown on hover. Leave blank to remove.', entry.tooltip || '');
+                if (next === null) return;
+                entry.tooltip = next.trim();
+                rerenderFn();
+            };
+        }
+
         function moveButtonsHtml(isFirst, isLast, upTitle, dnTitle) {
             upTitle = upTitle || 'Move up';
             dnTitle = dnTitle || 'Move down';
             // At a list boundary, the button for the direction that's not
             // possible is omitted entirely rather than shown dimmed/disabled.
-            var upBtn = isFirst ? '' : '<button data-mv-up type="button" class="wo-move-btn" aria-label="' + upTitle + '" title="' + upTitle + '">' + MOVE_UP_SVG + '</button>';
-            var dnBtn = isLast ? '' : '<button data-mv-dn type="button" class="wo-move-btn" aria-label="' + dnTitle + '" title="' + dnTitle + '">' + MOVE_DN_SVG + '</button>';
+            var upBtn = isFirst ? '' : '<button data-mv-up type="button" class="wo-move-btn" aria-label="' + upTitle + '">' + MOVE_UP_SVG + '</button>';
+            var dnBtn = isLast ? '' : '<button data-mv-dn type="button" class="wo-move-btn" aria-label="' + dnTitle + '">' + MOVE_DN_SVG + '</button>';
             return '<span class="wo-move-wrap" onclick="event.stopPropagation()">' + upBtn + dnBtn + '</span>';
         }
 
@@ -6002,6 +6201,8 @@
             var container = box.parentElement;
             var upBtn = box.querySelector('[data-mv-up]');
             var dnBtn = box.querySelector('[data-mv-dn]');
+            if (upBtn) attachTooltip(upBtn, upBtn.getAttribute('aria-label'));
+            if (dnBtn) attachTooltip(dnBtn, dnBtn.getAttribute('aria-label'));
             if (upBtn) upBtn.onclick = function() {
                 if (idx === 0) return;
                 var tmp = arr[idx - 1];
@@ -6183,10 +6384,24 @@
             applyHotkeys();
             closeTabCtxMenu();
             closeRuleMenu();
-            modal._woCleanup();
-            modal.remove();
             render();
             checkForUpdate();
+            // Stays open and refreshes in place instead of closing — lets you
+            // keep working, and re-draws the active tab in case saving itself
+            // changed anything relevant (e.g. update-check status). Guide is
+            // skipped since it just opens a new browser tab, not a re-render;
+            // Feedback is skipped so an in-progress draft doesn't get wiped.
+            if (currentTabId !== '__s_guide' && currentTabId !== '__s_feedback' && tabFns[currentTabId]) {
+                var savedScroll = content.scrollTop;
+                tabFns[currentTabId]();
+                content.scrollTop = savedScroll;
+            }
+            __woSetupSnapshot = JSON.stringify({
+                cfg: cfg,
+                scan: scan,
+                st: st
+            });
+            updateSaveButtonState();
         };
 
         modal.querySelector('#__s_exp').onclick = function() {
@@ -6242,6 +6457,7 @@
                     '<div data-coll-header class="wo-card-head">' +
                     DRAG_HANDLE_HTML +
                     titleHtml +
+                    entryTipIconHtml(v) +
                     moveButtonsHtml(idx === 0, idx === vars.length - 1) +
                     '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
                     '<button data-kebab type="button" class="wo-kebab-btn" aria-label="Variable actions" aria-haspopup="true">' +
@@ -6261,6 +6477,8 @@
                 makeCollapsible(box, v.label, !varExpandState[v.id], function(expandedNow) {
                     varExpandState[v.id] = expandedNow;
                 });
+                wireEntryTipIcon(box, v);
+                attachTooltip(box.querySelector('[data-kebab]'), 'More actions');
                 wireMoveButtons(box, vars, idx, function() {
                     saveVars(vars);
                     varsTab();
@@ -6319,6 +6537,7 @@
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
                         '<span>Duplicate</span>' +
                         '</button>' +
+                        EDIT_TOOLTIP_KEBAB_HTML +
                         '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger">' +
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
                         '<span>Delete</span>' +
@@ -6330,6 +6549,7 @@
                     modal.appendChild(menu);
                     var mr = menu.getBoundingClientRect();
                     if (mr.bottom > window.innerHeight) menu.style.top = Math.max(4, btnRect.top - mr.height - 4) + 'px';
+                    wireEditTooltipKebabItem(menu, v, v.label, varsTab);
                     menu.querySelector('[data-rename]').onclick = function(ev) {
                         ev.stopPropagation();
                         closeRuleMenu();
@@ -6409,9 +6629,9 @@
                 '<b style="color:' + color + ';font-size:11px;">' + label + '</b>' +
                 '</div>' +
                 '<div data-coll-body style="margin-top:7px;">' +
-                '<label style="font-size:10px;">Short (one line, shown in the group header):</label><br>' +
+                '<label style="font-size:10px;">' + thWithTip('Short:', 'One line, shown in the group header.') + '</label><br>' +
                 '<input type="text" data-short value="' + String(side.short || '').replace(/"/g, '&quot;') + '" style="width:100%;margin-top:2px;">' +
-                '<div style="margin-top:8px;color:var(--wo-muted);font-size:10px;">Long — one or more messages, each with its own optional condition. Every matching entry is shown as a bullet list.</div>' +
+                '<div style="margin-top:8px;font-size:10px;color:var(--wo-muted);">' + thWithTip('Long:', 'One or more messages, each with its own optional condition. Every matching entry is shown as a bullet list.') + '</div>' +
                 '<div data-long-list style="margin-top:5px;display:flex;flex-direction:column;gap:5px;"></div>' +
                 '<button data-add-long type="button" class="wo-btn-ghost" style="margin-top:4px;">+ Add message</button>' +
                 (includeReturn ?
@@ -6427,6 +6647,9 @@
                 '</div>';
 
             makeCollapsible(sec, label);
+            sec.querySelectorAll('[data-th-tip]').forEach(function(el) {
+                attachTooltip(el, el.getAttribute('data-th-tip'));
+            });
 
             sec.querySelector('[data-short]').oninput = function(e) {
                 side.short = e.target.value;
@@ -6494,6 +6717,7 @@
                     '<div data-coll-header class="wo-card-head">' +
                     DRAG_HANDLE_HTML +
                     titleHtml +
+                    entryTipIconHtml(rule) +
                     moveButtonsHtml(idx === 0, idx === cfg.rules.length - 1) +
                     '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
                     '<button data-kebab type="button" class="wo-kebab-btn" aria-label="Rule actions" aria-haspopup="true">' +
@@ -6522,6 +6746,8 @@
                 makeCollapsible(box, rule.label, !ruleExpandState[rule.id], function(expandedNow) {
                     ruleExpandState[rule.id] = expandedNow;
                 });
+                wireEntryTipIcon(box, rule);
+                attachTooltip(box.querySelector('[data-kebab]'), 'More actions');
 
                 var msgWrap = box.querySelector('[data-msg-sections]');
                 msgWrap.appendChild(msgSection(rule, 'pass', '✓ Pass', '#3fb950', false));
@@ -6578,6 +6804,7 @@
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
                         '<span>Duplicate</span>' +
                         '</button>' +
+                        EDIT_TOOLTIP_KEBAB_HTML +
                         '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger">' +
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
                         '<span>Delete</span>' +
@@ -6589,6 +6816,7 @@
                     modal.appendChild(menu);
                     var mr = menu.getBoundingClientRect();
                     if (mr.bottom > window.innerHeight) menu.style.top = Math.max(4, btnRect.top - mr.height - 4) + 'px';
+                    wireEditTooltipKebabItem(menu, rule, rule.label, rulesTab);
                     menu.querySelector('[data-rename]').onclick = function(ev) {
                         ev.stopPropagation();
                         closeRuleMenu();
@@ -6725,6 +6953,7 @@
                     '<div data-coll-header class="wo-card-head">' +
                     DRAG_HANDLE_HTML +
                     titleHtml +
+                    entryTipIconHtml(group) +
                     moveButtonsHtml(idx === 0, idx === orderedGrps.length - 1) +
                     '<button data-vis type="button" class="wo-btn-ghost wo-vis-btn' + (vis ? '' : ' is-hidden') + '" aria-label="' + (vis ? 'Hide this group' : 'Show this group') + '" onclick="event.stopPropagation()">' + visIconSvg + '</button>' +
                     '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
@@ -6785,6 +7014,8 @@
                 makeCollapsible(box, group.title, !groupExpandState[group.id], function(expandedNow) {
                     groupExpandState[group.id] = expandedNow;
                 });
+                wireEntryTipIcon(box, group);
+                attachTooltip(box.querySelector('[data-kebab]'), 'More actions');
 
                 // Swaps within the visual (gs.__order) order, not cfg.groups'
                 // raw array order — mirrors the main panel's own drag-drop
@@ -6792,6 +7023,8 @@
                 (function() {
                     var upBtn = box.querySelector('[data-mv-up]');
                     var dnBtn = box.querySelector('[data-mv-dn]');
+                    if (upBtn) attachTooltip(upBtn, upBtn.getAttribute('aria-label'));
+                    if (dnBtn) attachTooltip(dnBtn, dnBtn.getAttribute('aria-label'));
                     function swapOrder(lowIdx, highIdx) {
                         var ids = orderedGrps.map(function(g) {
                             return g.id;
@@ -6884,6 +7117,7 @@
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
                         '<span>Duplicate</span>' +
                         '</button>' +
+                        EDIT_TOOLTIP_KEBAB_HTML +
                         '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger">' +
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
                         '<span>Delete</span>' +
@@ -6895,6 +7129,12 @@
                     modal.appendChild(menu);
                     var mr = menu.getBoundingClientRect();
                     if (mr.bottom > window.innerHeight) menu.style.top = Math.max(4, btnRect.top - mr.height - 4) + 'px';
+                    // Groups already have an inline "Tooltip:" field in the
+                    // card body (predates this feature, also feeds the main
+                    // panel's group-header hover icon) — this kebab item is
+                    // just a second path to the same group.tooltip, kept for
+                    // menu consistency with Rules/Variables/Scan.
+                    wireEditTooltipKebabItem(menu, group, group.title, groupsTab);
                     menu.querySelector('[data-rename]').onclick = function(ev) {
                         ev.stopPropagation();
                         closeRuleMenu();
@@ -7168,6 +7408,7 @@
                     '<div data-coll-header class="wo-card-head">' +
                     DRAG_HANDLE_HTML +
                     titleHtml +
+                    entryTipIconHtml(s) +
                     moveButtonsHtml(idx === 0, idx === scan.scans.length - 1) +
                     '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
                     '<button data-kebab type="button" class="wo-kebab-btn" aria-label="Scan target actions" aria-haspopup="true">' +
@@ -7196,87 +7437,108 @@
                     '<div id="__rdf_list_' + idx + '" style="margin-top:6px;overflow-x:auto;"></div>';
                 box.querySelector('[data-coll-body]').appendChild(rdfWrap);
                 attachTooltip(rdfWrap.querySelector('#__rdf_add_' + idx), 'Add field');
-                // ── Actions editor ──
+                // ── Actions editor ── beta_1-gated end to end (see runActions'
+                // matching check) — untested alongside Fix, so both the editor
+                // and execution stay dormant until the user opts in via the
+                // Beta tab. Existing action rows are left in storage either way.
+                var actionsBetaOn = isBetaFeatureOn('beta_1');
                 var actWrap = document.createElement('div');
                 actWrap.className = 'wo-subbox';
                 actWrap.style.cssText = 'margin-top:9px;';
-                actWrap.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><b style="color:var(--wo-pass);font-size:11px;">Post-Scan Actions</b> ' +
-                    '<span style="color:var(--wo-muted);font-size:10px;">(fill fields after this tab is scanned)</span>' +
-                    '<button id="__act_add_' + idx + '" type="button" class="wo-btn-ghost" style="margin-left:auto;font-size:15px;line-height:1;padding:4px 10px;">+</button></div>' +
-                    '<div id="__act_list_' + idx + '" style="margin-top:6px;overflow-x:auto;"></div>';
-                box.querySelector('[data-coll-body]').appendChild(actWrap);
-                attachTooltip(actWrap.querySelector('#__act_add_' + idx), 'Add action');
-
-
-                function renderActList() {
-                    var actList = actWrap.querySelector('#__act_list_' + idx);
-                    var rows = s.actions || [];
-                    if (!rows.length) {
-                        actList.innerHTML = '<div style="color:var(--wo-muted);font-size:11px;padding:2px 0;">No actions yet.</div>';
-                        return;
-                    }
-                    var showRunOn = isBetaFeatureOn('beta_1');
-                    var html = '<table class="wo-edit-table"><thead><tr>' +
-                        '<th style="width:18%;">' + thWithTip('Field Element ID', 'The Maximo element ID of the field to fill, e.g. m12345678-tb') + '</th>' +
-                        '<th style="width:26%;">' + thWithTip('Value Expression', "What to put in the field — a variable (V('v_core')) or a formula (F('...'))") + '</th>' +
-                        '<th>' + thWithTip('Condition', 'Optional formula — leave blank to always run this action') + '</th>' +
-                        (showRunOn ? '<th style="width:15%;">' + thWithTip('Run on', 'Both Scan and Fix (default), Scan only, or Fix only') + ' <span class="wo-beta-pill" title="Beta feature">BETA</span></th>' : '') +
-                        '<th class="wo-edit-table-del"></th>' +
-                        '</tr></thead><tbody>' +
-                        rows.map(function(act) {
-                            return '<tr>' +
-                                '<td><input type="text" data-act-id value="' + (act.fieldId || '').replace(/"/g, '&quot;') + '" placeholder="e.g. m12345678-tb"></td>' +
-                                '<td><input type="text" data-act-val value="' + (act.value || '').replace(/"/g, '&quot;') + '"></td>' +
-                                '<td><input type="text" data-act-cond value="' + (act.condition || '').replace(/"/g, '&quot;') + '"></td>' +
-                                (showRunOn ? '<td><select data-act-runon>' +
-                                    '<option value="both"' + (!act.runOn || act.runOn === 'both' ? ' selected' : '') + '>Scan + Fix</option>' +
-                                    '<option value="scan"' + (act.runOn === 'scan' ? ' selected' : '') + '>Scan only</option>' +
-                                    '<option value="fix"' + (act.runOn === 'fix' ? ' selected' : '') + '>Fix only</option>' +
-                                    '</select></td>' : '') +
-                                '<td class="wo-edit-table-del"><button data-act-del type="button" class="wo-btn-ghost wo-kebab-item-danger" style="padding:2px;">' + TRASH_SVG + '</button></td>' +
-                                '</tr>';
-                        }).join('') +
-                        '</tbody></table>';
-                    actList.innerHTML = html;
-                    actList.querySelectorAll('[data-th-tip]').forEach(function(el) {
-                        attachTooltip(el, el.getAttribute('data-th-tip'));
+                if (!actionsBetaOn) {
+                    actWrap.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><b style="color:var(--wo-pass);font-size:11px;">Post-Scan Actions</b> <span class="wo-beta-pill" data-beta-pill-tip="Beta feature">BETA</span></div>' +
+                        '<div style="color:var(--wo-muted);font-size:10px;margin-top:6px;">Enable the "Fix" beta feature in the Beta tab to configure or run Post-Scan Actions' + ((s.actions && s.actions.length) ? ' — you have ' + s.actions.length + ' saved, left untouched.' : '.') + '</div>';
+                    box.querySelector('[data-coll-body]').appendChild(actWrap);
+                    actWrap.querySelectorAll('[data-beta-pill-tip]').forEach(function(el) {
+                        attachTooltip(el, el.getAttribute('data-beta-pill-tip'));
                     });
-                    var trs = actList.querySelectorAll('tbody tr');
-                    rows.forEach(function(act, ai) {
-                        var row = trs[ai];
-                        attachTooltip(row.querySelector('[data-act-del]'), 'Delete action');
-                        row.querySelector('[data-act-id]').oninput = function(e) {
-                            act.fieldId = e.target.value;
-                        };
-                        row.querySelector('[data-act-val]').oninput = function(e) {
-                            act.value = e.target.value;
-                        };
-                        row.querySelector('[data-act-cond]').oninput = function(e) {
-                            act.condition = e.target.value || undefined;
-                        };
-                        var runonSel = row.querySelector('[data-act-runon]');
-                        if (runonSel) {
-                            runonSel.onchange = function(e) {
-                                act.runOn = e.target.value;
-                            };
+                } else {
+                    actWrap.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><b style="color:var(--wo-pass);font-size:11px;">Post-Scan Actions</b> ' +
+                        '<span style="color:var(--wo-muted);font-size:10px;">(fill fields after this tab is scanned)</span>' +
+                        '<span class="wo-beta-pill" data-beta-pill-tip="Beta feature">BETA</span>' +
+                        '<button id="__act_add_' + idx + '" type="button" class="wo-btn-ghost" style="margin-left:auto;font-size:15px;line-height:1;padding:4px 10px;">+</button></div>' +
+                        '<div id="__act_list_' + idx + '" style="margin-top:6px;overflow-x:auto;"></div>';
+                    box.querySelector('[data-coll-body]').appendChild(actWrap);
+                    attachTooltip(actWrap.querySelector('#__act_add_' + idx), 'Add action');
+                    actWrap.querySelectorAll('[data-beta-pill-tip]').forEach(function(el) {
+                        attachTooltip(el, el.getAttribute('data-beta-pill-tip'));
+                    });
+
+                    (function() {
+                        function renderActList() {
+                            var actList = actWrap.querySelector('#__act_list_' + idx);
+                            var rows = s.actions || [];
+                            if (!rows.length) {
+                                actList.innerHTML = '<div style="color:var(--wo-muted);font-size:11px;padding:2px 0;">No actions yet.</div>';
+                                return;
+                            }
+                            var showRunOn = isBetaFeatureOn('beta_1');
+                            var html = '<table class="wo-edit-table"><thead><tr>' +
+                                '<th style="width:18%;">' + thWithTip('Field Element ID', 'The Maximo element ID of the field to fill, e.g. m12345678-tb') + '</th>' +
+                                '<th style="width:26%;">' + thWithTip('Value Expression', "What to put in the field — a variable (V('v_core')) or a formula (F('...'))") + '</th>' +
+                                '<th>' + thWithTip('Condition', 'Optional formula — leave blank to always run this action') + '</th>' +
+                                (showRunOn ? '<th style="width:15%;">' + thWithTip('Run on', 'Both Scan and Fix (default), Scan only, or Fix only') + ' <span class="wo-beta-pill" data-beta-pill-tip="Beta feature">BETA</span></th>' : '') +
+                                '<th class="wo-edit-table-del"></th>' +
+                                '</tr></thead><tbody>' +
+                                rows.map(function(act) {
+                                    return '<tr>' +
+                                        '<td><input type="text" data-act-id value="' + (act.fieldId || '').replace(/"/g, '&quot;') + '" placeholder="e.g. m12345678-tb"></td>' +
+                                        '<td><input type="text" data-act-val value="' + (act.value || '').replace(/"/g, '&quot;') + '"></td>' +
+                                        '<td><input type="text" data-act-cond value="' + (act.condition || '').replace(/"/g, '&quot;') + '"></td>' +
+                                        (showRunOn ? '<td><select data-act-runon>' +
+                                            '<option value="both"' + (!act.runOn || act.runOn === 'both' ? ' selected' : '') + '>Scan + Fix</option>' +
+                                            '<option value="scan"' + (act.runOn === 'scan' ? ' selected' : '') + '>Scan only</option>' +
+                                            '<option value="fix"' + (act.runOn === 'fix' ? ' selected' : '') + '>Fix only</option>' +
+                                            '</select></td>' : '') +
+                                        '<td class="wo-edit-table-del"><button data-act-del type="button" class="wo-btn-ghost wo-kebab-item-danger" style="padding:2px;">' + TRASH_SVG + '</button></td>' +
+                                        '</tr>';
+                                }).join('') +
+                                '</tbody></table>';
+                            actList.innerHTML = html;
+                            actList.querySelectorAll('[data-th-tip]').forEach(function(el) {
+                                attachTooltip(el, el.getAttribute('data-th-tip'));
+                            });
+                            actList.querySelectorAll('[data-beta-pill-tip]').forEach(function(el) {
+                                attachTooltip(el, el.getAttribute('data-beta-pill-tip'));
+                            });
+                            var trs = actList.querySelectorAll('tbody tr');
+                            rows.forEach(function(act, ai) {
+                                var row = trs[ai];
+                                attachTooltip(row.querySelector('[data-act-del]'), 'Delete action');
+                                row.querySelector('[data-act-id]').oninput = function(e) {
+                                    act.fieldId = e.target.value;
+                                };
+                                row.querySelector('[data-act-val]').oninput = function(e) {
+                                    act.value = e.target.value;
+                                };
+                                row.querySelector('[data-act-cond]').oninput = function(e) {
+                                    act.condition = e.target.value || undefined;
+                                };
+                                var runonSel = row.querySelector('[data-act-runon]');
+                                if (runonSel) {
+                                    runonSel.onchange = function(e) {
+                                        act.runOn = e.target.value;
+                                    };
+                                }
+                                row.querySelector('[data-act-del]').onclick = function() {
+                                    s.actions.splice(ai, 1);
+                                    renderActList();
+                                };
+                            });
                         }
-                        row.querySelector('[data-act-del]').onclick = function() {
-                            s.actions.splice(ai, 1);
+                        renderActList();
+
+                        actWrap.querySelector('#__act_add_' + idx).onclick = function() {
+                            if (!s.actions) s.actions = [];
+                            s.actions.push({
+                                fieldId: '',
+                                value: '',
+                                condition: ''
+                            });
                             renderActList();
                         };
-                    });
+                    })();
                 }
-                renderActList();
-
-                actWrap.querySelector('#__act_add_' + idx).onclick = function() {
-                    if (!s.actions) s.actions = [];
-                    s.actions.push({
-                        fieldId: '',
-                        value: '',
-                        condition: ''
-                    });
-                    renderActList();
-                };
 
                 function renderRdfList() {
                     var rdfList = rdfWrap.querySelector('#__rdf_list_' + idx);
@@ -7352,6 +7614,8 @@
                 makeCollapsible(box, s.title, !scanExpandState[s.id], function(expandedNow) {
                     scanExpandState[s.id] = expandedNow;
                 });
+                wireEntryTipIcon(box, s);
+                attachTooltip(box.querySelector('[data-kebab]'), 'More actions');
                 wireMoveButtons(box, scan.scans, idx, scanTab);
                 attachCardDrag(box.querySelector('[data-coll-header]'), box, content, scan.scans, idx, scanTab);
 
@@ -7405,6 +7669,7 @@
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
                         '<span>Duplicate</span>' +
                         '</button>' +
+                        EDIT_TOOLTIP_KEBAB_HTML +
                         '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger">' +
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
                         '<span>Delete</span>' +
@@ -7416,6 +7681,7 @@
                     modal.appendChild(menu);
                     var mr = menu.getBoundingClientRect();
                     if (mr.bottom > window.innerHeight) menu.style.top = Math.max(4, btnRect.top - mr.height - 4) + 'px';
+                    wireEditTooltipKebabItem(menu, s, s.title, scanTab);
                     menu.querySelector('[data-rename]').onclick = function(ev) {
                         ev.stopPropagation();
                         closeRuleMenu();
@@ -7474,9 +7740,10 @@
             // Apply persists the outer (stale) object on modal close.
             if (!st.betaEnabled) st.betaEnabled = {};
 
+            var grants = getGrants();
             var intro = document.createElement('div');
             intro.style.cssText = 'color:var(--wo-muted);font-size:11px;margin-bottom:10px;';
-            intro.textContent = 'Beta features you currently qualify for. Each feature\'s own settings live wherever they make the most sense elsewhere in Setup (marked with a BETA tag) — this tab only turns them on or off. Turned off, a feature leaves no trace anywhere in the tool.';
+            intro.textContent = 'Your access: ' + (grants.join(', ') || 'user') + '. Holding a grant just means you can opt in below — nothing turns on by itself.';
             content.appendChild(intro);
 
             BETA_FEATURES.filter(function(f) {
@@ -7529,60 +7796,69 @@
             content.appendChild(qrDiv);
             makeCollapsible(qrDiv, 'Quick Return Message');
 
-            // Hotkeys (Scan / Return / Approve) — one card per registered
-            // action, all sharing the same duplicate-combo check so the
-            // same keystroke can never be assigned to two actions at once.
-            HOTKEY_ACTIONS.filter(hotkeyActionActive).forEach(function(action) {
-                var hkDiv = document.createElement('div');
-                hkDiv.className = 'wo-card';
-                var hkCurrent = hotkeyFor(action, st);
-                hkDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">' + action.label + ' Hotkey</span>' + (action.betaFeature ? ' <span class="wo-beta-pill">BETA</span>' : '') + '</div>' +
-                    '<div data-coll-body style="margin-top:7px;">' +
-                    '<div style="color:var(--wo-muted);font-size:11px;">Current: <b class="__st_hk_display" style="color:var(--wo-accent);">' + (hkCurrent || 'not set') + '</b></div>' +
-                    '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;"><input class="__st_hk_input" type="text" readonly placeholder="Click here, then press your key combo..." style="flex:1;font-size:11px;cursor:pointer;">' +
-                    '<button type="button" class="wo-btn-ghost __st_hk_clear">Clear</button></div>' +
-                    '<div class="__st_hk_error" style="margin-top:4px;color:var(--wo-fail);font-size:10px;display:none;"></div>' +
-                    '</div>';
-                content.appendChild(hkDiv);
-                makeCollapsible(hkDiv, action.label + ' Hotkey', false);
+            // Hotkeys (Scan / Return / Approve / ...) — all registered
+            // actions live under ONE collapsible card now (not one card
+            // each), sharing the same duplicate-combo check so the same
+            // keystroke can never be assigned to two actions at once.
+            var activeHotkeyActions = HOTKEY_ACTIONS.filter(hotkeyActionActive);
+            if (activeHotkeyActions.length) {
+                var hkCard = document.createElement('div');
+                hkCard.className = 'wo-card';
+                hkCard.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Hotkeys</span></div>' +
+                    '<div data-coll-body style="margin-top:7px;"></div>';
+                content.appendChild(hkCard);
+                makeCollapsible(hkCard, 'Hotkeys', false);
+                var hkBody = hkCard.querySelector('[data-coll-body]');
 
-                var hkInput = hkDiv.querySelector('.__st_hk_input');
-                var hkDisplay = hkDiv.querySelector('.__st_hk_display');
-                var hkError = hkDiv.querySelector('.__st_hk_error');
-                hkInput.addEventListener('keydown', function(e) {
-                    e.preventDefault();
-                    var parts = [];
-                    if (e.ctrlKey) parts.push('Ctrl');
-                    if (e.altKey) parts.push('Alt');
-                    if (e.shiftKey) parts.push('Shift');
-                    if (e.metaKey) parts.push('Meta');
-                    var k = e.key;
-                    if (!['Control', 'Alt', 'Shift', 'Meta'].includes(k)) parts.push(k.length === 1 ? k.toUpperCase() : k);
-                    var combo = parts.join('+');
-                    if (!combo) return;
-                    var conflict = HOTKEY_ACTIONS.filter(function(other) {
-                        return other !== action && hotkeyActionActive(other) && hotkeyFor(other, st) === combo;
-                    })[0];
-                    if (conflict) {
-                        hkError.textContent = combo + ' is already assigned to ' + conflict.label + ' — pick a different combo.';
-                        hkError.style.display = '';
-                        return;
-                    }
-                    hkError.style.display = 'none';
-                    st[action.settingsKey] = combo;
-                    hkInput.value = combo;
-                    hkDisplay.textContent = combo;
-                    saveSettings();
+                activeHotkeyActions.forEach(function(action, ai) {
+                    var hkDiv = document.createElement('div');
+                    hkDiv.style.cssText = ai > 0 ? 'margin-top:12px;padding-top:12px;border-top:1px solid var(--wo-border);' : '';
+                    var hkCurrent = hotkeyFor(action, st);
+                    hkDiv.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><b style="font-size:11px;">' + action.label + '</b>' + (action.betaFeature ? ' <span class="wo-beta-pill">BETA</span>' : '') + '</div>' +
+                        '<div style="color:var(--wo-muted);font-size:11px;margin-top:4px;">Current: <b class="__st_hk_display" style="color:var(--wo-accent);">' + (hkCurrent || 'not set') + '</b></div>' +
+                        '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;"><input class="__st_hk_input" type="text" readonly placeholder="Click here, then press your key combo..." style="flex:1;font-size:11px;cursor:pointer;">' +
+                        '<button type="button" class="wo-btn-ghost __st_hk_clear">Clear</button></div>' +
+                        '<div class="__st_hk_error" style="margin-top:4px;color:var(--wo-fail);font-size:10px;display:none;"></div>';
+                    hkBody.appendChild(hkDiv);
+
+                    var hkInput = hkDiv.querySelector('.__st_hk_input');
+                    var hkDisplay = hkDiv.querySelector('.__st_hk_display');
+                    var hkError = hkDiv.querySelector('.__st_hk_error');
+                    hkInput.addEventListener('keydown', function(e) {
+                        e.preventDefault();
+                        var parts = [];
+                        if (e.ctrlKey) parts.push('Ctrl');
+                        if (e.altKey) parts.push('Alt');
+                        if (e.shiftKey) parts.push('Shift');
+                        if (e.metaKey) parts.push('Meta');
+                        var k = e.key;
+                        if (!['Control', 'Alt', 'Shift', 'Meta'].includes(k)) parts.push(k.length === 1 ? k.toUpperCase() : k);
+                        var combo = parts.join('+');
+                        if (!combo) return;
+                        var conflict = HOTKEY_ACTIONS.filter(function(other) {
+                            return other !== action && hotkeyActionActive(other) && hotkeyFor(other, st) === combo;
+                        })[0];
+                        if (conflict) {
+                            hkError.textContent = combo + ' is already assigned to ' + conflict.label + ' — pick a different combo.';
+                            hkError.style.display = '';
+                            return;
+                        }
+                        hkError.style.display = 'none';
+                        st[action.settingsKey] = combo;
+                        hkInput.value = combo;
+                        hkDisplay.textContent = combo;
+                        saveSettings();
+                    });
+
+                    hkDiv.querySelector('.__st_hk_clear').onclick = function() {
+                        st[action.settingsKey] = '';
+                        hkInput.value = '';
+                        hkDisplay.textContent = 'not set';
+                        hkError.style.display = 'none';
+                        saveSettings();
+                    };
                 });
-
-                hkDiv.querySelector('.__st_hk_clear').onclick = function() {
-                    st[action.settingsKey] = '';
-                    hkInput.value = '';
-                    hkDisplay.textContent = 'not set';
-                    hkError.style.display = 'none';
-                    saveSettings();
-                };
-            });
+            }
 
             // ── Auto-Scan on New WO ──
             var autoScanDiv = document.createElement('div');
@@ -7862,6 +8138,65 @@
 
 
             content.addEventListener('input', saveSettings);
+
+            // ── Danger Zone: reset / uninstall ──
+            // Neither button is a true "uninstall" — the bookmarklet always
+            // reinstalls the tool on the next click, so there's no way to
+            // remove it permanently from a page you don't control. Both are
+            // framed honestly as resets, not removal, to avoid promising
+            // something that isn't possible.
+            var dangerDiv = document.createElement('div');
+            dangerDiv.className = 'wo-card';
+            dangerDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Reset / Uninstall</span></div>' +
+                '<div data-coll-body style="margin-top:7px;">' +
+                '<div style="color:var(--wo-muted);font-size:11px;margin-bottom:10px;">Neither option below is a permanent removal — clicking the bookmarklet again always reinstalls the tool. These just clear local state now.</div>' +
+                '<div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start;">' +
+                '<div><button id="__st_reset_tool" type="button" class="wo-btn">Reset Tool (Keep My Config)</button>' +
+                '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;max-width:420px;">Clears the cached tool code and session data. Your rules, groups, variables, and scan config are saved first and restored automatically the next time you click the bookmarklet.</div></div>' +
+                '<div><button id="__st_reset_all" type="button" class="wo-btn wo-btn-danger">Full Reset (Erase Everything)</button>' +
+                '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;max-width:420px;">Erases all rules, groups, variables, scans, and settings, with no backup. Use this to start completely fresh.</div></div>' +
+                '</div>' +
+                '</div>';
+            content.appendChild(dangerDiv);
+            makeCollapsible(dangerDiv, 'Reset / Uninstall', true);
+
+            dangerDiv.querySelector('#__st_reset_tool').onclick = function() {
+                if (!confirm('Reset the tool but keep your config?\n\nThe cached tool code and session data will be cleared now. Your rules, groups, variables, and scan config are saved first and will be restored automatically the next time you click the bookmarklet.')) return;
+                var snapshot = {};
+                Object.keys(localStorage).forEach(function(k) {
+                    if (k.indexOf('__wo_') !== 0) return;
+                    if (EPHEMERAL_KEYS.indexOf(k) !== -1) return;
+                    if (k === REVOKED_BACKUP_KEY) return;
+                    snapshot[k] = localStorage.getItem(k);
+                });
+                localStorage.setItem(REVOKED_BACKUP_KEY, JSON.stringify({
+                    savedAt: Date.now(),
+                    data: snapshot
+                }));
+                Object.keys(localStorage).filter(function(k) {
+                    return k.indexOf('__wo_') === 0 && k !== REVOKED_BACKUP_KEY;
+                }).forEach(function(k) {
+                    localStorage.removeItem(k);
+                });
+                alert('Tool reset. Click the bookmarklet again to reinstall — your config will come back automatically.');
+                modal._woCleanup();
+                modal.remove();
+                teardown();
+            };
+            dangerDiv.querySelector('#__st_reset_all').onclick = function() {
+                if (!confirm('Erase EVERYTHING — all rules, groups, scans, and settings — plus the tool itself?\n\nThis cannot be undone. There is no backup for this option.')) return;
+                if (!confirm('Really sure? This permanently deletes your entire configuration.')) return;
+                Object.keys(localStorage).filter(function(k) {
+                    return k.indexOf('__wo_') === 0;
+                }).forEach(function(k) {
+                    localStorage.removeItem(k);
+                });
+                if (window.indexedDB) indexedDB.deleteDatabase('__wo_tool_db');
+                alert('Everything erased. Click the bookmarklet again for a fresh install.');
+                modal._woCleanup();
+                modal.remove();
+                teardown();
+            };
         }
 
         // ── UPDATE TAB ──
@@ -8223,9 +8558,11 @@
             });
         }
 
+        var tabFns = {};
         function bindTab(id, fn, onReclick) {
             var btn = modal.querySelector('#' + id);
             if (!btn) return; // tab not rendered (e.g. Install, dev-only)
+            tabFns[id] = fn;
             btn.onclick = function() {
                 // Clicking a tab header that's already active is the one
                 // explicit "reset" gesture for state a tab preserves across
