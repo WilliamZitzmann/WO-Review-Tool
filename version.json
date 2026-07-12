@@ -1,10 +1,19 @@
 {
-  "latest": "0.21.1",
+  "latest": "0.21.2",
   "channels": {
-    "stable": "0.21.1",
-    "beta": "0.21.1"
+    "stable": "0.21.2",
+    "beta": "0.21.2"
   },
   "versions": [
+    {
+      "version": "0.21.2",
+      "name": "Audit Fixes",
+      "changes": [
+        "Fixed: toggling a beta feature in the Beta tab, then clicking Save & Apply, silently reverted the toggle - it wrote to a different in-memory copy of settings than the one Save & Apply actually persisted.",
+        "Fixed: the 15-minute instant-launch cache still paid for a /bootstrap network round trip it didn't need - now a valid cache skips that too, not just whoami/check-access/tool-fetch.",
+        "Hardened: hotkeys (Scan/Return/Approve/Fix) no longer fire while typing in one of this tool's own text fields - this mattered more once Fix could silently overwrite field values with no confirmation dialog."
+      ]
+    },
     {
       "version": "0.21.1",
       "name": "Faster Access Checks + Issue-Tracked Feedback",

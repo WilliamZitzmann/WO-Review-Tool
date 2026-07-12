@@ -300,6 +300,24 @@
     }
 
     function main() {
+        // A valid grant cache is meant to skip ALL network round trips, not
+        // just whoami/check-access/tool-fetch — bootstrap is a real
+        // Worker/GitHub round trip too, so checking the cache has to happen
+        // before that fetch even starts, not just inside
+        // proceedWithAccessCheck (which would still leave every "instant"
+        // run paying for a bootstrap call it doesn't need). Domain-checks
+        // against whatever host list was last cached rather than a fresh
+        // one — identical to the existing bootstrap-failure fallback below,
+        // just taken proactively instead of reactively.
+        var cachedGrant = readGrantCache();
+        if (cachedGrant && localStorage.getItem(TOOL_SRC_KEY)) {
+            var cachedHosts = [];
+            try {
+                cachedHosts = JSON.parse(localStorage.getItem(HOSTS_CACHE_KEY) || '[]');
+            } catch (e) {}
+            checkDomainThenProceed(cachedHosts, null);
+            return;
+        }
         getJSON(WORKER_BASE_URL + '/bootstrap').then(function(boot) {
             var hosts = boot.maximoHosts || [];
             if (hosts.length) localStorage.setItem(HOSTS_CACHE_KEY, JSON.stringify(hosts));

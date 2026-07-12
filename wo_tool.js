@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.21.1';
+    var TOOL_VERSION = '0.21.2';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -7466,7 +7466,12 @@
         // when hasAnyBetaGrant() is true (see the tab-bar markup above).
         function betaTab() {
             content.innerHTML = '';
-            var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+            // Deliberately NOT a fresh localStorage read — `st` here is the
+            // SAME object hoisted once at openSetup() scope that
+            // settingsTab() reads/writes (see the comment on its
+            // declaration). A local re-read would shadow it, and a toggle
+            // made here would then get silently reverted the moment Save &
+            // Apply persists the outer (stale) object on modal close.
             if (!st.betaEnabled) st.betaEnabled = {};
 
             var intro = document.createElement('div');
@@ -8333,6 +8338,21 @@
         if (!Object.keys(byCombo).length) return;
 
         window.__wo_hk_listener = function(e) {
+            // Never fire while the user is typing somewhere editable in
+            // THIS tool's own UI (Setup's formula boxes, the Feedback
+            // textarea, quick-return inputs, etc. — everything the tool
+            // renders lives in the same top-level document as this
+            // listener, unlike Maximo's own fields which are isolated
+            // inside iframes and never reach a top-document keydown
+            // listener at all). This matters more now than when only Scan
+            // (read-only) had a hotkey: Fix silently overwrites field
+            // values with no confirm dialog, so an accidental trigger
+            // mid-typing would be a real, silent data change.
+            var activeEl = document.activeElement;
+            if (activeEl) {
+                var tag = activeEl.tagName;
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || activeEl.isContentEditable) return;
+            }
             var parts = [];
             if (e.ctrlKey) parts.push('Ctrl');
             if (e.altKey) parts.push('Alt');
