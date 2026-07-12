@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.32';
+    var TOOL_VERSION = '0.20.33';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -6482,6 +6482,10 @@
                     var newVis = !vis;
                     g2[group.id].visible = newVis;
                     saveGS(g2);
+                    // Hiding also collapses the entry — showing leaves
+                    // whatever expand state it already had rather than
+                    // forcing it open.
+                    if (!newVis) groupExpandState[group.id] = false;
                     groupsTab();
                 };
 

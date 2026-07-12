@@ -1,10 +1,16 @@
 {
-  "latest": "0.20.32",
+  "latest": "0.20.33",
   "channels": {
-    "stable": "0.20.32",
-    "beta": "0.20.32"
+    "stable": "0.20.33",
+    "beta": "0.20.33"
   },
   "versions": [
+    {
+      "version": "0.20.33",
+      "changes": [
+        "Groups tab: hiding an entry now also collapses it; showing an entry no longer forces it open, it just leaves the expand state alone"
+      ]
+    },
     {
       "version": "0.20.32",
       "changes": [
