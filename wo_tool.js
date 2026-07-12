@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.25';
+    var TOOL_VERSION = '0.20.26';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -4432,7 +4432,7 @@
             // header row otherwise stretches to fit whichever button in it
             // is biggest, making Groups cards visibly thicker than Rules.
             "#__wo_setup_modal .wo-vis-btn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:1px solid transparent;flex-shrink:0;color:var(--wo-text);}" +
-            "#__wo_setup_modal .wo-vis-btn.is-hidden{color:var(--wo-muted);}" +
+            "#__wo_setup_modal .wo-vis-btn.is-hidden{color:var(--wo-muted);opacity:0.55;}" +
             // Reserved-width drag handle at the far left of the header —
             // always takes up its slot in the layout (so the title doesn't
             // reflow when it appears) but stays invisible until the card
@@ -4842,6 +4842,18 @@
 
             function showPreview(zone) {
                 var rect = computeSnapRect(zone);
+                // A fresh drag-to-left-edge snap always resets to the
+                // narrowest width (see stopdrag()) — the live preview needs
+                // to anticipate that too, or it shows the old remembered
+                // width right up until the moment you actually drop.
+                if (zone === 'left' && currentSnap !== 'left') {
+                    rect = {
+                        left: 0,
+                        top: 0,
+                        width: MODAL_MIN_W,
+                        height: rect.height
+                    };
+                }
                 if (!preview) {
                     preview = document.createElement('div');
                     preview.id = '__wo_snap_preview';
@@ -5089,11 +5101,23 @@
             function up(e) {
                 overlay.removeEventListener('mousemove', move);
                 overlay.removeEventListener('mouseup', up);
+                overlay.removeEventListener('mouseleave', up);
                 overlay.remove();
                 if (onUp) onUp(e);
             }
             overlay.addEventListener('mousemove', move);
             overlay.addEventListener('mouseup', up);
+            // The overlay spans the whole viewport, so it never receives
+            // another mousemove/mouseup once the cursor actually leaves the
+            // browser window (there's no way to keep tracking a cursor once
+            // it's outside the OS window — the browser simply stops getting
+            // mouse events). Rather than leave the drag/resize stuck mid-
+            // gesture forever (frozen, or stuck if the button is released
+            // outside and the page never finds out), treat the cursor
+            // leaving the viewport as the release point and end the
+            // gesture there — same effect as if the user had let go right
+            // at the edge.
+            overlay.addEventListener('mouseleave', up);
         }
         // Rule kebab menus are built fresh on click and position:fixed from
         // the button's own rect (not absolute-inside-the-card) — a rule

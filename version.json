@@ -1,10 +1,18 @@
 {
-  "latest": "0.20.25",
+  "latest": "0.20.26",
   "channels": {
-    "stable": "0.20.25",
-    "beta": "0.20.25"
+    "stable": "0.20.26",
+    "beta": "0.20.26"
   },
   "versions": [
+    {
+      "version": "0.20.26",
+      "changes": [
+        "Groups tab hide/unhide icon: hidden state is now a visibly darker, dimmer grey instead of a shade too close to the visible state; re-verified the unhide-also-toggles-expand / hide-doesn't behavior is wired correctly (a synthetic click test confirms only unhide toggles the header)",
+        "Setup window's snap-to-left live preview (shown while still dragging, before you drop) now shows the narrow reset width immediately when snapping fresh from a floating state, instead of showing the old remembered width right up until you actually let go",
+        "Dragging or resizing the Setup window now ends the gesture the moment the cursor leaves the browser window, instead of freezing mid-drag or silently ignoring a mouse-up that happens outside the window - there's no way to keep tracking a cursor once it's left the OS window, so leaving is now treated as the release point (same effect as letting go right at the edge)"
+      ]
+    },
     {
       "version": "0.20.25",
       "changes": [
