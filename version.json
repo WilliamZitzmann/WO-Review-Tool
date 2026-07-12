@@ -1,10 +1,18 @@
 {
-  "latest": "0.20.35",
+  "latest": "0.20.36",
   "channels": {
-    "stable": "0.20.35",
-    "beta": "0.20.35"
+    "stable": "0.20.36",
+    "beta": "0.20.36"
   },
   "versions": [
+    {
+      "version": "0.20.36",
+      "name": "Preserve Config Across Revoke",
+      "changes": [
+        "A revoke no longer deletes your rules/groups/scan/settings outright - they're snapshotted locally first, then restored automatically the next time access is granted again on the same browser. Previously a revoke just wiped everything, with no way back short of a file-linked backup.",
+        "This applies to both revoke paths: the bookmarklet's first-load access check, and the tool's own periodic self-update re-check."
+      ]
+    },
     {
       "version": "0.20.35",
       "name": "Access-Controlled Updates",

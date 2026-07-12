@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.35';
+    var TOOL_VERSION = '0.20.36';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -1684,9 +1684,29 @@
     // Clears the tool + its config on a confirmed revoke — deliberately
     // leaves IndexedDB (the linked backup-file handle) untouched, same
     // policy as loader.js, so a config file link survives a revoke.
+    // Keys that are fine to just discard — everything else under __wo_ is
+    // real user config and gets snapshotted before it's cleared, not just
+    // deleted, so a later regrant (via loader.js's matching restore, next
+    // time the bookmarklet runs) comes back whole. Same exclude-list and
+    // same REVOKED_BACKUP_KEY as loader.js's revokeLocal() — kept in sync
+    // manually since the two files are fetched/run independently.
+    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_known_hosts', '__wo_last_scanned_wo'];
+    var REVOKED_BACKUP_KEY = '__wo_revoked_backup';
+
     function revokeAccessLocally() {
+        var snapshot = {};
+        Object.keys(localStorage).forEach(function(k) {
+            if (k.indexOf('__wo_') !== 0) return;
+            if (EPHEMERAL_KEYS.indexOf(k) !== -1) return;
+            if (k === REVOKED_BACKUP_KEY) return;
+            snapshot[k] = localStorage.getItem(k);
+        });
+        localStorage.setItem(REVOKED_BACKUP_KEY, JSON.stringify({
+            savedAt: Date.now(),
+            data: snapshot
+        }));
         Object.keys(localStorage).filter(function(k) {
-            return k.indexOf('__wo_') === 0;
+            return k.indexOf('__wo_') === 0 && k !== REVOKED_BACKUP_KEY;
         }).forEach(function(k) {
             localStorage.removeItem(k);
         });

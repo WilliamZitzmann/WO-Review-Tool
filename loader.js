@@ -69,17 +69,54 @@
         });
     }
 
-    // Clears the tool + its config on a confirmed revoke, but deliberately
-    // leaves IndexedDB (__wo_tool_db, which holds the linked backup-file
-    // handle) untouched — a config file link survives a revoke, so if
-    // access is regranted later the reinstalled tool still knows where to
-    // load the old backup from.
+    // Keys that are fine to just discard on a revoke — everything else
+    // under __wo_ is treated as real user config and gets snapshotted
+    // before it's cleared, not just deleted. An exclude-list rather than an
+    // allow-list on purpose: new config keys wo_tool.js adds later get
+    // captured automatically without this file needing to know their names.
+    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_known_hosts', '__wo_last_scanned_wo'];
+    var REVOKED_BACKUP_KEY = '__wo_revoked_backup';
+
+    // Clears the tool + its config on a confirmed revoke, but preserves two
+    // things so a later regrant comes back whole: IndexedDB (__wo_tool_db,
+    // the linked backup-file handle) is left completely untouched, and
+    // every other __wo_ key is snapshotted into REVOKED_BACKUP_KEY before
+    // being cleared, rather than just being deleted outright — a revoke
+    // shouldn't cost someone their rules/groups/settings if they regain
+    // access later, especially if they never set up a file-linked backup.
     function revokeLocal() {
+        var snapshot = {};
+        Object.keys(localStorage).forEach(function(k) {
+            if (k.indexOf('__wo_') !== 0) return;
+            if (EPHEMERAL_KEYS.indexOf(k) !== -1) return;
+            if (k === REVOKED_BACKUP_KEY) return;
+            snapshot[k] = localStorage.getItem(k);
+        });
+        localStorage.setItem(REVOKED_BACKUP_KEY, JSON.stringify({
+            savedAt: Date.now(),
+            data: snapshot
+        }));
         Object.keys(localStorage).filter(function(k) {
-            return k.indexOf('__wo_') === 0;
+            return k.indexOf('__wo_') === 0 && k !== REVOKED_BACKUP_KEY;
         }).forEach(function(k) {
             localStorage.removeItem(k);
         });
+    }
+
+    // Restores whatever a previous revoke snapshotted, if anything's there —
+    // called right before running the tool on any successful grant, so a
+    // regrant on the same browser silently comes back with the old config
+    // in place instead of starting blank.
+    function restoreFromRevokedBackupIfAny() {
+        var raw = localStorage.getItem(REVOKED_BACKUP_KEY);
+        if (!raw) return;
+        try {
+            var parsed = JSON.parse(raw);
+            Object.keys(parsed.data || {}).forEach(function(k) {
+                localStorage.setItem(k, parsed.data[k]);
+            });
+        } catch (e) {}
+        localStorage.removeItem(REVOKED_BACKUP_KEY);
     }
 
     function fieldsSubset(required, whoamiData) {
@@ -134,6 +171,7 @@
                 } else {
                     localStorage.removeItem(DEV_UNLOCK_KEY);
                 }
+                restoreFromRevokedBackupIfAny();
                 return fetchAndRunTool(decision.token);
             }
             // A POSITIVE deny — whoami was read fine, the Worker responded,
