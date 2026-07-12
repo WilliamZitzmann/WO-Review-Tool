@@ -1,5 +1,5 @@
 {
-  "_comment": "TEMPLATE ONLY. The real file must NOT live in this public repo — it belongs only in the private repo the Worker reads from (see access-control/README.md). Every condition's 'field' must be one of the canonical whoami fields loader.js sends: username, email, country, insertSite, langcode, displayName.",
+  "_comment": "TEMPLATE ONLY. The real file must NOT live in this public repo — it belongs only in the private repo the Worker reads from (see access-control/README.md). Every condition's 'field' must be one of the canonical whoami fields loader.js sends: username, email, country, insertSite, langcode, displayName. 'grants' arrays replace the old single 'tier' string — a user can hold more than one at once (e.g. [\"user\",\"dev\",\"beta_0\"]). 'beta_0' is a wildcard meaning 'all betas'; any other 'beta_N' gates one specific feature. Omitting 'grants' defaults to [\"user\"].",
 
   "maximoHosts": [
     {
@@ -9,7 +9,7 @@
   ],
 
   "override": [
-    { "username": "KIMX", "tier": "user" }
+    { "username": "KIMX", "grants": ["user"] }
   ],
 
   "blacklist": [
@@ -24,27 +24,26 @@
 
   "allow": [
     {
-      "tier": "user",
+      "grants": ["user"],
       "conditions": [
         { "field": "insertSite", "op": "eq", "value": "AVWP" }
       ]
     },
     {
-      "tier": "user",
+      "grants": ["user"],
       "conditions": [
         { "field": "email", "op": "endsWith", "value": "@abbvie.com" }
       ]
     },
     {
-      "tier": "user",
+      "grants": ["user"],
       "conditions": [
         { "field": "country", "op": "eq", "value": "IE" }
       ]
     }
   ],
 
-  "tiers": {
-    "dev": ["ZITZMWX"],
-    "beta": []
+  "extraGrants": {
+    "ZITZMWX": ["dev", "beta_0"]
   }
 }

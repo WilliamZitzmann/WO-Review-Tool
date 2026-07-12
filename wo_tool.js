@@ -20,7 +20,8 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.20.37';
+    var TOOL_VERSION = '0.21.0';
+    var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -40,6 +41,67 @@
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
     // is left alone, not overridden.
     var DEFAULT_HOTKEY = 'Ctrl+Shift+S';
+
+    // ── Hotkey registry ──
+    // Each action's combo lives as its own plain top-level __wo_settings
+    // field (matching the pre-existing rescanHotkey convention) rather than
+    // a nested object, so it stays device-level automatically — none of
+    // these are in PROFILE_SETTINGS_KEYS, so switching profiles never
+    // touches them. Return/Approve ship with NO default combo (only Scan
+    // does) since they're destructive actions a user should opt into
+    // assigning, not something that could fire from a stray keystroke on a
+    // fresh install. The Settings UI is the only place that enforces "no
+    // two actions share a combo" — this registry and applyHotkeys() just
+    // trust that invariant already holds.
+    var HOTKEY_ACTIONS = [{
+        id: 'rescan',
+        settingsKey: 'rescanHotkey',
+        label: 'Scan',
+        defaultHotkey: DEFAULT_HOTKEY,
+        run: function() {
+            runScan(render);
+        }
+    }, {
+        id: 'return',
+        settingsKey: 'returnHotkey',
+        label: 'Return',
+        defaultHotkey: '',
+        run: function() {
+            if (!confirm('Return this Work Order?\n\nThe return message will be filled into the Memo field.')) return;
+            routeWorkflow('return');
+        }
+    }, {
+        id: 'approve',
+        settingsKey: 'approveHotkey',
+        label: 'Approve',
+        defaultHotkey: '',
+        run: function() {
+            if (!confirm('Approve this Work Order?\n\nThis will route with Complete Review selected.')) return;
+            routeWorkflow('approve');
+        }
+    }, {
+        id: 'fix',
+        settingsKey: 'fixHotkey',
+        label: 'Fix',
+        defaultHotkey: '',
+        betaFeature: 'beta_1', // only registered/assignable at all while this beta feature is on
+        run: function() {
+            runScan(render, 'fix');
+        }
+    }];
+
+    // Whether a hotkey action is currently eligible to be assigned/fired —
+    // true for every non-beta action; a beta-gated one also needs its
+    // feature switched on (isBetaFeatureOn already folds in the server
+    // grant check, so this one call covers both halves).
+    function hotkeyActionActive(action) {
+        return !action.betaFeature || isBetaFeatureOn(action.betaFeature);
+    }
+
+    function hotkeyFor(action, st) {
+        var v = st[action.settingsKey];
+        return (v !== undefined) ? v : action.defaultHotkey;
+    }
     var DEFAULT_CFG = {
         groups: [{
             id: 'g_core',
@@ -1615,7 +1677,12 @@
 
     // ── Dev/beta unlock (console-only, deliberately not in Setup UI) ──
     // Stored outside __wo_settings so it never rides along in a shared/exported backup.
-    var DEV_UNLOCK_KEY = '__wo_dev_unlock';
+    // GRANTS_KEY holds a JSON array (e.g. ["user","dev","beta_0"]) rather
+    // than a single tier string — a user can hold more than one grant at
+    // once. "beta_0" is a wildcard meaning "all betas"; hasGrant() treats
+    // any other "beta_N" as a specific feature flag.
+    var GRANTS_KEY = '__wo_grants';
+    var DEV_UNLOCK_KEY = '__wo_dev_unlock'; // retired key name, kept only so EPHEMERAL_KEYS still cleans up any leftover value from before this change
     var REPO_RAW_BASE = 'https://raw.githubusercontent.com/WilliamZitzmann/WO-Review-Tool';
     // Same Worker loader.js talks to for the bookmarklet's first load — the
     // tool's own source now lives in a private repo the Worker gates, so
@@ -1690,7 +1757,7 @@
     // time the bookmarklet runs) comes back whole. Same exclude-list and
     // same REVOKED_BACKUP_KEY as loader.js's revokeLocal() — kept in sync
     // manually since the two files are fetched/run independently.
-    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_known_hosts', '__wo_last_scanned_wo'];
+    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_grants', '__wo_known_hosts', '__wo_last_scanned_wo'];
     var REVOKED_BACKUP_KEY = '__wo_revoked_backup';
 
     function revokeAccessLocally() {
@@ -1717,7 +1784,7 @@
         teardown();
         var banner = document.createElement('div');
         banner.style.cssText = 'position:fixed;top:10px;right:10px;z-index:2147483647;background:#2c2c2c;color:#e74c3c;padding:10px 16px;border-radius:6px;font-family:Arial,sans-serif;font-size:13px;max-width:320px;';
-        banner.textContent = 'Access no longer granted. Contact williamzitzmann@abbvie.com for access.';
+        banner.textContent = 'Access no longer granted. Contact ' + SUPPORT_EMAIL + ' for access.';
         document.body.appendChild(banner);
     }
 
@@ -1741,11 +1808,7 @@
             });
         }).then(function(decision) {
             if (decision.granted) {
-                if (decision.tier === 'beta' || decision.tier === 'dev') {
-                    localStorage.setItem(DEV_UNLOCK_KEY, decision.tier);
-                } else {
-                    localStorage.removeItem(DEV_UNLOCK_KEY);
-                }
+                localStorage.setItem(GRANTS_KEY, JSON.stringify(decision.grants || []));
                 return decision.token;
             }
             revokeAccessLocally();
@@ -1765,31 +1828,86 @@
         });
     }
 
-    function getDevTier() {
-        var t = '';
+    function getGrants() {
         try {
-            t = localStorage.getItem(DEV_UNLOCK_KEY) || '';
-        } catch (e) {}
-        return (t === 'beta' || t === 'dev') ? t : '';
+            return JSON.parse(localStorage.getItem(GRANTS_KEY) || '[]');
+        } catch (e) {
+            return [];
+        }
+    }
+
+    // "beta_0" is a wildcard: holding it satisfies any "beta_N" check, not
+    // just itself. dev and beta are independent axes — a user can hold both,
+    // one, or neither.
+    function hasGrant(flag) {
+        var grants = getGrants();
+        if (grants.indexOf(flag) !== -1) return true;
+        if (flag.indexOf('beta_') === 0 && grants.indexOf('beta_0') !== -1) return true;
+        return false;
+    }
+
+    // Compat shim for the pre-grants call sites (channel gating, pinned-version
+    // gating) that only ever needed a single best tier out of {'', 'beta', 'dev'}.
+    // New code that needs a SPECIFIC beta flag should call hasGrant() directly.
+    function getDevTier() {
+        if (hasGrant('dev')) return 'dev';
+        if (hasGrant('beta_0')) return 'beta';
+        return '';
+    }
+
+    // ── Beta feature framework ──
+    // Two independent gates, both required for a beta feature to actually
+    // do anything: SERVER GRANT (hasGrant(id) — whether permissions.json
+    // says this user qualifies at all) and LOCAL ENABLEMENT (st.betaEnabled,
+    // a device-level on/off the user flips themselves in the Beta tab).
+    // Granted-but-disabled must be indistinguishable from never-granted —
+    // every feature's own code checks isBetaFeatureOn(), never hasGrant()
+    // alone, so nothing about it can leak through while it's off.
+    // Each feature's id IS the beta grant flag it's gated behind (e.g.
+    // "beta_1"), so hasGrant()'s existing beta_0-wildcard rule applies here
+    // too — a beta_0 holder qualifies for every feature in this list.
+    var BETA_FEATURES = [{
+        id: 'beta_1',
+        label: 'Route / Return / Fix / Approve',
+        description: 'Adds a neutral "Route" symbol and a "Fix" action (rescan + reapply fields) next to Return/Approve. Post-scan actions can be limited to run only on Scan, only on Fix, or both.'
+    }];
+
+    function isBetaFeatureOn(id) {
+        if (!hasGrant(id)) return false;
+        try {
+            var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+            return !!(st.betaEnabled && st.betaEnabled[id]);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // Whether the Beta tab itself should be visible at all — true the
+    // moment a user qualifies for at least one registered feature.
+    function hasAnyBetaGrant() {
+        return BETA_FEATURES.some(function(f) {
+            return hasGrant(f.id);
+        });
     }
 
     window.__woEnableBeta = function() {
-        if (getDevTier() === 'dev') {
+        if (hasGrant('dev')) {
             console.log('[WO Tool] Developer mode already unlocked (includes beta). Use window.__woLockDev() to reset.');
             return 'dev';
         }
-        localStorage.setItem(DEV_UNLOCK_KEY, 'beta');
+        localStorage.setItem(GRANTS_KEY, JSON.stringify(['user', 'beta_0']));
         console.log('[WO Tool] Beta features unlocked. Reopen Setup > Settings to see Update Channel.');
         return 'beta';
     };
 
     window.__woEnableDev = function() {
-        localStorage.setItem(DEV_UNLOCK_KEY, 'dev');
+        localStorage.setItem(GRANTS_KEY, JSON.stringify(['user', 'dev', 'beta_0']));
         console.log('[WO Tool] Developer mode unlocked. Reopen Setup > Settings to see Update Channel.');
         return 'dev';
     };
 
     window.__woLockDev = function() {
+        localStorage.removeItem(GRANTS_KEY);
         localStorage.removeItem(DEV_UNLOCK_KEY);
         var s = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
         s.channel = 'stable';
@@ -1901,9 +2019,9 @@
                     var pinnedLabel = target.pinKind === 'floating' ?
                         'Pinned to ' + target.pinRaw + '.x (v' + TOOL_VERSION + ')' :
                         'Pinned to v' + TOOL_VERSION;
-                    setStatus(target.pinned ?
+                    setStatus((target.pinned ?
                         pinnedLabel :
-                        'Running the latest ' + target.channel + ' version (v' + TOOL_VERSION + ')');
+                        'Running the latest ' + target.channel + ' version (v' + TOOL_VERSION + ')') + grantsStatusLine());
                     return;
                 }
 
@@ -1961,7 +2079,7 @@
         fetchToolSourceViaWorker(null).then(function(code) {
             var cached = localStorage.getItem('__wo_tool_src') || '';
             if (code === cached) {
-                setStatus('Running latest dev build (main) — v' + TOOL_VERSION);
+                setStatus('Running latest dev build (main) — v' + TOOL_VERSION + grantsStatusLine());
                 return;
             }
             setStatus('Installing latest dev build...');
@@ -2261,11 +2379,18 @@
     var scanLog = [];
     window.__wo_laborTypeCache = [];
 
-    function runActions(step) {
+    // mode is 'scan' (default) or 'fix' — Fix is the beta_1-only rescan
+    // action (see runScan's mode param). An action's own runOn ('both' —
+    // the default, 'scan', or 'fix') decides whether it's eligible to fire
+    // on this particular run, independent of its condition formula.
+    function runActions(step, mode) {
         var actions = (step && step.actions) || [];
         if (!actions.length) return;
         actions.forEach(function(action) {
             try {
+                var runOn = action.runOn || 'both';
+                if (runOn === 'scan' && mode === 'fix') return;
+                if (runOn === 'fix' && mode !== 'fix') return;
                 if (action.condition) {
                     if (!formulaBool(action.condition, cache)) return;
                 }
@@ -2647,8 +2772,12 @@
             tableErrors: tableErrors
         };
     } /* ── patched runScan: capture snapshot inside each step after DOM is ready ── */
-    function runScan(done) {
+    // mode is 'scan' (default) or 'fix' — Fix reruns the exact same scan
+    // pipeline, just with a different set of post-scan actions eligible to
+    // fire (see runActions). Everything else about a run is identical.
+    function runScan(done, mode) {
         if (scanning) return;
+        mode = mode || 'scan';
         scanning = true;
         scanLog = [];
         cache = {
@@ -2775,11 +2904,11 @@
                     } else {
                         if (t.rowDetailFields && t.rowDetailFields.length) {
                             collectRowDetailFields(t, function() {
-                                runActions(t);
+                                runActions(t, mode);
                                 next();
                             });
                         } else {
-                            runActions(t);
+                            runActions(t, mode);
                             next();
                         }
                     }
@@ -3083,6 +3212,23 @@
 
     function setStatus(t) {
         if (statusEl) statusEl.textContent = t;
+    }
+
+    // A second status line naming which non-default grants are currently
+    // active, shown right after a "you're up to date" message so dev/beta
+    // access is visible every launch, not just discoverable via console.
+    // Empty for plain users — nothing to announce.
+    function grantsStatusLine() {
+        var grants = getGrants().filter(function(g) { return g !== 'user'; });
+        if (!grants.length) return '';
+        var labels = grants.map(function(g) {
+            if (g === 'dev') return 'Dev mode enabled';
+            if (g === 'beta_0') return 'Beta access enabled (all features)';
+            var m = /^beta_(.+)$/.exec(g);
+            if (m) return 'Beta_' + m[1] + ' access enabled';
+            return g + ' access enabled';
+        });
+        return '\n' + labels.join(' · ');
     }
 
     // Device-level preference — read fresh each time rather than cached,
@@ -3457,7 +3603,7 @@
         });
     }
 
-    // Shared by buildPanel() (initial bind) — applyHotkey() no longer needs
+    // Shared by buildPanel() (initial bind) — applyHotkeys() no longer needs
     // to separately update the tooltip text on a hotkey change, since
     // attachTooltip() re-runs this function fresh on every hover rather
     // than freezing whatever text was current when it was first bound.
@@ -3652,8 +3798,12 @@
             "#__wo_dock .wo-qr-copy:hover{background:var(--wo-field);color:var(--wo-text);}" +
             "#__wo_dock .wo-icon-copy,#__wo_dock .wo-icon-check{display:block;}" +
             "#__wo_dock .wo-icon-check{color:var(--wo-pass);}" +
-            "#__wo_dock .wo-action-row{display:flex;gap:7px;margin:8px 0 4px;}" +
+            "#__wo_dock .wo-action-row{display:flex;gap:7px;margin:8px 0 4px;align-items:stretch;}" +
             "#__wo_dock .wo-btn-block{flex:1;padding:9px;font-size:12.5px;text-align:center;}" +
+            // beta_1-only: a plain non-interactive glyph, never a button —
+            // no background/border/hover, no click handler. Purely a visual
+            // label ahead of Return/Fix/Approve, not one of the actions.
+            "#__wo_dock .wo-route-symbol{display:flex;align-items:center;justify-content:center;flex:0 0 auto;width:28px;color:var(--wo-muted);cursor:default;}" +
             "#__wo_dock .wo-btn-block.wo-btn-icon{display:inline-flex;align-items:center;justify-content:center;gap:7px;}" +
             "#__wo_dock .wo-btn-pass{background:var(--wo-pass);color:#04210c;border-color:var(--wo-pass);}" +
             "#__wo_dock .wo-btn-fail{background:var(--wo-fail);color:#2b0705;border-color:var(--wo-fail);}" +
@@ -3711,7 +3861,7 @@
             '<button id="__wo_exit" class="wo-btn wo-btn-danger">Exit</button>' +
             '</div>' +
             '</div>' +
-            '<div id="__wo_status" style="padding:6px 12px;color:#e3b341;font-size:11px;min-height:15px;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
+            '<div id="__wo_status" style="padding:6px 12px;color:#e3b341;font-size:11px;min-height:15px;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;white-space:pre-line;"></div>' +
             '<div id="__wo_scanlog" style="padding:0 12px 6px;font-size:10.5px;color:#9aa4af;max-height:80px;overflow-y:auto!important;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
             '<div id="__wo_summary" style="padding:0 12px 6px;font-size:11px;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
             // Deliberately NOT display:flex here. That was the actual root
@@ -4135,12 +4285,29 @@
                     hmText = varCache[hmRaw] || '';
                     // no status color for variables — use neutral
                 } else {
-                    // type === 'rule' — use shortened pass/fail message
+                    // type === 'rule' — a specific rule id shows that rule's
+                    // message always. Left blank (the default), it instead
+                    // auto-picks whichever of the group's own ruleRefs
+                    // currently has the worst status — same priority order
+                    // as the multi-rule badge (error > fail > warn > pass) —
+                    // so a group with several rules still shows a message
+                    // without needing one hand-picked ahead of time.
+                    var hmRuleId = hmRaw;
+                    if (!hmRuleId) {
+                        var HM_PRIORITY = ['error', 'fail', 'warn', 'pass'];
+                        var hmCandidates = (group.ruleRefs || []).filter(function(id) {
+                            return results[id] && results[id].status !== 'na';
+                        });
+                        hmCandidates.sort(function(a, b) {
+                            return HM_PRIORITY.indexOf(results[a].status) - HM_PRIORITY.indexOf(results[b].status);
+                        });
+                        hmRuleId = hmCandidates[0] || '';
+                    }
                     var hmRule = cfg.rules.filter(function(r) {
-                        return r.id === hmRaw;
+                        return r.id === hmRuleId;
                     })[0];
                     if (hmRule) {
-                        var hmRes = results[hmRaw];
+                        var hmRes = results[hmRuleId];
                         if (hmRes) {
                             if (hmRes.status === 'pass') {
                                 var hmShort = (hmRule.pass && hmRule.pass.short) || '';
@@ -4178,8 +4345,8 @@
 
 
                 if (hmText) {
-                    var hmColor = (group.headerMsg.type === 'rule' && results[hmRaw]) ?
-                        statusColor(results[hmRaw].status) :
+                    var hmColor = (group.headerMsg.type === 'rule' && results[hmRuleId]) ?
+                        statusColor(results[hmRuleId].status) :
                         (group.headerMsg.type === 'variable' ? '#58a6ff' : 'var(--wo-muted)');
 
                     headerMsgHtml = '<span class="wo-header-msg" style="color:' + hmColor + ';">' + String(hmText).replace(/</g, '&lt;') + '</span>';
@@ -4332,9 +4499,36 @@
             '</div>';
 
         footerAreaEl.appendChild(qrWrap);
-        // ── Return and Approve buttons ──
+        // ── Return, Approve, and (beta_1 only) Route symbol + Fix ──
+        // Non-beta/dev users must see exactly what's always been here:
+        // Return + Approve, nothing else, same classes, same order.
         var actionRow = document.createElement('div');
         actionRow.className = 'wo-action-row';
+        var betaRouteOn = isBetaFeatureOn('beta_1');
+
+        if (betaRouteOn) {
+            var routeSymbol = document.createElement('span');
+            routeSymbol.className = 'wo-route-symbol';
+            routeSymbol.setAttribute('aria-hidden', 'true');
+            // Three nodes converging into one checked final node — a
+            // visual label, not a control: no button element, no
+            // border/background, no click handler.
+            routeSymbol.innerHTML = '<svg width="16" height="16" viewBox="0 0 320 320" fill="none">' +
+                '<g stroke="currentColor" stroke-width="10" stroke-linecap="round">' +
+                '<line x1="65" y1="50" x2="95" y2="50"/>' +
+                '<line x1="100" y1="60" x2="60" y2="100"/>' +
+                '<line x1="65" y1="110" x2="80" y2="110"/>' +
+                '</g>' +
+                '<g stroke="currentColor">' +
+                '<circle cx="50" cy="50" r="15" stroke-width="10"/>' +
+                '<circle cx="110" cy="50" r="15" stroke-width="10"/>' +
+                '<circle cx="50" cy="110" r="15" stroke-width="10"/>' +
+                '<circle cx="110" cy="110" r="25" stroke-width="5"/>' +
+                '</g>' +
+                '<path d="M100 110 L108 118 L122 101" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>' +
+                '</svg>';
+            actionRow.appendChild(routeSymbol);
+        }
 
         var returnBtn = document.createElement('button');
         returnBtn.type = 'button';
@@ -4344,6 +4538,18 @@
             if (!confirm('Return this Work Order?\n\nThe return message will be filled into the Memo field.')) return;
             routeWorkflow('return');
         };
+        actionRow.appendChild(returnBtn);
+
+        if (betaRouteOn) {
+            var fixBtn = document.createElement('button');
+            fixBtn.type = 'button';
+            fixBtn.textContent = '⚙ Fix';
+            fixBtn.className = 'wo-btn wo-btn-block';
+            fixBtn.onclick = function() {
+                runScan(render, 'fix');
+            };
+            actionRow.appendChild(fixBtn);
+        }
 
         var approveBtn = document.createElement('button');
         approveBtn.type = 'button';
@@ -4353,9 +4559,8 @@
             if (!confirm('Approve this Work Order?\n\nThis will route with Complete Review selected.')) return;
             routeWorkflow('approve');
         };
-
-        actionRow.appendChild(returnBtn);
         actionRow.appendChild(approveBtn);
+
         footerAreaEl.appendChild(actionRow);
 
         var qrCopyBtn = qrWrap.querySelector('.__wo_qr_copy');
@@ -4845,6 +5050,11 @@
             "#__wo_setup_modal .wo-btn-pass{background:var(--wo-pass);color:#04210c;border-color:var(--wo-pass);}" +
             "#__wo_setup_modal .wo-btn-ghost{background:none;border:1px solid transparent;color:var(--wo-muted);cursor:pointer;font:inherit;font-size:11px;padding:6px 8px;border-radius:var(--wo-r-ctl);}" +
             "#__wo_setup_modal .wo-btn-ghost:hover{color:var(--wo-text);background:var(--wo-field);}" +
+            // Small "this only does something if the beta feature is on"
+            // marker — reused wherever a beta feature's own settings live
+            // inline (not centralized), so it's visually obvious without a
+            // trip to the Beta tab.
+            "#__wo_setup_modal .wo-beta-pill{display:inline-block;padding:1px 5px;border-radius:3px;background:#8957e5;color:#fff;font-size:8.5px;font-weight:800;letter-spacing:.03em;vertical-align:middle;}" +
             "#__wo_setup_modal input[type=text],#__wo_setup_modal input[type=number],#__wo_setup_modal textarea,#__wo_setup_modal select{font:inherit;font-size:11.5px;background:var(--wo-field);color:var(--wo-text);border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:5px 7px;}" +
             // Every plain textarea only grows/shrinks vertically — a
             // textarea that can also stretch wider than its container
@@ -4932,7 +5142,7 @@
             // property a host page's own broad selectors fight over, and a
             // plain (non-important) rule can lose that fight even at
             // higher specificity if the host's is also !important.
-            "#__wo_setup_modal .wo-drag-handle{display:inline-flex;align-items:center;justify-content:center;width:14px;height:22px;flex-shrink:0;color:var(--wo-muted);opacity:0!important;cursor:grab;}" +
+            "#__wo_setup_modal .wo-drag-handle{display:inline-flex;align-items:center;justify-content:center;width:18px;height:26px;flex-shrink:0;color:var(--wo-muted);opacity:0!important;cursor:grab;}" +
             "#__wo_setup_modal [data-reorder-card]:hover .wo-drag-handle,#__wo_setup_modal [data-reorder-card]:focus-within .wo-drag-handle{opacity:1!important;}" +
             // Move buttons stay invisible until the pointer is anywhere
             // over the card (header or its expanded body) — just an icon
@@ -5025,6 +5235,9 @@
             settings: '<path d="M12.57 6.9L14.24 6.56L14.24 9.44L12.57 9.1L12.01 10.46L13.43 11.39L11.39 13.43L10.46 12.01L9.1 12.57L9.44 14.24L6.56 14.24L6.9 12.57L5.54 12.01L4.61 13.43L2.57 11.39L3.99 10.46L3.43 9.1L1.76 9.44L1.76 6.56L3.43 6.9L3.99 5.54L2.57 4.61L4.61 2.57L5.54 3.99L6.9 3.43L6.56 1.76L9.44 1.76L9.1 3.43L10.46 3.99L11.39 2.57L13.43 4.61L12.01 5.54Z" stroke="currentColor" stroke-width="0.9" stroke-linejoin="round"/><circle cx="8" cy="8" r="2.4" stroke="currentColor" stroke-width="1.2"/>',
             update: '<path d="M12.8 5.2A5 5 0 1 0 13.5 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M12.8 2.5V5.2H10.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
             guide: '<path d="M2.5 3.5C2.5 3 2.9 2.7 3.4 2.8C5 3 6.5 3.6 8 4.6C9.5 3.6 11 3 12.6 2.8C13.1 2.7 13.5 3 13.5 3.5V11.5C13.5 12 13.1 12.3 12.6 12.4C11 12.6 9.5 13.2 8 14.2C6.5 13.2 5 12.6 3.4 12.4C2.9 12.3 2.5 12 2.5 11.5V3.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 4.6V14.2" stroke="currentColor" stroke-width="1.2"/>',
+            feedback: '<path d="M2.5 3.7C2.5 3.1 3 2.6 3.6 2.6H12.4C13 2.6 13.5 3.1 13.5 3.7V9.3C13.5 9.9 13 10.4 12.4 10.4H6.5L3.8 12.7C3.5 12.9 3 12.7 3 12.3V10.4H3.6C3 10.4 2.5 9.9 2.5 9.3V3.7Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><circle cx="5.8" cy="6.5" r="0.55" fill="none" stroke="currentColor" stroke-width="1.1"/><circle cx="8" cy="6.5" r="0.55" fill="none" stroke="currentColor" stroke-width="1.1"/><circle cx="10.2" cy="6.5" r="0.55" fill="none" stroke="currentColor" stroke-width="1.1"/>',
+            // Flask/beaker — conventional "beta/experimental" glyph.
+            beta: '<path d="M6.3 2.6H9.7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M6.9 2.6V6.2L3.4 12.1C3 12.8 3.5 13.7 4.3 13.7H11.7C12.5 13.7 13 12.8 12.6 12.1L9.1 6.2V2.6" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5 10.4H11" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>',
             exp: '<path d="M8 10V2.5M8 2.5L5.5 5M8 2.5L10.5 5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.5 10V12.5C2.5 13.1 2.9 13.5 3.5 13.5H12.5C13.1 13.5 13.5 13.1 13.5 12.5V10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
             imp: '<path d="M8 2.5V10M8 10L5.5 7.5M8 10L10.5 7.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.5 10V12.5C2.5 13.1 2.9 13.5 3.5 13.5H12.5C13.1 13.5 13.5 13.1 13.5 12.5V10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>'
         };
@@ -5059,10 +5272,12 @@
             tabBtn('__s_scan', 'scan', 'Scan') +
             tabBtn('__s_profiles', 'profiles', 'Profiles') +
             tabBtn('__s_settings', 'settings', 'Settings') +
-            tabBtn('__s_update', 'update', 'Install') +
+            (hasAnyBetaGrant() ? tabBtn('__s_beta', 'beta', 'Beta') : '') +
+            (hasGrant('dev') ? tabBtn('__s_update', 'update', 'Install') : '') +
             '</div>' +
             '<div class="wo-tab-group wo-tab-group-end">' +
             tabBtn('__s_guide', 'guide', 'Guide', 'wo-tab-btn-ghost') +
+            tabBtn('__s_feedback', 'feedback', 'Feedback', 'wo-tab-btn-ghost') +
             tabBtn('__s_exp', 'exp', 'Export', 'wo-tab-btn-ghost') +
             tabBtn('__s_imp', 'imp', 'Import', 'wo-tab-btn-ghost') +
             '</div>' +
@@ -5714,7 +5929,7 @@
         // listens on the whole header, not this element specifically).
         // Up chevron, two horizontal lines, down chevron — reads as "grab
         // and drag this row up or down" rather than a generic move-arrow.
-        var DRAG_HANDLE_HTML = '<span class="wo-drag-handle" aria-hidden="true"><svg width="12" height="16" viewBox="0 0 16 16" fill="none"><path d="M5 4.2L8 1.8L11 4.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 7.2H11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M5 9.4H11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M5 11.8L8 14.2L11 11.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+        var DRAG_HANDLE_HTML = '<span class="wo-drag-handle" aria-hidden="true"><svg width="16" height="20" viewBox="0 0 16 16" fill="none"><path d="M5 4.2L8 1.8L11 4.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 7.2H11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M5 9.4H11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M5 11.8L8 14.2L11 11.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
         // Same trash-can glyph as the kebab menu's Delete item, reused
         // anywhere a plain "delete this row" icon button is needed outside
         // a kebab menu (table rows, list rows) so delete always reads the
@@ -5965,7 +6180,7 @@
             saveCfg(cfg);
             saveScan(scan);
             saveSettingsCfg(st);
-            applyHotkey();
+            applyHotkeys();
             closeTabCtxMenu();
             closeRuleMenu();
             modal._woCleanup();
@@ -6543,7 +6758,7 @@
                     '</select></div>' +
                     '<div id="__hm_rule_wrap_' + idx + '" style="' + (group.headerMsg && group.headerMsg.type === 'rule' ? '' : 'display:none;') + '">' +
                     'Rule: <select id="__hm_rule_' + idx + '" style="max-width:100%;">' +
-                    '<option value="">-- pick rule --</option>' +
+                    '<option value="">Auto — highest-priority rule in this group (error &gt; fail &gt; warn &gt; pass)</option>' +
                     cfg.rules.map(function(r) {
                         return '<option value="' + r.id + '"' + (group.headerMsg && group.headerMsg.value === r.id ? ' selected' : '') + '>' + r.label + '</option>';
                     }).join('') +
@@ -7000,10 +7215,12 @@
                         actList.innerHTML = '<div style="color:var(--wo-muted);font-size:11px;padding:2px 0;">No actions yet.</div>';
                         return;
                     }
+                    var showRunOn = isBetaFeatureOn('beta_1');
                     var html = '<table class="wo-edit-table"><thead><tr>' +
-                        '<th style="width:20%;">' + thWithTip('Field Element ID', 'The Maximo element ID of the field to fill, e.g. m12345678-tb') + '</th>' +
-                        '<th style="width:28%;">' + thWithTip('Value Expression', "What to put in the field — a variable (V('v_core')) or a formula (F('...'))") + '</th>' +
+                        '<th style="width:18%;">' + thWithTip('Field Element ID', 'The Maximo element ID of the field to fill, e.g. m12345678-tb') + '</th>' +
+                        '<th style="width:26%;">' + thWithTip('Value Expression', "What to put in the field — a variable (V('v_core')) or a formula (F('...'))") + '</th>' +
                         '<th>' + thWithTip('Condition', 'Optional formula — leave blank to always run this action') + '</th>' +
+                        (showRunOn ? '<th style="width:15%;">' + thWithTip('Run on', 'Both Scan and Fix (default), Scan only, or Fix only') + ' <span class="wo-beta-pill" title="Beta feature">BETA</span></th>' : '') +
                         '<th class="wo-edit-table-del"></th>' +
                         '</tr></thead><tbody>' +
                         rows.map(function(act) {
@@ -7011,6 +7228,11 @@
                                 '<td><input type="text" data-act-id value="' + (act.fieldId || '').replace(/"/g, '&quot;') + '" placeholder="e.g. m12345678-tb"></td>' +
                                 '<td><input type="text" data-act-val value="' + (act.value || '').replace(/"/g, '&quot;') + '"></td>' +
                                 '<td><input type="text" data-act-cond value="' + (act.condition || '').replace(/"/g, '&quot;') + '"></td>' +
+                                (showRunOn ? '<td><select data-act-runon>' +
+                                    '<option value="both"' + (!act.runOn || act.runOn === 'both' ? ' selected' : '') + '>Scan + Fix</option>' +
+                                    '<option value="scan"' + (act.runOn === 'scan' ? ' selected' : '') + '>Scan only</option>' +
+                                    '<option value="fix"' + (act.runOn === 'fix' ? ' selected' : '') + '>Fix only</option>' +
+                                    '</select></td>' : '') +
                                 '<td class="wo-edit-table-del"><button data-act-del type="button" class="wo-btn-ghost wo-kebab-item-danger" style="padding:2px;">' + TRASH_SVG + '</button></td>' +
                                 '</tr>';
                         }).join('') +
@@ -7032,6 +7254,12 @@
                         row.querySelector('[data-act-cond]').oninput = function(e) {
                             act.condition = e.target.value || undefined;
                         };
+                        var runonSel = row.querySelector('[data-act-runon]');
+                        if (runonSel) {
+                            runonSel.onchange = function(e) {
+                                act.runOn = e.target.value;
+                            };
+                        }
                         row.querySelector('[data-act-del]').onclick = function() {
                             s.actions.splice(ai, 1);
                             renderActList();
@@ -7232,6 +7460,45 @@
 
 
         // ── SETTINGS TAB ──
+        // ── BETA TAB ── Enable/disable registry only — no feature's actual
+        // settings live here. Only lists features this user currently
+        // holds the grant for; the tab itself is only ever rendered at all
+        // when hasAnyBetaGrant() is true (see the tab-bar markup above).
+        function betaTab() {
+            content.innerHTML = '';
+            var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+            if (!st.betaEnabled) st.betaEnabled = {};
+
+            var intro = document.createElement('div');
+            intro.style.cssText = 'color:var(--wo-muted);font-size:11px;margin-bottom:10px;';
+            intro.textContent = 'Beta features you currently qualify for. Each feature\'s own settings live wherever they make the most sense elsewhere in Setup (marked with a BETA tag) — this tab only turns them on or off. Turned off, a feature leaves no trace anywhere in the tool.';
+            content.appendChild(intro);
+
+            BETA_FEATURES.filter(function(f) {
+                return hasGrant(f.id);
+            }).forEach(function(f) {
+                var div = document.createElement('div');
+                div.className = 'wo-card';
+                var on = !!st.betaEnabled[f.id];
+                div.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">' + f.label + '</span> <span class="wo-beta-pill">' + f.id.toUpperCase() + '</span></div>' +
+                    '<div data-coll-body style="margin-top:7px;">' +
+                    '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
+                    '<input type="checkbox" data-beta-toggle ' + (on ? 'checked' : '') + '>' +
+                    '<span style="color:var(--wo-text);font-size:11px;">Enable this feature</span>' +
+                    '</label>' +
+                    '<div style="color:var(--wo-muted);font-size:10px;margin-top:6px;">' + f.description + '</div>' +
+                    '</div>';
+                content.appendChild(div);
+                makeCollapsible(div, f.label, false);
+                div.querySelector('[data-beta-toggle]').onchange = function(e) {
+                    st.betaEnabled[f.id] = e.target.checked;
+                    saveSettingsCfg(st);
+                    applyHotkeys();
+                    render();
+                };
+            });
+        }
+
         function settingsTab() {
             // `st` is declared once at openSetup() scope (not here) so a
             // staged channel/version change survives switching tabs and
@@ -7257,42 +7524,60 @@
             content.appendChild(qrDiv);
             makeCollapsible(qrDiv, 'Quick Return Message');
 
-            // Scan hotkey
-            var hkDiv = document.createElement('div');
-            hkDiv.className = 'wo-card';
-            var hkCurrent = (st.rescanHotkey !== undefined) ? st.rescanHotkey : DEFAULT_HOTKEY;
-            hkDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Scan Hotkey</span></div>' +
-                '<div data-coll-body style="margin-top:7px;">' +
-                '<div style="color:var(--wo-muted);font-size:11px;">Current: <b id="__st_hk_display" style="color:var(--wo-accent);">' + (hkCurrent || 'not set') + '</b></div>' +
-                '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;"><input id="__st_hk_input" type="text" readonly placeholder="Click here, then press your key combo..." style="flex:1;font-size:11px;cursor:pointer;">' +
-                '<button id="__st_hk_clear" type="button" class="wo-btn-ghost">Clear</button></div>' +
-                '</div>';
-            content.appendChild(hkDiv);
-            makeCollapsible(hkDiv, 'Scan Hotkey', false);
+            // Hotkeys (Scan / Return / Approve) — one card per registered
+            // action, all sharing the same duplicate-combo check so the
+            // same keystroke can never be assigned to two actions at once.
+            HOTKEY_ACTIONS.filter(hotkeyActionActive).forEach(function(action) {
+                var hkDiv = document.createElement('div');
+                hkDiv.className = 'wo-card';
+                var hkCurrent = hotkeyFor(action, st);
+                hkDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">' + action.label + ' Hotkey</span>' + (action.betaFeature ? ' <span class="wo-beta-pill">BETA</span>' : '') + '</div>' +
+                    '<div data-coll-body style="margin-top:7px;">' +
+                    '<div style="color:var(--wo-muted);font-size:11px;">Current: <b class="__st_hk_display" style="color:var(--wo-accent);">' + (hkCurrent || 'not set') + '</b></div>' +
+                    '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;"><input class="__st_hk_input" type="text" readonly placeholder="Click here, then press your key combo..." style="flex:1;font-size:11px;cursor:pointer;">' +
+                    '<button type="button" class="wo-btn-ghost __st_hk_clear">Clear</button></div>' +
+                    '<div class="__st_hk_error" style="margin-top:4px;color:var(--wo-fail);font-size:10px;display:none;"></div>' +
+                    '</div>';
+                content.appendChild(hkDiv);
+                makeCollapsible(hkDiv, action.label + ' Hotkey', false);
 
-            var hkInput = hkDiv.querySelector('#__st_hk_input');
-            var hkDisplay = hkDiv.querySelector('#__st_hk_display');
-            hkInput.addEventListener('keydown', function(e) {
-                e.preventDefault();
-                var parts = [];
-                if (e.ctrlKey) parts.push('Ctrl');
-                if (e.altKey) parts.push('Alt');
-                if (e.shiftKey) parts.push('Shift');
-                if (e.metaKey) parts.push('Meta');
-                var k = e.key;
-                if (!['Control', 'Alt', 'Shift', 'Meta'].includes(k)) parts.push(k.length === 1 ? k.toUpperCase() : k);
-                st.rescanHotkey = parts.join('+');
-                hkInput.value = st.rescanHotkey;
-                hkDisplay.textContent = st.rescanHotkey;
-                saveSettings();
+                var hkInput = hkDiv.querySelector('.__st_hk_input');
+                var hkDisplay = hkDiv.querySelector('.__st_hk_display');
+                var hkError = hkDiv.querySelector('.__st_hk_error');
+                hkInput.addEventListener('keydown', function(e) {
+                    e.preventDefault();
+                    var parts = [];
+                    if (e.ctrlKey) parts.push('Ctrl');
+                    if (e.altKey) parts.push('Alt');
+                    if (e.shiftKey) parts.push('Shift');
+                    if (e.metaKey) parts.push('Meta');
+                    var k = e.key;
+                    if (!['Control', 'Alt', 'Shift', 'Meta'].includes(k)) parts.push(k.length === 1 ? k.toUpperCase() : k);
+                    var combo = parts.join('+');
+                    if (!combo) return;
+                    var conflict = HOTKEY_ACTIONS.filter(function(other) {
+                        return other !== action && hotkeyActionActive(other) && hotkeyFor(other, st) === combo;
+                    })[0];
+                    if (conflict) {
+                        hkError.textContent = combo + ' is already assigned to ' + conflict.label + ' — pick a different combo.';
+                        hkError.style.display = '';
+                        return;
+                    }
+                    hkError.style.display = 'none';
+                    st[action.settingsKey] = combo;
+                    hkInput.value = combo;
+                    hkDisplay.textContent = combo;
+                    saveSettings();
+                });
+
+                hkDiv.querySelector('.__st_hk_clear').onclick = function() {
+                    st[action.settingsKey] = '';
+                    hkInput.value = '';
+                    hkDisplay.textContent = 'not set';
+                    hkError.style.display = 'none';
+                    saveSettings();
+                };
             });
-
-            hkDiv.querySelector('#__st_hk_clear').onclick = function() {
-                st.rescanHotkey = '';
-                hkInput.value = '';
-                hkDisplay.textContent = 'not set';
-                saveSettings();
-            };
 
             // ── Auto-Scan on New WO ──
             var autoScanDiv = document.createElement('div');
@@ -7362,14 +7647,18 @@
                 st.msgSuffix = content.querySelector('#__st_suffix').value;
                 st.msgDelim = content.querySelector('#__st_delim').value;
 
-                // Always prefer the in-memory st.rescanHotkey (set by keydown),
-                // fall back to whatever was previously saved
-                if (!st.rescanHotkey && currentSaved.rescanHotkey) {
-                    st.rescanHotkey = currentSaved.rescanHotkey;
-                }
+                // Always prefer the in-memory hotkey (set by keydown) for
+                // each registered action, falling back to whatever was
+                // previously saved — same reasoning as before, just applied
+                // to every hotkey action instead of only Scan's.
+                HOTKEY_ACTIONS.forEach(function(action) {
+                    if (!st[action.settingsKey] && currentSaved[action.settingsKey]) {
+                        st[action.settingsKey] = currentSaved[action.settingsKey];
+                    }
+                });
 
                 saveSettingsCfg(st);
-                applyHotkey();
+                applyHotkeys();
             }
 
             // ── Auto-Backup section ──
@@ -7678,6 +7967,47 @@
             window.open('https://williamzitzmann.github.io/WO-Review-Tool/', '_blank');
         }
 
+        // ── FEEDBACK TAB ── No backend to receive reports — this just
+        // composes a mailto: draft (same support address used for access
+        // requests) pre-filled with version/channel/grants so a report
+        // doesn't need those typed out by hand.
+        function feedbackTab() {
+            content.innerHTML = '';
+            var div = document.createElement('div');
+            div.className = 'wo-card';
+            div.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Report a Bug / Suggest an Improvement</span></div>' +
+                '<div data-coll-body style="margin-top:7px;">' +
+                '<div style="margin-bottom:6px;">Type: <select id="__fb_type">' +
+                '<option value="Bug">Bug</option>' +
+                '<option value="Suggestion">Suggestion</option>' +
+                '</select></div>' +
+                '<textarea id="__fb_body" placeholder="What happened, or what would help?" style="width:100%;height:140px;"></textarea>' +
+                '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;">' +
+                '<button id="__fb_send" type="button" class="wo-btn wo-btn-primary">Send via Email</button>' +
+                '<span style="color:var(--wo-muted);font-size:10px;">Opens a draft to ' + SUPPORT_EMAIL + ' in your default mail app — nothing is sent automatically.</span>' +
+                '</div>' +
+                '</div>';
+            content.appendChild(div);
+            makeCollapsible(div, 'Report a Bug / Suggest an Improvement', false);
+
+            div.querySelector('#__fb_send').onclick = function() {
+                var type = div.querySelector('#__fb_type').value;
+                var body = div.querySelector('#__fb_body').value.trim();
+                if (!body) {
+                    alert('Describe the bug or suggestion first.');
+                    return;
+                }
+                var context = 'Tool version: v' + TOOL_VERSION +
+                    '\nGrants: ' + (getGrants().join(', ') || 'user') +
+                    '\nURL: ' + location.href;
+                var subject = 'WO Review Tool ' + type + ' report';
+                var mailBody = body + '\n\n---\n' + context;
+                window.location.href = 'mailto:' + SUPPORT_EMAIL +
+                    '?subject=' + encodeURIComponent(subject) +
+                    '&body=' + encodeURIComponent(mailBody);
+            };
+        }
+
         // ── PROFILES TAB ──
         function profilesTab() {
             content.innerHTML = '';
@@ -7854,7 +8184,9 @@
         }
 
         function bindTab(id, fn, onReclick) {
-            modal.querySelector('#' + id).onclick = function() {
+            var btn = modal.querySelector('#' + id);
+            if (!btn) return; // tab not rendered (e.g. Install, dev-only)
+            btn.onclick = function() {
                 // Clicking a tab header that's already active is the one
                 // explicit "reset" gesture for state a tab preserves across
                 // ordinary tab switches (e.g. Rules' expand/collapse) —
@@ -7869,6 +8201,7 @@
             };
         }
         bindTab('__s_guide', guideTab);
+        bindTab('__s_feedback', feedbackTab);
         bindTab('__s_rules', rulesTab, function() {
             ruleExpandState = {};
         });
@@ -7883,6 +8216,7 @@
         });
         bindTab('__s_profiles', profilesTab);
         bindTab('__s_settings', settingsTab);
+        bindTab('__s_beta', betaTab);
         bindTab('__s_update', updateTab);
         activateTab('__s_rules');
         rulesTab();
@@ -7949,14 +8283,19 @@
         }
     }
 
-    function applyHotkey() {
+    function applyHotkeys() {
         var st = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
-        var hk = (st.rescanHotkey !== undefined) ? st.rescanHotkey : DEFAULT_HOTKEY;
         if (window.__wo_hk_listener) document.removeEventListener('keydown', window.__wo_hk_listener);
         // No need to touch the Scan button's tooltip here — attachTooltip()
         // was bound with scanBtnTooltipText itself (not a frozen string), so
         // it re-reads __wo_settings fresh on every hover and can't go stale.
-        if (!hk) return;
+        var byCombo = {};
+        HOTKEY_ACTIONS.forEach(function(action) {
+            if (!hotkeyActionActive(action)) return; // beta feature off (or never granted) — this action doesn't exist right now
+            var hk = hotkeyFor(action, st);
+            if (hk) byCombo[hk] = action; // the Settings UI is what actually prevents two actions colliding on one combo
+        });
+        if (!Object.keys(byCombo).length) return;
 
         window.__wo_hk_listener = function(e) {
             var parts = [];
@@ -7965,14 +8304,15 @@
             if (e.shiftKey) parts.push('Shift');
             if (e.metaKey) parts.push('Meta');
             if (!['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) parts.push(e.key.length === 1 ? e.key.toUpperCase() : e.key);
-            if (parts.join('+') === hk) {
+            var action = byCombo[parts.join('+')];
+            if (action) {
                 e.preventDefault();
-                runScan(render);
+                action.run();
             }
         };
         document.addEventListener('keydown', window.__wo_hk_listener);
     }
-    applyHotkey();
+    applyHotkeys();
 
     buildPanel();
     // mergeSnapshot(extractSnapshotFull());
@@ -7983,7 +8323,7 @@
         // restored (RKEY present) skips straight through.
         if (!localStorage.getItem(RKEY)) {
             return showInstaller().then(function() {
-                applyHotkey(); // config just arrived — (re)attach hotkey listener from it
+                applyHotkeys(); // config just arrived — (re)attach hotkey listener from it
                 // Backup-setup nag was suppressed in startupRestore() for fresh
                 // installs specifically so it wouldn't race the installer — surface
                 // it now that setup is done, if still relevant.

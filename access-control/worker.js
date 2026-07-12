@@ -17,7 +17,13 @@
  *   POST /check-access   — body: { fields: {...} } (only the fields
  *                          /bootstrap said were required). Evaluates
  *                          override -> blacklist -> allow -> deny and
- *                          returns { granted, tier, token? }.
+ *                          returns { granted, grants, token? }. `grants` is
+ *                          an array (e.g. ["user","dev","beta_0"]) rather
+ *                          than a single tier — a user can hold more than
+ *                          one flag at once (e.g. dev AND beta_0).
+ *                          "beta_0" is a wildcard meaning "all betas"; the
+ *                          client treats any other "beta_N" as one specific
+ *                          feature.
  *   GET  /tool?token=...&version=X.Y.Z (version optional)
  *                        — redeems a short-lived signed token and proxies
  *                          wo_tool.js from the private repo. With no
@@ -112,7 +118,7 @@ function evaluateAccess(perms, user) {
         return String(o.username || '').toLowerCase() === username;
     });
     if (override) {
-        return { granted: true, tier: resolveTier(perms, username, override.tier || 'user') };
+        return { granted: true, grants: resolveGrants(perms, username, override.grants) };
     }
 
     var blacklisted = (perms.blacklist || []).some(function(group) {
@@ -126,20 +132,25 @@ function evaluateAccess(perms, user) {
         return evalGroup(user, group.conditions);
     });
     if (allowMatch) {
-        return { granted: true, tier: resolveTier(perms, username, allowMatch.tier || 'user') };
+        return { granted: true, grants: resolveGrants(perms, username, allowMatch.grants) };
     }
 
     return { granted: false };
 }
 
-// A dev/beta tier list can upgrade an already-granted user's tier — this is
-// the server-side replacement for the console __woEnableBeta/__woEnableDev
-// commands, not a separate access gate of its own.
-function resolveTier(perms, username, baseTier) {
-    var tiers = perms.tiers || {};
-    if ((tiers.dev || []).some(function(u) { return String(u).toLowerCase() === username; })) return 'dev';
-    if ((tiers.beta || []).some(function(u) { return String(u).toLowerCase() === username; })) return 'beta';
-    return baseTier;
+// Merges the base grants a user got from their matching override/allow rule
+// with any extra flags called out for them by name in perms.extraGrants —
+// this is the server-side replacement for the console
+// __woEnableBeta/__woEnableDev commands, not a separate access gate of its
+// own. Lets one person hold multiple grants at once (e.g. dev + beta_0)
+// without needing a dedicated override entry for every combination.
+function resolveGrants(perms, username, baseGrants) {
+    var set = {};
+    (baseGrants && baseGrants.length ? baseGrants : ['user']).forEach(function(g) { set[g] = true; });
+    var extraGrants = perms.extraGrants || {};
+    var key = Object.keys(extraGrants).filter(function(k) { return k.toLowerCase() === username; })[0];
+    (key ? extraGrants[key] : []).forEach(function(g) { set[g] = true; });
+    return Object.keys(set);
 }
 
 // Every field name referenced anywhere in the ruleset, plus username always
@@ -222,10 +233,10 @@ async function handleCheckAccess(request, env) {
     if (!result.granted) return json({ granted: false });
 
     var token = await makeToken(env.TOKEN_SECRET, {
-        tier: result.tier,
+        grants: result.grants,
         exp: Date.now() + TOKEN_TTL_MS,
     });
-    return json({ granted: true, tier: result.tier, token: token });
+    return json({ granted: true, grants: result.grants, token: token });
 }
 
 async function handleGetTool(request, env) {

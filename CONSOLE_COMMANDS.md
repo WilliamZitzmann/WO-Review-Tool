@@ -13,21 +13,34 @@ By default, everyone runs the **stable** channel and can only pin to a released
 (non-prerelease) version — see [Setup > Settings > Updates]. These commands unlock
 more.
 
+Access grants now live as an array (e.g. `["user","dev","beta_0"]`), not a single
+tier — a user can hold more than one at once. `beta_0` is a wildcard for every
+registered beta feature; `beta_1`/`beta_2`/etc. each gate one specific feature
+(enable/disable per feature lives in Setup > Beta, visible once you hold any
+beta grant). Grants are normally set server-side (permissions.json, via the
+access-control Worker) and re-checked on every bookmarklet click — these
+commands are a local-only override for testing without needing a real grant.
+
 ### `window.__woEnableBeta()`
-Unlocks **beta** tier. Reveals the Beta channel option and any beta-tagged
-(`X.Y.Z-beta1`) builds in the version-pin list, in Setup > Settings > Updates.
+Sets local grants to `["user","beta_0"]` (all beta features). Reveals the Beta
+channel option and any beta-tagged (`X.Y.Z-beta1`) builds in the version-pin
+list, in Setup > Settings > Updates, plus the Beta tab.
 
 ### `window.__woEnableDev()`
-Unlocks **dev** tier (superset of beta). Also reveals the Dev channel option
-(tracks the tip of `main` directly, not a tagged release) and the Debug section
-in Setup > Settings.
+Sets local grants to `["user","dev","beta_0"]` (dev + all betas). Also reveals
+the Dev channel option (tracks the tip of `main` directly, not a tagged
+release) and the Debug section in Setup > Settings.
 
 ### `window.__woLockDev()`
-Re-locks dev/beta mode. Resets the channel back to `stable` and clears any
-version pin. Everything unlocked by the two commands above goes back to hidden.
+Clears local grants back to none. Resets the channel back to `stable` and
+clears any version pin. Everything unlocked by the two commands above goes
+back to hidden.
 
-**Note:** the unlock state lives in its own localStorage key, separate from
-`__wo_settings` — it never travels with an exported/shared config backup.
+**Note:** grants live in their own localStorage key (`__wo_grants`), separate
+from `__wo_settings` — they never travel with an exported/shared config
+backup. On a real (non-console-forced) run, the server's grant list overwrites
+this key on every bookmarklet click, so a console override only lasts until
+the next launch.
 
 ---
 

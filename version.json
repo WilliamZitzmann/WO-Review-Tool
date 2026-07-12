@@ -1,10 +1,25 @@
 {
-  "latest": "0.20.37",
+  "latest": "0.21.0",
   "channels": {
-    "stable": "0.20.37",
-    "beta": "0.20.37"
+    "stable": "0.21.0",
+    "beta": "0.21.0"
   },
   "versions": [
+    {
+      "version": "0.21.0",
+      "name": "Minor Version 1 + Beta Framework",
+      "changes": [
+        "Permissions now grant a LIST of flags per user instead of one tier (e.g. dev + beta_0 at once) - beta_0 is a wildcard for every beta feature, beta_1/beta_2/etc. gate one specific feature each.",
+        "New: Return and Approve can each have their own hotkey (Scan already could) - assigning a key combo already used by another action is now rejected instead of silently overwriting it.",
+        "New: Feedback tab in Setup to send a bug report or suggestion by email, pre-filled with version/grants for context.",
+        "Install tab is now only visible with the dev grant.",
+        "Drag handle icon is a bit wider and taller.",
+        "Startup status now shows a second line naming any active dev/beta grants, so access is visible every launch, not just discoverable via console.",
+        "Groups: a header message tied to a specific rule can now be left on \"Auto\" to always show whichever of the group's rules currently has the worst status (error > fail > warn > pass), instead of requiring one rule to be hand-picked ahead of time.",
+        "New Beta tab (visible only if you hold a beta grant) lists whichever beta features you qualify for with individual enable/disable toggles. Off means zero trace anywhere in the tool - no settings, no buttons, no menu items.",
+        "First beta feature (dev + beta_1 only, off by default): adds a neutral Route symbol and a Fix action next to Return/Approve. Fix reruns the scan and reapplies fields, and post-scan actions can now be limited to run only on Scan, only on Fix, or both."
+      ]
+    },
     {
       "version": "0.20.37",
       "name": "Multi-Company Redirect Fix",

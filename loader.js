@@ -17,7 +17,7 @@
 
     var TOOL_SRC_KEY = '__wo_tool_src'; // same key the tool itself has always used
     var HOSTS_CACHE_KEY = '__wo_known_hosts';
-    var DEV_UNLOCK_KEY = '__wo_dev_unlock'; // same key wo_tool.js's console unlock commands use
+    var GRANTS_KEY = '__wo_grants'; // same key wo_tool.js's hasGrant()/console unlock commands read
     var CONTACT_EMAIL = 'williamzitzmann@abbvie.com';
 
     function showBanner(text, isError) {
@@ -74,7 +74,7 @@
     // before it's cleared, not just deleted. An exclude-list rather than an
     // allow-list on purpose: new config keys wo_tool.js adds later get
     // captured automatically without this file needing to know their names.
-    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_known_hosts', '__wo_last_scanned_wo'];
+    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_grants', '__wo_known_hosts', '__wo_last_scanned_wo'];
     var REVOKED_BACKUP_KEY = '__wo_revoked_backup';
 
     // Clears the tool + its config on a confirmed revoke, but preserves two
@@ -166,11 +166,7 @@
             });
         }).then(function(decision) {
             if (decision.granted) {
-                if (decision.tier === 'beta' || decision.tier === 'dev') {
-                    localStorage.setItem(DEV_UNLOCK_KEY, decision.tier);
-                } else {
-                    localStorage.removeItem(DEV_UNLOCK_KEY);
-                }
+                localStorage.setItem(GRANTS_KEY, JSON.stringify(decision.grants || []));
                 restoreFromRevokedBackupIfAny();
                 return fetchAndRunTool(decision.token);
             }
