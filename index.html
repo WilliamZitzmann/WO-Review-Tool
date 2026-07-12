@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Will's WO Review Tool — Guide</title>
+<title>WO Review Tool — Guide</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -261,6 +261,7 @@
   .callout-warn { background: rgba(255,152,0,0.07); border-color: var(--orange); }
   .callout-danger { background: rgba(231,76,60,0.08); border-color: var(--red); }
   .callout-info { background: rgba(46,204,113,0.07); border-color: var(--green); }
+  .callout-beta { background: rgba(155,89,182,0.08); border-color: var(--purple); }
   .callout strong { color: #eee; }
 
   /* ── STATUS DOTS ── */
@@ -349,255 +350,6 @@
     border: none;
     background: #0a0a0a;
     border-radius: 4px;
-  }
-
-  /* ── MOCK PANEL ── */
-  .panel-demo-wrapper {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    margin: 20px 0 24px;
-  }
-  .panel-demo-label {
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-    margin-bottom: 8px;
-    padding: 3px 8px;
-    background: #222;
-    border-radius: 4px;
-    border: 1px solid var(--border);
-  }
-
-  .mock-panel {
-    width: 300px;
-    height: 520px;
-    background: #141414;
-    border: 1px solid #3a3a3a;
-    border-radius: 8px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.7), 0 0 0 1px #2a2a2a;
-    font-family: 'Segoe UI', Arial, sans-serif;
-    font-size: 12px;
-  }
-
-  .mp-topbar {
-    background: #2c2c2c;
-    padding: 8px 10px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    border-bottom: 1px solid #3a3a3a;
-    flex-shrink: 0;
-  }
-  .mp-title {
-    flex: 1;
-  }
-  .mp-title .t1 {
-    font-size: 12px;
-    font-weight: 700;
-    color: #eee;
-    line-height: 1.2;
-  }
-  .mp-title .t2 {
-    font-size: 9px;
-    color: #888;
-    margin-top: 1px;
-  }
-  .mp-btn {
-    background: #3a3a3a;
-    border: 1px solid #4a4a4a;
-    color: #ccc;
-    border-radius: 4px;
-    padding: 3px 7px;
-    font-size: 10px;
-    cursor: pointer;
-    font-family: inherit;
-  }
-  .mp-btn-red { background: rgba(231,76,60,0.2); border-color: var(--red); color: var(--red); }
-  .mp-btn-green { background: rgba(46,204,113,0.2); border-color: var(--green); color: var(--green); }
-
-  .mp-statusbar {
-    background: #1c1c1c;
-    padding: 4px 10px;
-    font-size: 10px;
-    color: var(--yellow);
-    border-bottom: 1px solid #2a2a2a;
-    flex-shrink: 0;
-  }
-
-  .mp-scanlog {
-    background: #161616;
-    padding: 4px 10px 5px;
-    border-bottom: 1px solid #2a2a2a;
-    flex-shrink: 0;
-  }
-  .mp-scanlog-row {
-    font-size: 10px;
-    color: #666;
-    line-height: 1.5;
-  }
-  .mp-scanlog-row .ok { color: #4a9; }
-
-  .mp-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-  }
-  .mp-body::-webkit-scrollbar { width: 4px; }
-  .mp-body::-webkit-scrollbar-track { background: #111; }
-  .mp-body::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
-
-  .mp-tile {
-    background: #181818;
-    border: 1px solid #2a2a2a;
-    border-radius: 5px;
-    overflow: hidden;
-  }
-  .mp-tile-header {
-    background: #252525;
-    padding: 5px 8px;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    cursor: pointer;
-  }
-  .mp-tile-dots {
-    display: flex;
-    gap: 3px;
-    flex-shrink: 0;
-  }
-  .mp-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-  .mp-tile-title {
-    flex: 1;
-    font-size: 11px;
-    font-weight: 700;
-    color: #ddd;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .mp-tile-msg {
-    font-size: 10px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 80px;
-  }
-  .mp-tile-chevron {
-    font-size: 9px;
-    color: #666;
-    flex-shrink: 0;
-  }
-  .mp-tile-x {
-    font-size: 10px;
-    color: #555;
-    flex-shrink: 0;
-    padding: 0 2px;
-  }
-
-  .mp-tile-body {
-    padding: 7px 8px;
-    border-top: 1px solid #222;
-  }
-  .mp-field-row {
-    display: flex;
-    gap: 6px;
-    margin-bottom: 4px;
-  }
-  .mp-field {
-    flex: 1;
-  }
-  .mp-field-label {
-    font-size: 9px;
-    color: #666;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-  }
-  .mp-field-val {
-    font-size: 11px;
-    color: #ddd;
-    font-weight: 600;
-  }
-  .mp-rule-row {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    margin-top: 5px;
-    padding-top: 5px;
-    border-top: 1px solid #222;
-  }
-  .mp-rule-label { font-size: 10px; color: #aaa; flex: 1; }
-  .mp-rule-status { font-size: 10px; font-weight: 700; }
-
-  .mp-bottom {
-    border-top: 1px solid #2a2a2a;
-    padding: 6px;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-  }
-  .mp-return-preview {
-    background: #222;
-    border: 1px solid #333;
-    border-radius: 4px;
-    padding: 6px 8px;
-    font-size: 10px;
-    color: #bbb;
-    min-height: 32px;
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 4px;
-  }
-  .mp-copy-btn {
-    background: none;
-    border: none;
-    color: #888;
-    cursor: pointer;
-    font-size: 12px;
-    padding: 0;
-    flex-shrink: 0;
-  }
-  .mp-action-row {
-    display: flex;
-    gap: 5px;
-  }
-  .mp-action-btn {
-    flex: 1;
-    padding: 5px;
-    border-radius: 4px;
-    border: none;
-    font-size: 11px;
-    font-weight: 700;
-    cursor: pointer;
-    font-family: inherit;
-  }
-  .mp-btn-return { background: rgba(231,76,60,0.25); color: var(--red); border: 1px solid rgba(231,76,60,0.4); }
-  .mp-btn-approve { background: rgba(46,204,113,0.2); color: var(--green); border: 1px solid rgba(46,204,113,0.35); }
-  .mp-show-hidden {
-    background: #252525;
-    border: 1px solid #333;
-    color: #888;
-    border-radius: 4px;
-    padding: 4px;
-    font-size: 10px;
-    text-align: center;
-    cursor: pointer;
-    font-family: inherit;
-    width: 100%;
   }
 
   /* ── FLOW DIAGRAM ── */
@@ -796,116 +548,69 @@
 <!-- SIDEBAR -->
 <aside id="sidebar">
   <div id="sidebar-logo">
-    <div class="tool-name">Will's WO Review Tool</div>
-    <div class="tool-sub">Documentation Guide · v0.6.0</div>
+    <div class="tool-name">WO Review Tool</div>
+    <div class="tool-sub">User Guide · v0.21.2</div>
   </div>
   <nav id="nav">
-    <a href="#s1" class="active"><span class="sec-num">1</span> Overview</a>
+    <a href="#s1"><span class="sec-num">1</span> Getting Started</a>
     <a href="#s2"><span class="sec-num">2</span> The Panel</a>
-    <a href="#s3"><span class="sec-num">3</span> Rules</a>
-    <a href="#s4"><span class="sec-num">4</span> Variables</a>
-    <a href="#s5"><span class="sec-num">5</span> Groups &amp; Display</a>
-    <a href="#s6"><span class="sec-num">6</span> Scan System</a>
-    <a href="#s7"><span class="sec-num">7</span> Return Message &amp; Workflow</a>
-    <a href="#s8"><span class="sec-num">8</span> Settings</a>
-    <a href="#s9"><span class="sec-num">9</span> Export / Import</a>
-    <a href="#s10"><span class="sec-num">10</span> Formula Quick Reference</a>
+    <a href="#s3"><span class="sec-num">3</span> Setup Overview</a>
+    <a href="#s4"><span class="sec-num">4</span> Rules</a>
+    <a href="#s5"><span class="sec-num">5</span> Variables</a>
+    <a href="#s6"><span class="sec-num">6</span> Groups &amp; Display</a>
+    <a href="#s7"><span class="sec-num">7</span> Adding Fields</a>
+    <a href="#s8"><span class="sec-num">8</span> Scan System</a>
+    <a href="#s9"><span class="sec-num">9</span> Profiles &amp; Presets</a>
+    <a href="#s10"><span class="sec-num">10</span> Settings &amp; Hotkeys</a>
+    <a href="#s11"><span class="sec-num">11</span> Export / Import</a>
+    <a href="#s12"><span class="sec-num">12</span> Feedback</a>
+    <a href="#s13"><span class="sec-num">13</span> Beta Features</a>
+    <a href="#s14"><span class="sec-num">14</span> Formula Reference</a>
+    <a href="#s15"><span class="sec-num">15</span> Troubleshooting</a>
   </nav>
-  <div id="sidebar-footer">Will's WO Review Tool Guide</div>
+  <div id="sidebar-footer">WO Review Tool Guide</div>
 </aside>
 
 <!-- MAIN -->
 <main id="main">
 
 <!-- ══════════════════════════════════════════════════ -->
-<!-- SECTION 1 -->
+<!-- SECTION 1 — GETTING STARTED -->
 <!-- ══════════════════════════════════════════════════ -->
 <section class="section" id="s1">
   <div class="section-header">
-    <span class="section-icon">🔍</span>
-    <h2>Overview</h2>
+    <span class="section-icon">🚀</span>
+    <h2>Getting Started</h2>
     <span class="sec-badge">§1</span>
   </div>
 
   <div class="hero">
-    <div class="version-tag">v0.6.0</div>
-    <h1>Will's WO Review Tool</h1>
-    <p>A browser bookmarklet that injects a fixed right-side panel into Maximo work order pages, reads live DOM field values, evaluates configurable JS rules, and displays pass/fail/warn/na status in grouped tiles.</p>
+    <div class="version-tag">v0.21.2</div>
+    <h1>WO Review Tool</h1>
+    <p>A bookmarklet that injects a live checklist panel into Maximo work order pages — it reads field values and tables straight off the page, runs your own rules against them, and helps you write a clean return message in seconds instead of re-checking the same things by eye every time.</p>
   </div>
 
-  <p>The tool injects a fixed 360px panel on the right side of any Maximo work order page. It traverses iframes to read field values and table data directly from the live DOM, evaluates JavaScript rule formulas, and displays results in grouped, collapsible tiles. The scan system automatically navigates Maximo tabs and dialogs to collect data from multiple areas of the WO, then returns to the WO tab. All configuration is persisted in browser <code>localStorage</code>.</p>
+  <h3>Installing the Bookmarklet</h3>
+  <p>You'll receive a one-line bookmarklet to save as a browser bookmark (drag it to your bookmarks bar, or paste it into a new bookmark's URL field — however your browser prefers). It never needs updating: it always fetches the current logic when clicked, so you install it exactly once.</p>
 
-  <h3>LocalStorage Keys</h3>
-  <table class="doc-table">
-    <thead>
-      <tr><th>Key</th><th>Contents</th></tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><code>__wo_rules_config</code></td>
-        <td>Groups, rules, field registrations, settings (return message config, hotkey, message overrides)</td>
-      </tr>
-      <tr>
-        <td><code>__wo_scan_config</code></td>
-        <td>Scan targets — tabs/dialogs to visit, wait conditions</td>
-      </tr>
-      <tr>
-        <td><code>__wo_vars_config</code></td>
-        <td>Variables — named computed expressions</td>
-      </tr>
-      <tr>
-        <td><code>__wo_field_config</code></td>
-        <td>Registered field mappings (tab, label, DOM id)</td>
-      </tr>
-      <tr>
-        <td><code>__wo_group_state</code></td>
-        <td>Per-group collapsed/visible state and ordering</td>
-      </tr>
-    </tbody>
-  </table>
+  <div class="flow-steps">
+    <div class="flow-step"><div class="flow-num">1</div><div class="flow-text">Open a work order in Maximo.</div></div>
+    <div class="flow-step"><div class="flow-num">2</div><div class="flow-text">Click the bookmarklet. If you're not already on the right Maximo page, it redirects you there first — click it again once you've landed and are logged in.</div></div>
+    <div class="flow-step"><div class="flow-num">3</div><div class="flow-text">It checks that you're allowed to use the tool, then loads the panel on the right side of the page.</div></div>
+    <div class="flow-step"><div class="flow-num">4</div><div class="flow-text">First time only: pick a starting configuration (a shared preset, or start blank) in the installer that appears.</div></div>
+  </div>
 
-  <h3>Status Color Reference</h3>
-  <table class="doc-table">
-    <thead>
-      <tr><th>Color</th><th>Status</th><th>Trigger</th></tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><span class="dot dot-green"></span><span class="status-badge sb-green">PASS</span></td>
-        <td>Pass</td>
-        <td>Formula returned <code>true</code></td>
-      </tr>
-      <tr>
-        <td><span class="dot dot-red"></span><span class="status-badge sb-red">FAIL</span></td>
-        <td>Fail</td>
-        <td>Formula returned <code>false</code></td>
-      </tr>
-      <tr>
-        <td><span class="dot dot-orange"></span><span class="status-badge sb-orange">WARN</span></td>
-        <td>Warning</td>
-        <td>Formula returned <code>'warn'</code></td>
-      </tr>
-      <tr>
-        <td><span class="dot dot-yellow"></span><span class="status-badge sb-yellow">NA</span></td>
-        <td>Not Applicable</td>
-        <td>Formula returned <code>'na'</code></td>
-      </tr>
-      <tr>
-        <td><span class="dot dot-purple"></span><span class="status-badge sb-purple">ERROR</span></td>
-        <td>Error</td>
-        <td>Formula threw a JS exception</td>
-      </tr>
-      <tr>
-        <td><span class="dot dot-gray"></span><span class="status-badge sb-gray">—</span></td>
-        <td>Default / Unknown</td>
-        <td>Not yet evaluated or unrecognized return value</td>
-      </tr>
-    </tbody>
-  </table>
+  <div class="callout callout-tip">
+    <strong>Access required:</strong> the tool checks with a small access-control service every time you click the bookmarklet. If you haven't been granted access yet, it'll tell you who to contact. This is a quick, automatic check — you won't need to do anything yourself once you're approved.
+  </div>
+
+  <div class="callout callout-warn">
+    <strong>Different PC?</strong> Your rules/groups/settings live in this browser's local storage, not your Maximo account. If you use the tool on a second PC, set up <a href="#s11">Export/Import</a> or Settings' Auto-Backup to carry your configuration across.
+  </div>
 </section>
 
 <!-- ══════════════════════════════════════════════════ -->
-<!-- SECTION 2 -->
+<!-- SECTION 2 — THE PANEL -->
 <!-- ══════════════════════════════════════════════════ -->
 <section class="section" id="s2">
   <div class="section-header">
@@ -914,195 +619,98 @@
     <span class="sec-badge">§2</span>
   </div>
 
-  <p>The panel is a fixed right-side overlay, 360px wide, that pushes page content left so nothing is obscured. It is independently scrollable and persists across Maximo tab navigation within the same page session.</p>
+  <p>The panel is a fixed strip on the right side of the page. It pushes the Maximo content left rather than overlapping it, and stays put as you navigate Maximo's own tabs.</p>
 
-  <h3>Panel Controls</h3>
+  <h3>Header Controls</h3>
   <table class="doc-table">
-    <thead>
-      <tr><th>Control</th><th>Action</th></tr>
-    </thead>
+    <thead><tr><th>Control</th><th>What it does</th></tr></thead>
     <tbody>
-      <tr>
-        <td><strong>Re-scan</strong></td>
-        <td>Triggers a full scan of all configured targets, then re-evaluates all rules and re-renders the panel</td>
-      </tr>
-      <tr>
-        <td><strong>Setup</strong></td>
-        <td>Opens the Setup UI modal for configuring rules, groups, scan targets, variables, and settings</td>
-      </tr>
-      <tr>
-        <td><strong style="color:var(--red)">Exit</strong></td>
-        <td>Removes the panel from the DOM. Run the bookmarklet again to restore it.</td>
-      </tr>
+      <tr><td><strong>Scan</strong></td><td>Runs every configured scan target in order, then re-evaluates all rules and re-renders the panel. Has its own hotkey — see <a href="#s10">Settings</a>.</td></tr>
+      <tr><td><strong>Setup</strong></td><td>Opens the Setup window — where you write rules, groups, scans, variables, and change settings. See <a href="#s3">Setup Overview</a>.</td></tr>
+      <tr><td><strong style="color:var(--red)">Exit</strong></td><td>Removes the panel from the page. Click the bookmarklet again to bring it back — your configuration is untouched.</td></tr>
     </tbody>
   </table>
 
-  <!-- MOCK PANEL -->
-  <div class="panel-demo-wrapper">
-    <div class="panel-demo-label">Example Panel</div>
-    <div class="mock-panel">
-      <!-- Top bar -->
-      <div class="mp-topbar">
-        <div class="mp-title">
-          <div class="t1">Will's WO | Review Tool</div>
-          <div class="t2">v0.6.0</div>
-        </div>
-        <button class="mp-btn">Re-scan</button>
-        <button class="mp-btn">Setup</button>
-        <button class="mp-btn mp-btn-red">Exit</button>
-      </div>
-      <!-- Status bar -->
-      <div class="mp-statusbar">Scan complete 10:34:21 AM</div>
-      <!-- Scan log -->
-      <div class="mp-scanlog">
-        <div class="mp-scanlog-row">▸ Actuals: <span class="ok">OK (1243ms)</span></div>
-        <div class="mp-scanlog-row">▸ Approvers: <span class="ok">OK (892ms)</span></div>
-      </div>
-      <!-- Tiles -->
-      <div class="mp-body">
-        <!-- Tile 1: expanded -->
-        <div class="mp-tile">
-          <div class="mp-tile-header">
-            <div class="mp-tile-dots">
-              <div class="mp-dot" style="background:var(--green)"></div>
-              <div class="mp-dot" style="background:var(--gray)"></div>
-            </div>
-            <div class="mp-tile-title">Work Order Summary</div>
-            <div class="mp-tile-chevron">▼</div>
-            <div class="mp-tile-x">×</div>
-          </div>
-          <div class="mp-tile-body">
-            <div class="mp-field-row">
-              <div class="mp-field">
-                <div class="mp-field-label">Work Order</div>
-                <div class="mp-field-val">1234567</div>
-              </div>
-              <div class="mp-field">
-                <div class="mp-field-label">Work Type</div>
-                <div class="mp-field-val">PM</div>
-              </div>
-            </div>
-            <div class="mp-field-row">
-              <div class="mp-field">
-                <div class="mp-field-label">Status</div>
-                <div class="mp-field-val">WAPPR</div>
-              </div>
-            </div>
-            <div class="mp-rule-row">
-              <div class="mp-dot" style="background:var(--green);width:7px;height:7px;border-radius:50%;flex-shrink:0"></div>
-              <div class="mp-rule-label">WO has description</div>
-              <div class="mp-rule-status" style="color:var(--green)">✓ OK</div>
-            </div>
-            <div class="mp-rule-row">
-              <div class="mp-dot" style="background:var(--gray);width:7px;height:7px;border-radius:50%;flex-shrink:0"></div>
-              <div class="mp-rule-label">Lot number check</div>
-              <div class="mp-rule-status" style="color:var(--gray)">— N/A</div>
-            </div>
-          </div>
-        </div>
-        <!-- Tile 2: collapsed, fail -->
-        <div class="mp-tile">
-          <div class="mp-tile-header">
-            <div class="mp-tile-dots">
-              <div class="mp-dot" style="background:var(--red)"></div>
-            </div>
-            <div class="mp-tile-title">Time Check</div>
-            <div class="mp-tile-msg" style="color:var(--red)">✗ Missing finish</div>
-            <div class="mp-tile-chevron">▶</div>
-            <div class="mp-tile-x">×</div>
-          </div>
-        </div>
-        <!-- Tile 3: collapsed, warn -->
-        <div class="mp-tile">
-          <div class="mp-tile-header">
-            <div class="mp-tile-dots">
-              <div class="mp-dot" style="background:var(--orange)"></div>
-            </div>
-            <div class="mp-tile-title">Lot Number</div>
-            <div class="mp-tile-msg" style="color:var(--orange)">⚠ Verify lot</div>
-            <div class="mp-tile-chevron">▶</div>
-            <div class="mp-tile-x">×</div>
-          </div>
-        </div>
-      </div>
-      <!-- Bottom -->
-      <div class="mp-bottom">
-        <div class="mp-return-preview">
-          <span>Please add actual finish date.</span>
-          <button class="mp-copy-btn">📋</button>
-        </div>
-        <div class="mp-action-row">
-          <button class="mp-action-btn mp-btn-return">↩ Return</button>
-          <button class="mp-action-btn mp-btn-approve">✓ Approve</button>
-        </div>
-        <button class="mp-show-hidden">Show hidden tiles</button>
-      </div>
-    </div>
-  </div>
-
-  <h3>Status Bar</h3>
-  <p>The status bar below the header displays the current scan state. Possible values:</p>
-  <ul>
-    <li><span style="color:var(--teal)">Scanning…</span> — scan in progress</li>
-    <li><span style="color:var(--yellow)">Scan complete HH:MM:SS AM/PM</span> — last successful scan time</li>
-    <li><span style="color:var(--muted)">Reading WO tab…</span> — initial data capture from WO tab</li>
-  </ul>
-
-  <h3>Scan Log</h3>
-  <p>A collapsible area below the status bar shows per-step results after each scan. It is scrollable up to 80px tall. Each line shows the target name and its result:</p>
+  <h3>Status Bar &amp; Scan Log</h3>
+  <p>Right under the header, a status line shows what the tool is currently doing or last did — e.g. <em>"Scan complete 10:34:21 AM"</em>. If you have dev or beta access, a second line names which of those you currently have, so it's always visible without needing to check the console.</p>
+  <p>Below that, a small scrollable scan log lists each scan step's result:</p>
   <table class="doc-table">
     <thead><tr><th>Log Entry</th><th>Meaning</th></tr></thead>
     <tbody>
-      <tr><td><code>Target: OK (Xms)</code></td><td>Target captured successfully in X milliseconds</td></tr>
-      <tr><td><code>Target: TIMEOUT waiting for "text" (Xms)</code></td><td>waitFor text never appeared within the timeout window</td></tr>
-      <tr><td><code>Target: FAILED</code></td><td>An error occurred during navigation or capture</td></tr>
-      <tr><td><code>Target: skipped (condition false)</code></td><td>The target's <code>condition</code> formula returned false; target was skipped</td></tr>
+      <tr><td><code>Target: OK (Xms)</code></td><td>Captured successfully in X milliseconds</td></tr>
+      <tr><td><code>Target: TIMEOUT waiting for "text" (Xms)</code></td><td>The expected marker text/table never appeared in time</td></tr>
+      <tr><td><code>Target: FAILED - ...</code></td><td>Something went wrong opening or reading that target</td></tr>
+      <tr><td><code>Target: skipped (condition false)</code></td><td>The target's condition formula was false, so it wasn't scanned this run</td></tr>
     </tbody>
   </table>
 
   <h3>Group Tiles</h3>
-  <p>Each tile card has the following structure:</p>
+  <p>Each group you configure shows up as a card. Click its header to expand or collapse it (animated smoothly, not an instant snap). Every tile has:</p>
   <div class="prop-block">
-    <div class="prop-row"><div class="prop-key">Header bar</div><div class="prop-val">Background <code>#252525</code>. Contains: colored status dots (one per ruleRef), title in bold, optional ⓘ tooltip icon (teal), optional inline header message (colored by rule status), expand/collapse button (▶/▼), × hide button.</div></div>
-    <div class="prop-row"><div class="prop-key">Banner message</div><div class="prop-val">Optional blue-tinted box shown at the top of the expanded group body. Static text configured per group.</div></div>
-    <div class="prop-row"><div class="prop-key">Field rows</div><div class="prop-val">Captured field values with labels, arranged in configurable rows. Multiple fields can share a row with optional % width.</div></div>
-    <div class="prop-row"><div class="prop-key">Variable fields</div><div class="prop-val">Variable computed values rendered as labelled field rows with a teal <code>(var)</code> tag next to the label.</div></div>
-    <div class="prop-row"><div class="prop-key">Linked table</div><div class="prop-val">Shows captured table rows inline. Has a ⚙ Cols button to toggle column visibility.</div></div>
-    <div class="prop-row"><div class="prop-key">Rule status blocks</div><div class="prop-val">Small colored circle + rule label + status label. Sub-messages (bulleted, colored by status) appear below for fail/warn rules with configured messages.</div></div>
+    <div class="prop-row"><div class="prop-key">Status badge</div><div class="prop-val">One colored badge per group, summarizing every rule it references. One rule = a single badge. Two rules = a split badge, half each. Three or more = a fanned stack with the worst status in front. Hover for the full breakdown.</div></div>
+    <div class="prop-row"><div class="prop-key">Header message</div><div class="prop-val">An optional inline message next to the title — a field value, a variable's value, or a rule's pass/fail message. Configured per group in Setup.</div></div>
+    <div class="prop-row"><div class="prop-key">Field rows</div><div class="prop-val">Captured field values, arranged however you laid them out in Setup.</div></div>
+    <div class="prop-row"><div class="prop-key">Linked table</div><div class="prop-val">If the group has one, captured table rows appear inline with a column-visibility toggle.</div></div>
+    <div class="prop-row"><div class="prop-key">Rule status blocks</div><div class="prop-val">Each rule the group references shows its status (✓ Pass / ✗ Fail / ⚠ Warn / — N/A) plus any configured messages underneath.</div></div>
   </div>
 
-  <h3>Rule Status Blocks</h3>
-  <p>Inside expanded tiles, each rule referenced by the group shows a status block:</p>
-  <ul>
-    <li>Small colored circle matching the rule result color</li>
-    <li>Rule label text</li>
-    <li>Status label: <span style="color:var(--green)">✓ OK</span> / <span style="color:var(--red)">✗ Failed</span> / <span style="color:var(--orange)">⚠ Warning</span> / <span style="color:var(--yellow)">— N/A</span></li>
-    <li>Sub-messages (bulleted, colored by status) appear below the status line for fail/warn rules that have configured messages</li>
-  </ul>
+  <h3>Reordering &amp; Hiding Groups</h3>
+  <p>Drag a group by its header to reorder it — other tiles animate out of the way as you drag. Use the hide (eye) icon on a group's header in Setup's Groups tab to hide it from the panel entirely; a "Show hidden tiles" button at the bottom of the panel brings them back.</p>
 
-  <h3>Bottom Controls</h3>
+  <h3>Return / Approve</h3>
+  <p>At the bottom, a preview box shows the assembled return message (built automatically from every failed/warned rule that's configured to contribute to it) with a copy button, followed by two buttons:</p>
   <div class="prop-block">
-    <div class="prop-row"><div class="prop-key">Return message box</div><div class="prop-val">Dark background (<code>#222</code>). Shows assembled return message text, or <em style="color:var(--muted)">(No failed rules — return message will appear here)</em> in muted gray when all rules pass. Has a 📋 clipboard copy button.</div></div>
-    <div class="prop-row"><div class="prop-key">↩ Return button</div><div class="prop-val">Red. Full-width flex 1. Opens Route Workflow dialog, selects "Return Work Order", fills memo with return message.</div></div>
-    <div class="prop-row"><div class="prop-key">✓ Approve button</div><div class="prop-val">Green. Full-width flex 1. Opens Route Workflow dialog, selects "Complete Review", submits.</div></div>
-    <div class="prop-row"><div class="prop-key">Show hidden tiles</div><div class="prop-val">Full-width button. Reveals all tiles previously hidden with the × button.</div></div>
+    <div class="prop-row"><div class="prop-key">↩ Return</div><div class="prop-val">Opens Maximo's Route Workflow dialog, selects Return, and fills the Memo field with the assembled message. Asks you to confirm first.</div></div>
+    <div class="prop-row"><div class="prop-key">✓ Approve</div><div class="prop-val">Opens Route Workflow, selects Complete Review. Asks you to confirm first.</div></div>
   </div>
-
-  <h3>Reordering Groups</h3>
-  <p>Groups can be dragged by their header bar to reorder. The new order is saved automatically to <code>__wo_group_state</code>.</p>
+  <p>Both can be assigned their own keyboard shortcut in <a href="#s10">Settings</a>.</p>
 </section>
 
 <!-- ══════════════════════════════════════════════════ -->
-<!-- SECTION 3 -->
+<!-- SECTION 3 — SETUP OVERVIEW -->
 <!-- ══════════════════════════════════════════════════ -->
 <section class="section" id="s3">
   <div class="section-header">
-    <span class="section-icon">📋</span>
-    <h2>Rules</h2>
+    <span class="section-icon">🗺️</span>
+    <h2>Setup Overview</h2>
     <span class="sec-badge">§3</span>
   </div>
 
-  <p>Rules are JavaScript formulas evaluated against cached field and table data. Each rule returns a status value that drives the panel display and return message assembly.</p>
+  <p>Clicking <strong>Setup</strong> opens a window with several tabs. Nothing you change takes effect until you click <strong>Save &amp; Apply</strong> in the title bar — except a few individual toggles (like a hotkey or a hide/show change) which apply immediately, called out where relevant below.</p>
+
+  <table class="doc-table">
+    <thead><tr><th>Tab</th><th>What it's for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Rules</strong></td><td>Write the JavaScript formulas that produce pass/fail/warn/na results — see <a href="#s4">§4</a></td></tr>
+      <tr><td><strong>Groups &amp; Display</strong></td><td>Build the tile cards shown on the panel, and register new fields — see <a href="#s6">§6</a> / <a href="#s7">§7</a></td></tr>
+      <tr><td><strong>Variables</strong></td><td>Named computed values usable everywhere rules are — see <a href="#s5">§5</a></td></tr>
+      <tr><td><strong>Scan</strong></td><td>Define which Maximo tabs/dialogs get visited on a scan, and what to auto-fill afterward — see <a href="#s8">§8</a></td></tr>
+      <tr><td><strong>Profiles</strong></td><td>Save/switch/share whole configurations — see <a href="#s9">§9</a></td></tr>
+      <tr><td><strong>Settings</strong></td><td>Hotkeys, auto-scan, auto-backup, update channel — see <a href="#s10">§10</a></td></tr>
+      <tr><td><strong>Beta</strong> <span class="tag-teal">if granted</span></td><td>Enable/disable beta features you've been granted access to — see <a href="#s13">§13</a></td></tr>
+      <tr><td><strong>Install</strong> <span class="tag-teal">dev only</span></td><td>Manual/offline install path, separate from the automatic updater</td></tr>
+      <tr><td><strong>Guide</strong></td><td>Opens this page</td></tr>
+      <tr><td><strong>Feedback</strong></td><td>Report a bug or suggest an improvement — see <a href="#s12">§12</a></td></tr>
+      <tr><td><strong>Export / Import</strong></td><td>Back up or restore your whole configuration — see <a href="#s11">§11</a></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-tip">
+    <strong>Tip:</strong> every card in Setup (a rule, a group, a scan target, a variable) can be collapsed/expanded by clicking its header, dragged to reorder by its handle, and has a <strong>⋮</strong> menu for rename/duplicate/delete.
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!-- SECTION 4 — RULES -->
+<!-- ══════════════════════════════════════════════════ -->
+<section class="section" id="s4">
+  <div class="section-header">
+    <span class="section-icon">📋</span>
+    <h2>Rules</h2>
+    <span class="sec-badge">§4</span>
+  </div>
+
+  <p>A rule is a small JavaScript formula evaluated against whatever the last scan captured. It returns a status, which drives the panel's colors and the return message.</p>
 
   <h3>Return Values</h3>
   <table class="doc-table">
@@ -1112,81 +720,42 @@
       <tr><td><code>false</code></td><td>Fail</td><td><span class="dot dot-red"></span> Red</td></tr>
       <tr><td><code>'warn'</code></td><td>Warning</td><td><span class="dot dot-orange"></span> Orange</td></tr>
       <tr><td><code>'na'</code></td><td>Not Applicable</td><td><span class="dot dot-yellow"></span> Yellow</td></tr>
-      <tr><td><em>throws exception</em></td><td>Error</td><td><span class="dot dot-purple"></span> Purple</td></tr>
+      <tr><td><em>(throws an exception)</em></td><td>Error</td><td><span class="dot dot-purple"></span> Purple</td></tr>
     </tbody>
   </table>
 
-  <h3>Rule Properties</h3>
-  <table class="doc-table">
-    <thead><tr><th>Property</th><th>Type</th><th>Description</th></tr></thead>
-    <tbody>
-      <tr><td><code>id</code></td><td>string</td><td>Unique identifier for the rule</td></tr>
-      <tr><td><code>label</code></td><td>string</td><td>Display name shown in panel and used as fallback message</td></tr>
-      <tr><td><code>formula</code></td><td>JS string</td><td>The rule logic. Must return <code>true</code>, <code>false</code>, <code>'warn'</code>, or <code>'na'</code></td></tr>
-      <tr><td><code>pass</code> / <code>fail</code> / <code>warn</code></td><td>object</td><td>One message config per status: <code>{ short, long, returnMode, returnCustom }</code> (<code>pass</code> has no <code>returnMode</code>/<code>returnCustom</code> — only fail/warn contribute to the return message)</td></tr>
-      <tr><td>&nbsp;&nbsp;<code>.short</code></td><td>string</td><td>One-line message shown in the collapsed group header. Supports <code>{{expr}}</code></td></tr>
-      <tr><td>&nbsp;&nbsp;<code>.long</code></td><td>array</td><td>List of <code>{ condition, msg }</code> entries shown as a bullet list in the expanded tile. Every entry whose <code>condition</code> is blank or truthy is shown</td></tr>
-      <tr><td>&nbsp;&nbsp;<code>.returnMode</code></td><td>string</td><td><code>'none'</code> / <code>'short'</code> / <code>'long'</code> / <code>'custom'</code> — what this status contributes to the copied return message</td></tr>
-      <tr><td>&nbsp;&nbsp;<code>.returnCustom</code></td><td>string</td><td>Text used when <code>returnMode</code> is <code>'custom'</code>. Supports <code>{{expr}}</code></td></tr>
-    </tbody>
-  </table>
-  <p>All three statuses (Pass/Fail/Warn) use the identical <code>{ short, long }</code> shape, edited inline in each rule's collapsible Pass/Fail/Warn section in Setup → Rules — there's no separate "return message" screen anymore.</p>
+  <h3>Writing a Rule</h3>
+  <p>In Setup → Rules, click <strong>+ Add Rule</strong>. Give it a label, then write its formula — plain JavaScript, using <code>return</code> to give your answer:</p>
+  <pre><code><span class="kw">var</span> lot = <span class="fn">F</span>(<span class="str">'Work Order :: Production Run Lot #'</span>);
+<span class="kw">if</span> (!lot) <span class="kw">return</span> <span class="str">'na'</span>;
+<span class="kw">return</span> lot.length > <span class="num">3</span>;</code></pre>
+  <p>Every field you've registered (see <a href="#s7">Adding Fields</a>) is available through <code>F('Tab :: Label')</code>. The full helper-function list is in the <a href="#s14">Formula Reference</a>.</p>
 
-  <h3>Helper Functions</h3>
-  <table class="helper-table">
-    <thead><tr><th>Function</th><th>Description</th></tr></thead>
-    <tbody>
-      <tr><td><code>F(field)</code></td><td>Get a field value by <code>"Tab :: Label"</code> key. Also resolves by suffix — e.g. <code>F('Status')</code> matches the first registered field ending with <code>' :: Status'</code></td></tr>
-      <tr><td><code>T(table)</code></td><td>Get all rows of a captured table as an array of objects (keyed by column header)</td></tr>
-      <tr><td><code>rowCount(table)</code></td><td>Number of rows in a captured table</td></tr>
-      <tr><td><code>col(table, colName)</code></td><td>Array of values from a specific column across all rows</td></tr>
-      <tr><td><code>has(table, colName, value)</code></td><td>Returns <code>true</code> if any row has the given value in the specified column</td></tr>
-      <tr><td><code>hours(str)</code></td><td>Parse a <code>HH:MM</code> or decimal string to a numeric hours value</td></tr>
-      <tr><td><code>hoursBetween(a, b)</code></td><td>Hours between two datetime strings (format: <code>DD/MM/YYYY HH:MM</code>)</td></tr>
-      <tr><td><code>oneOf(val, arr)</code></td><td>Returns <code>true</code> if <code>val</code> is in the array <code>arr</code></td></tr>
-      <tr><td><code>contains(text, pattern)</code></td><td>Regex test — returns boolean</td></tr>
-      <tr><td><code>matches(text, pattern)</code></td><td>Returns an array of unique regex matches</td></tr>
-      <tr><td><code>isEmpty(v)</code> / <code>notEmpty(v)</code></td><td>Empty / not-empty check (handles null, undefined, empty string)</td></tr>
-      <tr><td><code>maxLaborHours(tableTitle, nameCol, hoursCol)</code></td><td>Returns the maximum total hours attributed to any single person in the specified labor table</td></tr>
-      <tr><td><code>V(id)</code></td><td>Get a Variable's computed value by its ID or label</td></tr>
-    </tbody>
-  </table>
+  <h3>Pass / Fail / Warn Messages</h3>
+  <p>Each rule has three collapsible sections — Pass, Fail, Warn — all with the identical shape:</p>
+  <div class="prop-block">
+    <div class="prop-row"><div class="prop-key">Short</div><div class="prop-val">One line shown next to the group title (or wherever the group's header message points at this rule). Supports <code>{{expr}}</code>.</div></div>
+    <div class="prop-row"><div class="prop-key">Long</div><div class="prop-val">A bullet list shown inside the expanded tile. Each entry has its own <strong>Condition</strong> (optional formula — blank means always show it) and <strong>Message</strong> text. Add more with "+ Add message".</div></div>
+    <div class="prop-row"><div class="prop-key">Return Mode</div><div class="prop-val">What this status contributes to the copied return message: <code>none</code>, <code>short</code> (the Short text), <code>long</code> (every matching Long entry), or <code>custom</code> (its own text below). Pass has no return mode — only Fail/Warn feed the return message.</div></div>
+  </div>
 
   <h3>{{expr}} Interpolation</h3>
-  <p>Embed dynamic values in any message string (a Short field, a Long entry's message, or a return message's Custom text) using <code>{{expr}}</code>.</p>
-  <ul>
-    <li>The expression is evaluated at render time against the same cached data as rules</li>
-    <li>Do <strong>not</strong> use <code>return</code> inside <code>{{...}}</code> — for multi-statement expressions, wrap in an IIFE:</li>
-  </ul>
-  <pre><code><span class="cm">// Single expression — OK</span>
-<span class="str">"Lot: {{F('Lot Number')}}"</span>
-
-<span class="cm">// Multi-statement — use IIFE</span>
-<span class="str">"Hours: {{(function(){ var h=hoursBetween(F('Actual Start'),F('Actual Finish')); return h?h.toFixed(1):'?'; })()}}"</span></code></pre>
-
+  <p>Drop a live value into any message (Short, a Long entry, or a custom return message) with <code>{{...}}</code>:</p>
+  <pre><code><span class="str">"Lot: {{F('Lot Number')}}"</span></code></pre>
+  <p>It's evaluated as a single expression — don't use <code>return</code> inside it. For anything multi-step, wrap it in an immediately-invoked function:</p>
+  <pre><code><span class="str">"Hours: {{(function(){ var h=hoursBetween(F('Actual Start'),F('Actual Finish')); return h?h.toFixed(1):'?'; })()}}"</span></code></pre>
   <div class="callout callout-warn">
-    <strong>Note:</strong> If <code>{{expr}}</code> renders as <code>?</code> in the panel, the expression threw an error. Use the Debug Dump in Settings to verify field key names.
-  </div>
-
-  <h3>Conditional Messages (Long list entries)</h3>
-  <p>Each entry in a Pass/Fail/Warn "Long" list has its own separate <strong>Condition</strong> and <strong>Message</strong> input — added with the "+ Add message" button in Setup → Rules:</p>
-  <div class="prop-block">
-    <div class="prop-row"><div class="prop-key">Condition blank</div><div class="prop-val">The message is always included when the rule reaches that status.</div></div>
-    <div class="prop-row"><div class="prop-key">Condition set</div><div class="prop-val">A JS formula (same rules as the main formula box) — the message is only included if it's truthy.</div></div>
-  </div>
-
-  <div class="callout callout-tip">
-    <strong>Note:</strong> Condition and message are separate fields, so a condition that references a qualified field key like <code>F('Work Order :: Status')</code> is completely safe — there's no delimiter to collide with. (Older versions parsed <code>condition :: message</code> out of a single line, which broke exactly on inputs like this; that's why this changed.)
+    <strong>Seeing a <code>?</code> instead of a value?</strong> The expression threw an error — double-check the field name you're passing to <code>F()</code>.
   </div>
 
   <h3>Code Examples</h3>
 
-  <h4>Field check (with na guard)</h4>
+  <h4>Field check with an N/A guard</h4>
   <pre><code><span class="kw">var</span> lot = <span class="fn">F</span>(<span class="str">'Work Order :: Production Run Lot #'</span>);
 <span class="kw">if</span> (!lot) <span class="kw">return</span> <span class="str">'na'</span>;
 <span class="kw">return</span> lot.length > <span class="num">3</span>;</code></pre>
 
-  <h4>Duration vs actual hours</h4>
+  <h4>Duration vs. actual hours</h4>
   <pre><code><span class="kw">var</span> d = <span class="fn">hours</span>(<span class="fn">F</span>(<span class="str">'Duration'</span>));
 <span class="kw">var</span> a = <span class="fn">hoursBetween</span>(<span class="fn">F</span>(<span class="str">'Actual Start'</span>), <span class="fn">F</span>(<span class="str">'Actual Finish'</span>));
 <span class="kw">if</span> (!d || !a) <span class="kw">return</span> <span class="str">'na'</span>;
@@ -1197,7 +766,7 @@
 <span class="kw">if</span> (wt === <span class="str">'EM'</span>) <span class="kw">return</span> <span class="str">'warn'</span>;
 <span class="kw">return</span> <span class="kw">true</span>;</code></pre>
 
-  <h4>Table row count check</h4>
+  <h4>Table row-count check</h4>
   <pre><code><span class="kw">return</span> <span class="fn">rowCount</span>(<span class="str">'Labor'</span>) > <span class="num">0</span>;</code></pre>
 
   <h4>Using a variable</h4>
@@ -1207,41 +776,34 @@
 </section>
 
 <!-- ══════════════════════════════════════════════════ -->
-<!-- SECTION 4 -->
+<!-- SECTION 5 — VARIABLES -->
 <!-- ══════════════════════════════════════════════════ -->
-<section class="section" id="s4">
+<section class="section" id="s5">
   <div class="section-header">
     <span class="section-icon">⚡</span>
     <h2>Variables</h2>
-    <span class="sec-badge">§4</span>
+    <span class="sec-badge">§5</span>
   </div>
 
-  <p>Variables are named computed expressions that return a display value (string, number, etc.) rather than a pass/fail status. They are evaluated before rules after each scan, making their values available for rules, group header messages, and field row display.</p>
+  <p>A variable is a named formula that returns any kind of value (a string, a number, whatever) instead of a pass/fail status. Variables are computed after each scan, before rules run, so rules — and other variables defined later — can use them.</p>
 
-  <h3>Creating Variables</h3>
-  <p>Variables are created in <strong>Setup → Variables</strong>. Each variable has three properties:</p>
-  <div class="prop-block">
-    <div class="prop-row"><div class="prop-key">ID</div><div class="prop-val">Unique string identifier. Used in <code>V('id')</code> calls.</div></div>
-    <div class="prop-row"><div class="prop-key">Label</div><div class="prop-val">Display name. Can also be used in <code>V('label')</code> calls.</div></div>
-    <div class="prop-row"><div class="prop-key">Formula</div><div class="prop-val">JS expression that must <code>return</code> a value of any type. All rule helper functions are available.</div></div>
-  </div>
+  <h3>Creating One</h3>
+  <p>In Setup → Variables, give it an <strong>ID</strong> (used in code, e.g. <code>v_total_hours</code>), a <strong>Label</strong> (shown in the UI, also usable in <code>V()</code>), and a <strong>Formula</strong> — the same JS environment as a rule, just returning any value instead of a status.</p>
 
-  <h3>Using Variables</h3>
+  <h3>Using a Variable</h3>
   <table class="doc-table">
-    <thead><tr><th>Usage</th><th>How</th></tr></thead>
+    <thead><tr><th>Where</th><th>How</th></tr></thead>
     <tbody>
-      <tr><td>In rule formulas</td><td><code>V('label')</code> or <code>V('v_idstring')</code></td></tr>
-      <tr><td>As group header inline message</td><td>Set the group's headerMsg type to <code>'variable'</code> in Setup → Groups</td></tr>
-      <tr><td>As field rows in group body</td><td>Add to the group's Variable Fields list in Setup → Groups. Displayed with teal label and <code>(var)</code> tag.</td></tr>
+      <tr><td>Inside a rule/scan/action formula</td><td><code>V('v_total_hours')</code> or <code>V('Total Hours')</code> (label also works)</td></tr>
+      <tr><td>As a group's header message</td><td>Set the group's header message type to Variable in Setup → Groups</td></tr>
+      <tr><td>As a field row in a group</td><td>Add it to the group's Variable Fields list — shown with a teal <code>(var)</code> tag</td></tr>
     </tbody>
   </table>
 
-  <h3>Example Formulas</h3>
-
-  <h4>Work type and status summary</h4>
+  <h4>Example: work type + status summary</h4>
   <pre><code><span class="kw">return</span> <span class="fn">F</span>(<span class="str">'Work Order :: Work Type'</span>) + <span class="str">' — '</span> + <span class="fn">F</span>(<span class="str">'Work Order :: Status'</span>);</code></pre>
 
-  <h4>Total labor hours from table</h4>
+  <h4>Example: total labor hours from a table</h4>
   <pre><code><span class="kw">var</span> rows = <span class="fn">T</span>(<span class="str">'Labor'</span>);
 <span class="kw">var</span> total = <span class="num">0</span>;
 rows.forEach(<span class="kw">function</span>(r) {
@@ -1250,39 +812,334 @@ rows.forEach(<span class="kw">function</span>(r) {
 <span class="kw">return</span> total.toFixed(<span class="num">2</span>) + <span class="str">' hrs'</span>;</code></pre>
 
   <div class="callout callout-tip">
-    <strong>Tip:</strong> Variables are evaluated in the order they are defined. A variable can reference a previously defined variable via <code>V()</code>, but not one defined after it.
+    <strong>Order matters:</strong> variables compute top-to-bottom. One can reference an earlier variable via <code>V()</code>, but not one defined below it.
   </div>
 </section>
 
 <!-- ══════════════════════════════════════════════════ -->
-<!-- SECTION 5 -->
+<!-- SECTION 6 — GROUPS & DISPLAY -->
 <!-- ══════════════════════════════════════════════════ -->
-<section class="section" id="s5">
+<section class="section" id="s6">
   <div class="section-header">
     <span class="section-icon">🗂️</span>
     <h2>Groups &amp; Display</h2>
-    <span class="sec-badge">§5</span>
+    <span class="sec-badge">§6</span>
   </div>
 
-  <p>Groups are the visual tile cards displayed in the panel. Each group provides a focused view of one area of the work order, combining field values, table data, and rule results.</p>
+  <p>A group is one tile card on the panel. Click <strong>+ Add Group</strong> in Setup → Groups &amp; Display to start one, then build it up:</p>
 
-  <h3>Group Contents</h3>
+  <h3>What a Group Can Show</h3>
   <table class="doc-table">
-    <thead><tr><th>Content Type</th><th>Description</th></tr></thead>
+    <thead><tr><th>Content</th><th>Description</th></tr></thead>
     <tbody>
-      <tr><td><strong>Fields</strong></td><td>Captured field values with their labels, arranged in configurable rows</td></tr>
-      <tr><td><strong>Variable Fields</strong></td><td>Variable computed values rendered as labelled field rows with a teal <code>(var)</code> tag</td></tr>
-      <tr><td><strong>Linked Table</strong></td><td>Shows table rows inline with a ⚙
+      <tr><td><strong>Field Rows</strong></td><td>Registered fields, arranged in rows — group several per row for a compact layout, or one per row for long values</td></tr>
+      <tr><td><strong>Variable Fields</strong></td><td>Variable values, shown the same way with a teal <code>(var)</code> tag</td></tr>
+      <tr><td><strong>Linked Table</strong></td><td>A captured table's rows, inline, with a column-visibility toggle</td></tr>
+      <tr><td><strong>Rules</strong></td><td>Tick which rules this group references — their status blocks appear inside, and their statuses drive the group's badge</td></tr>
+    </tbody>
+  </table>
 
+  <h3>Header Message</h3>
+  <p>Turn on "Show inline header message" to put a short line next to the group's title. Three types:</p>
+  <div class="prop-block">
+    <div class="prop-row"><div class="prop-key">Field value</div><div class="prop-val">Shows a registered field's captured value.</div></div>
+    <div class="prop-row"><div class="prop-key">Rule pass/fail message</div><div class="prop-val">Shows a rule's Short message, colored by its status. Leave the rule dropdown on <strong>Auto</strong> and it automatically shows whichever of the group's own rules currently has the worst status (error &gt; fail &gt; warn &gt; pass) — pick a specific rule instead if you always want that one rule's message regardless of the others.</div></div>
+    <div class="prop-row"><div class="prop-key">Variable value</div><div class="prop-val">Shows a variable's computed value.</div></div>
+  </div>
 
+  <h3>Tooltip &amp; Expanded Message</h3>
+  <p>A group can also have a small ⓘ tooltip icon (static text, shown on hover) and an Expanded Message — a banner shown at the top of the tile only while it's expanded.</p>
 
+  <h3>Collapsed by Default, Visibility, Reordering</h3>
+  <ul>
+    <li>Tick <strong>Collapsed by default</strong> if this group should start closed on a fresh scan.</li>
+    <li>Use the eye icon to hide a group from the panel entirely — hiding also collapses it; showing it again leaves its expand state alone.</li>
+    <li>Drag a card by its handle (left edge) to reorder — the same order is used on the panel.</li>
+  </ul>
+</section>
 
+<!-- ══════════════════════════════════════════════════ -->
+<!-- SECTION 7 — ADDING FIELDS -->
+<!-- ══════════════════════════════════════════════════ -->
+<section class="section" id="s7">
+  <div class="section-header">
+    <span class="section-icon">🔍</span>
+    <h2>Adding Fields</h2>
+    <span class="sec-badge">§7</span>
+  </div>
 
+  <p>Before a field can be used in a rule or shown in a group, it has to be registered once. There are two ways, both in Setup → Groups &amp; Display:</p>
 
+  <h3>Browse Page Fields (recommended)</h3>
+  <div class="flow-steps">
+    <div class="flow-step"><div class="flow-num">1</div><div class="flow-text">On the actual Maximo page (behind Setup), navigate to the tab that has the field you want.</div></div>
+    <div class="flow-step"><div class="flow-num">2</div><div class="flow-text">In Setup → Groups &amp; Display, click <strong>🔍 Browse Page Fields</strong>.</div></div>
+    <div class="flow-step"><div class="flow-num">3</div><div class="flow-text">It lists every labeled field it can currently see on the page (across every Maximo tab already loaded), with its current value. Already-registered fields are highlighted green.</div></div>
+    <div class="flow-step"><div class="flow-num">4</div><div class="flow-text">Filter by typing, tick the fields you want, optionally pick a group to drop them straight into, then click <strong>Save Selected</strong>.</div></div>
+  </div>
+  <div class="callout callout-tip">
+    <strong>Only see fields from one tab?</strong> Maximo often only builds a tab's fields into the page once you've actually visited that tab. Click through the tabs you care about first, then open Browse Page Fields.
+  </div>
 
+  <h3>Add a Field Already Registered</h3>
+  <p>If a field is already registered (from a shared preset, or registered previously) but isn't in any group yet, use the plain "Add a field not yet in any group" dropdown right above the Browse button — pick the field and a target group, click Add.</p>
 
+  <div class="callout callout-info">
+    Once registered, a field is available everywhere as <code>F('Tab :: Label')</code> — in rules, variables, scan actions, and message text. You don't need to re-register it for each new rule.
+  </div>
+</section>
 
+<!-- ══════════════════════════════════════════════════ -->
+<!-- SECTION 8 — SCAN SYSTEM -->
+<!-- ══════════════════════════════════════════════════ -->
+<section class="section" id="s8">
+  <div class="section-header">
+    <span class="section-icon">📡</span>
+    <h2>Scan System</h2>
+    <span class="sec-badge">§8</span>
+  </div>
 
+  <p>A scan visits every configured target in order — clicking a Maximo tab or opening a dialog, waiting for it to load, capturing whatever it needs, then moving to the next one — and finishes back on the WO tab. Configure targets in Setup → Scan.</p>
 
+  <h3>Scan Target Properties</h3>
+  <div class="prop-block">
+    <div class="prop-row"><div class="prop-key">Type</div><div class="prop-val"><strong>Tab</strong> — clicks a Maximo tab link. <strong>Dialog</strong> — triggers a popup dialog (e.g. Route Workflow) instead.</div></div>
+    <div class="prop-row"><div class="prop-key">Tab ID / Event</div><div class="prop-val">For a Tab target, the internal Maximo element ID of the tab link to click. For a Dialog target, the trigger event type. See "Finding IDs" below.</div></div>
+    <div class="prop-row"><div class="prop-key">Wait for text / Wait for table</div><div class="prop-val">What tells the tool this target has actually finished loading — either a marker text string that should appear, or the internal name of a table that should be populated. Set one, not both.</div></div>
+    <div class="prop-row"><div class="prop-key">Condition</div><div class="prop-val">Optional formula — return <code>true</code> to scan this target this run, <code>false</code> to skip it. Leave blank to always scan it. Conditions can see data captured by earlier targets in the same run.</div></div>
+    <div class="prop-row"><div class="prop-key">Row Detail Fields</div><div class="prop-val">For a target with an expandable table: fields captured from inside each row's own expanded detail panel, not the table's visible columns.</div></div>
+    <div class="prop-row"><div class="prop-key">Post-Scan Actions</div><div class="prop-val">Auto-fill Maximo fields once this target's data is captured — see below.</div></div>
+  </div>
 
+  <h3>Finding a Tab ID or Field Element ID</h3>
+  <p>These are raw Maximo DOM element IDs, not anything the tool can look up for you by name. To find one:</p>
+  <div class="flow-steps">
+    <div class="flow-step"><div class="flow-num">1</div><div class="flow-text">Right-click the tab or field in Maximo and choose <strong>Inspect</strong> (Chrome/Edge DevTools).</div></div>
+    <div class="flow-step"><div class="flow-num">2</div><div class="flow-text">Look at the highlighted element's <code>id</code> attribute — Maximo tab links typically end in <code>-tab</code>, and field inputs typically end in <code>-tb</code> or similar.</div></div>
+    <div class="flow-step"><div class="flow-num">3</div><div class="flow-text">Copy that ID into the Tab ID / Field Element ID box.</div></div>
+  </div>
+  <div class="callout callout-warn">
+    <strong>These IDs can change</strong> between Maximo versions/configurations. If a scan target or action suddenly stops working after a Maximo update, this is the first thing to re-check.
+  </div>
 
+  <h3>Post-Scan Actions</h3>
+  <p>An action fills one Maximo field automatically once its target has been scanned:</p>
+  <div class="prop-block">
+    <div class="prop-row"><div class="prop-key">Field Element ID</div><div class="prop-val">The Maximo field to fill (found the same way as a Tab ID, above).</div></div>
+    <div class="prop-row"><div class="prop-key">Value Expression</div><div class="prop-val">What to put there — a variable (<code>V('v_core')</code>) or a formula (<code>F('...')</code> and friends). Evaluated fresh every time the action runs.</div></div>
+    <div class="prop-row"><div class="prop-key">Condition</div><div class="prop-val">Optional formula — leave blank to always run this action once its target is scanned.</div></div>
+  </div>
+
+  <h3>Table Capture</h3>
+  <p>When a scan target's Wait Table (or a group's Linked Table) names a table, the tool reads every visible row of that table directly from the page into an array of objects keyed by column header — available in formulas via <code>T('Table Name')</code>, <code>rowCount(...)</code>, <code>col(...)</code>, and <code>has(...)</code> (see the <a href="#s14">Formula Reference</a>).</p>
+
+  <h3>Dialog Capture</h3>
+  <p>A Dialog-type target opens a Maximo popup (rather than switching tabs), waits for its content, captures data the same way as a tab, then dismisses it automatically before moving on — you won't see it stay open.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!-- SECTION 9 — PROFILES & PRESETS -->
+<!-- ══════════════════════════════════════════════════ -->
+<section class="section" id="s9">
+  <div class="section-header">
+    <span class="section-icon">📁</span>
+    <h2>Profiles &amp; Presets</h2>
+    <span class="sec-badge">§9</span>
+  </div>
+
+  <p>A profile is a named, portable snapshot of your rules/groups/scan/variables (not device settings like hotkeys or your update channel — those stay with the device). Useful for keeping a couple of different setups around, or sharing yours with a colleague.</p>
+
+  <h3>Local Profiles</h3>
+  <ul>
+    <li><strong>Save Current As New Profile</strong> — snapshots what you have right now under a name you choose.</li>
+    <li><strong>Switch</strong> — swaps your live configuration to a saved profile (blocked if it's already active, or your only one).</li>
+    <li><strong>Start Blank Profile</strong> — wipes the current configuration to a fresh empty one.</li>
+    <li>Delete — removes a saved profile (blocked for the active one, or your last remaining one).</li>
+  </ul>
+
+  <h3>Shared Presets</h3>
+  <p>The Profiles tab can also list ready-made presets others have published. Installing one downloads and registers it as a local profile, then switches you to it — your previous configuration isn't lost, just no longer active (switch back any time).</p>
+
+  <div class="callout callout-tip">
+    <strong>To share your own setup:</strong> use <a href="#s11">Export</a> to get a backup file, and send that — or ask whoever maintains this tool to add it to the shared preset list for everyone.
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!-- SECTION 10 — SETTINGS & HOTKEYS -->
+<!-- ══════════════════════════════════════════════════ -->
+<section class="section" id="s10">
+  <div class="section-header">
+    <span class="section-icon">⚙️</span>
+    <h2>Settings &amp; Hotkeys</h2>
+    <span class="sec-badge">§10</span>
+  </div>
+
+  <p>Everything in Setup → Settings is device-level — it stays with this browser, and isn't affected by switching profiles.</p>
+
+  <h3>Hotkeys</h3>
+  <p>Scan, Return, and Approve can each be given their own keyboard shortcut. Click the box, press the key combination you want, and it's saved immediately (no Save &amp; Apply needed). The same key combination can never be assigned to two actions at once — assigning a combo already in use shows an error instead of silently overwriting it. Hotkeys never fire while you're typing in one of the tool's own text fields.</p>
+
+  <h3>Auto-Scan</h3>
+  <p>When enabled, opening a different work order than the last one you scanned triggers a scan automatically, without needing to click Scan yourself.</p>
+
+  <h3>Quick Return Message</h3>
+  <p>Set a Prefix (e.g. <em>"Hi {name},"</em>), Suffix/Signature (e.g. <em>"- wz"</em>), and the delimiter used between combined messages — these wrap around whatever your rules contribute to the return message.</p>
+
+  <h3>Display</h3>
+  <p>Toggle whether the pass/fail/warn/error count summary shows under the status line.</p>
+
+  <h3>Auto-Backup</h3>
+  <p>On Chrome/Edge, link a local file once and the tool keeps it updated automatically every time you save a change — the most reliable way to make sure you never lose your configuration. Not supported in every browser; use manual <a href="#s11">Export/Import</a> as a fallback.</p>
+
+  <h3>Update Channel</h3>
+  <p>Everyone can pin to a specific released version, or a floating "X.Y.x" line that always takes that line's newest patch, from the version dropdown. Bug-fix patches within your current version install automatically by default (toggle this off if you'd rather review every update first).</p>
+</section>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!-- SECTION 11 — EXPORT / IMPORT -->
+<!-- ══════════════════════════════════════════════════ -->
+<section class="section" id="s11">
+  <div class="section-header">
+    <span class="section-icon">💾</span>
+    <h2>Export / Import</h2>
+    <span class="sec-badge">§11</span>
+  </div>
+
+  <p>Export produces a backup file containing your full configuration. Import restores from one. Use this to move your setup to a different PC, keep a manual backup, or send your configuration to someone else.</p>
+
+  <div class="callout callout-info">
+    Export/Import carries rules, groups, scan targets, variables, and field registrations. Auto-Backup (Settings) is the same idea, just automatic — set one up if your browser supports it so you're never relying on remembering to export.
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!-- SECTION 12 — FEEDBACK -->
+<!-- ══════════════════════════════════════════════════ -->
+<section class="section" id="s12">
+  <div class="section-header">
+    <span class="section-icon">💬</span>
+    <h2>Feedback</h2>
+    <span class="sec-badge">§12</span>
+  </div>
+
+  <p>Setup → Feedback is the fastest way to report a bug or suggest an improvement. Pick a type, describe what happened (or what would help), and click Send — it's filed directly, along with your tool version, current channel, and browser info, so nothing needs to be typed out by hand. If it can't be filed for any reason, it falls back to opening an email draft instead, so a report is never just lost.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!-- SECTION 13 — BETA FEATURES -->
+<!-- ══════════════════════════════════════════════════ -->
+<section class="section" id="s13">
+  <div class="section-header">
+    <span class="section-icon">🧪</span>
+    <h2>Beta Features</h2>
+    <span class="sec-badge">§13</span>
+  </div>
+
+  <div class="callout callout-beta">
+    <strong>Most people won't see this tab at all.</strong> If you haven't been granted beta access, skip this section — nothing here applies, and the tool looks and behaves exactly as described everywhere else on this page.
+  </div>
+
+  <p>If you've been granted access to one or more beta features, a <strong>Beta</strong> tab appears in Setup listing each one, with its own on/off switch. Turning a feature off removes every trace of it — no button, no menu item, no setting left visible — until you turn it back on. A feature's own settings (if it has any) live wherever makes sense elsewhere in Setup, marked with a small purple <strong>BETA</strong> tag, rather than being crammed into the Beta tab itself.</p>
+
+  <p>Beta features currently available:</p>
+  <div class="prop-block">
+    <div class="prop-row"><div class="prop-key">Route / Fix</div><div class="prop-val">Adds a small Route symbol and a <strong>Fix</strong> button next to Return/Approve. Fix re-runs a scan and reapplies post-scan actions marked "Fix only" or "Scan + Fix" — useful for correcting a field without doing a full round trip through Return/Approve. Post-scan actions gain a "Run on" option (Scan + Fix / Scan only / Fix only) once this is on.</div></div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!-- SECTION 14 — FORMULA REFERENCE -->
+<!-- ══════════════════════════════════════════════════ -->
+<section class="section" id="s14">
+  <div class="section-header">
+    <span class="section-icon">📖</span>
+    <h2>Formula Reference</h2>
+    <span class="sec-badge">§14</span>
+  </div>
+
+  <p>These helper functions are available inside every rule, variable, scan condition, and post-scan action expression.</p>
+
+  <table class="helper-table">
+    <thead><tr><th>Function</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>F(field)</code></td><td>Get a field's value by <code>"Tab :: Label"</code>. Also matches by suffix — <code>F('Status')</code> matches the first registered field ending in <code>' :: Status'</code></td></tr>
+      <tr><td><code>T(table)</code></td><td>All rows of a captured table, as an array of objects keyed by column header</td></tr>
+      <tr><td><code>rowCount(table)</code></td><td>Number of rows in a captured table</td></tr>
+      <tr><td><code>col(table, colName)</code></td><td>Array of values from one column across all rows</td></tr>
+      <tr><td><code>has(table, colName, value)</code></td><td><code>true</code> if any row has that value in that column</td></tr>
+      <tr><td><code>hours(str)</code></td><td>Parses an <code>HH:MM</code> or decimal string into a numeric hours value</td></tr>
+      <tr><td><code>hoursBetween(a, b)</code></td><td>Hours between two datetime strings (format <code>DD/MM/YYYY HH:MM</code>)</td></tr>
+      <tr><td><code>oneOf(val, arr)</code></td><td><code>true</code> if <code>val</code> is in the array</td></tr>
+      <tr><td><code>contains(text, pattern)</code></td><td>Regex test, returns a boolean</td></tr>
+      <tr><td><code>matches(text, pattern)</code></td><td>Array of unique regex matches</td></tr>
+      <tr><td><code>isEmpty(v)</code> / <code>notEmpty(v)</code></td><td>Empty/not-empty check (handles null, undefined, empty string)</td></tr>
+      <tr><td><code>maxLaborHours(tableTitle, nameCol, hoursCol)</code></td><td>The highest total hours attributed to any one person in a labor table</td></tr>
+      <tr><td><code>V(id)</code></td><td>A variable's computed value, by ID or label</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Status Color Reference</h3>
+  <table class="doc-table">
+    <thead><tr><th>Color</th><th>Status</th><th>Trigger</th></tr></thead>
+    <tbody>
+      <tr><td><span class="dot dot-green"></span><span class="status-badge sb-green">PASS</span></td><td>Pass</td><td>Formula returned <code>true</code></td></tr>
+      <tr><td><span class="dot dot-red"></span><span class="status-badge sb-red">FAIL</span></td><td>Fail</td><td>Formula returned <code>false</code></td></tr>
+      <tr><td><span class="dot dot-orange"></span><span class="status-badge sb-orange">WARN</span></td><td>Warning</td><td>Formula returned <code>'warn'</code></td></tr>
+      <tr><td><span class="dot dot-yellow"></span><span class="status-badge sb-yellow">NA</span></td><td>Not Applicable</td><td>Formula returned <code>'na'</code></td></tr>
+      <tr><td><span class="dot dot-purple"></span><span class="status-badge sb-purple">ERROR</span></td><td>Error</td><td>Formula threw a JS exception</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ══════════════════════════════════════════════════ -->
+<!-- SECTION 15 — TROUBLESHOOTING -->
+<!-- ══════════════════════════════════════════════════ -->
+<section class="section" id="s15">
+  <div class="section-header">
+    <span class="section-icon">🛠️</span>
+    <h2>Troubleshooting</h2>
+    <span class="sec-badge">§15</span>
+  </div>
+
+  <table class="doc-table">
+    <thead><tr><th>Problem</th><th>Try this</th></tr></thead>
+    <tbody>
+      <tr><td>A rule shows <code>?</code> in its message</td><td>A <code>{{expr}}</code> interpolation threw — check the field/variable name it references</td></tr>
+      <tr><td>A field always reads blank</td><td>Re-open Browse Page Fields on the tab that actually has it, and re-check whether it's registered</td></tr>
+      <tr><td>A scan target times out</td><td>Its "Wait for text/table" marker never appeared — the Tab ID may be wrong, or Maximo may have changed its layout. Re-check the ID via Inspect Element</td></tr>
+      <tr><td>Access denied on click</td><td>Use the <a href="#s12">Feedback</a> tab if you can still open the tool, or contact whoever manages access for this tool</td></tr>
+      <tr><td>Lost your configuration</td><td>If you had Auto-Backup or a linked file set up, re-link it in Settings. Otherwise restore your latest Export via <a href="#s11">Import</a></td></tr>
+      <tr><td>Tool looks different on a different PC</td><td>Configuration lives in the browser, not your Maximo account — export/import or set up Auto-Backup to carry it over</td></tr>
+    </tbody>
+  </table>
+
+  <p style="margin-top:24px;color:var(--muted);font-size:12px;">Still stuck? Use Setup → Feedback to report it.</p>
+</section>
+
+</main>
+
+<a href="#s1" class="back-top" id="backTop">↑</a>
+
+<script>
+  // Scrollspy: highlight the sidebar link for whichever section is in view
+  var sections = Array.prototype.slice.call(document.querySelectorAll('.section'));
+  var links = Array.prototype.slice.call(document.querySelectorAll('#sidebar nav a'));
+  function onScroll() {
+    var scrollPos = window.scrollY + 100;
+    var current = sections[0];
+    sections.forEach(function(sec) {
+      if (sec.offsetTop <= scrollPos) current = sec;
+    });
+    links.forEach(function(a) {
+      a.classList.toggle('active', a.getAttribute('href') === '#' + current.id);
+    });
+    var backTop = document.getElementById('backTop');
+    backTop.classList.toggle('visible', window.scrollY > 400);
+  }
+  window.addEventListener('scroll', onScroll);
+  onScroll();
+</script>
+
+</body>
+</html>
