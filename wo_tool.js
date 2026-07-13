@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.23.1';
+    var TOOL_VERSION = '0.23.2';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -5211,7 +5211,16 @@
             // from silently growing taller than another for reasons that
             // are hard to isolate in a static test (a couple of px of
             // difference was reported live but not reproducible here).
-            "#__wo_setup_modal .wo-card-head{display:flex;align-items:center;gap:6px;padding:6px 10px;height:34px;max-height:34px;box-sizing:border-box;overflow:hidden;line-height:1;cursor:pointer;user-select:none;background:var(--wo-surface-2);}" +
+            // line-height was 1 (== font-size, 12px) — tight enough that a
+            // descender (g/y/p/q/j) rendered right at or past the bottom
+            // edge of this box's fixed 34px height, and the overflow:hidden
+            // that keeps the header uniformly thick across tabs (see the
+            // comment above) clipped it off. line-height:34px instead
+            // vertically centers the text in the exact box height, which
+            // gives descenders the room they need without loosening the
+            // fixed-height/overflow guard that solves the original
+            // uneven-header-thickness problem.
+            "#__wo_setup_modal .wo-card-head{display:flex;align-items:center;gap:6px;padding:6px 10px;height:34px;max-height:34px;box-sizing:border-box;overflow:hidden;line-height:34px;cursor:pointer;user-select:none;background:var(--wo-surface-2);}" +
             "#__wo_setup_modal .wo-card-head:hover{background:var(--wo-field);}" +
             "#__wo_setup_modal .wo-card>[data-coll-body]{padding:0 10px 10px;}" +
             "#__wo_setup_modal .wo-card-arrow{font-size:9px;color:var(--wo-muted);min-width:9px;}" +

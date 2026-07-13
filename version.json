@@ -1,10 +1,17 @@
 {
-  "latest": "0.23.1",
+  "latest": "0.23.2",
   "channels": {
-    "stable": "0.23.1",
-    "beta": "0.23.1"
+    "stable": "0.23.2",
+    "beta": "0.23.2"
   },
   "versions": [
+    {
+      "version": "0.23.2",
+      "name": "Fix Clipped Descenders in Card Headers",
+      "changes": [
+        "Fixed: card header titles (Rules, Groups, Variables, Scan, and Settings cards) clipped the bottom of letters with descenders (g, y, p, q, j) - the fixed-height header box's line spacing didn't leave them enough room."
+      ]
+    },
     {
       "version": "0.23.1",
       "name": "Route Icon Fix + Layout Tweaks",
