@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.23.2';
+    var TOOL_VERSION = '0.24.0';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -3855,7 +3855,7 @@
             // beta_1-only: a plain non-interactive glyph, never a button —
             // no background/border/hover, no click handler. Purely a visual
             // label ahead of Return/Fix/Approve, not one of the actions.
-            "#__wo_dock .wo-route-symbol{display:flex;align-items:center;justify-content:center;flex:0 0 auto;width:36px;color:var(--wo-muted);cursor:default;}" +
+            "#__wo_dock .wo-route-symbol{display:flex;align-items:center;justify-content:center;flex:0 0 auto;width:36px;color:var(--wo-muted);cursor:default;margin-right:-3.5px;}" +
             "#__wo_dock .wo-btn-block.wo-btn-icon{display:inline-flex;align-items:center;justify-content:center;gap:7px;}" +
             "#__wo_dock .wo-btn-pass{background:var(--wo-pass);color:#04210c;border-color:var(--wo-pass);}" +
             "#__wo_dock .wo-btn-warn{background:var(--wo-warn);color:#241900;border-color:var(--wo-warn);}" +
@@ -5396,7 +5396,7 @@
             '<div class="wo-modal-titlebar" id="__s_titlebar">' +
             '<span class="wo-modal-title">Setup</span>' +
             '<span class="wo-modal-title-actions">' +
-            '<button id="__s_save" class="wo-btn wo-btn-primary">Save &amp; Apply</button>' +
+            '<button id="__s_save" class="wo-btn wo-btn-primary">Save</button>' +
             '<button id="__s_close" class="wo-btn-ghost" aria-label="Close">✕</button>' +
             '</span>' +
             '</div>' +
@@ -5870,15 +5870,40 @@
         });
         var saveBtn = modal.querySelector('#__s_save');
 
-        function updateSaveButtonState() {
-            var dirty = JSON.stringify({
+        function isSetupDirty() {
+            return JSON.stringify({
                 cfg: cfg,
                 scan: scan,
                 st: st
             }) !== __woSetupSnapshot;
-            saveBtn.disabled = !dirty;
+        }
+        function updateSaveButtonState() {
+            saveBtn.disabled = !isSetupDirty();
         }
         updateSaveButtonState();
+
+        // Coarse per-area diff (not per-field) for the Save button's hover
+        // tooltip — variables are excluded since those already persist
+        // immediately on every edit (see saveVars() call sites) and aren't
+        // part of what this button applies.
+        function setupChangedAreasText() {
+            var before;
+            try {
+                before = JSON.parse(__woSetupSnapshot);
+            } catch (e) {
+                return '';
+            }
+            var areas = [];
+            if (JSON.stringify(cfg.rules) !== JSON.stringify(before.cfg.rules)) areas.push('Rules');
+            if (JSON.stringify(cfg.groups) !== JSON.stringify(before.cfg.groups)) areas.push('Groups');
+            if (JSON.stringify(scan) !== JSON.stringify(before.scan)) areas.push('Scan targets & actions');
+            if (JSON.stringify(st) !== JSON.stringify(before.st)) areas.push('Settings');
+            if (!areas.length) return 'No changes to save.';
+            return 'Will save changes to:\n' + areas.map(function(a) {
+                return '• ' + a;
+            }).join('\n');
+        }
+        attachTooltip(saveBtn, setupChangedAreasText);
         // MutationObserver catches structural edits (add/delete/reorder rows,
         // drag-and-drop, toggle clicks that don't fire input/change) with no
         // per-control wiring; the input/change listener catches keystrokes,
@@ -6220,8 +6245,12 @@
         }
 
         // Markup for the 4th kebab-menu item every Rules/Groups/Variables/Scan
-        // entry gets, alongside Rename/Duplicate/Delete.
-        var EDIT_TOOLTIP_KEBAB_HTML = '<button data-edit-tip type="button" class="wo-kebab-item">' + TH_TIP_SVG + '<span>Edit Tooltip</span></button>';
+        // entry gets, alongside Rename/Duplicate/Delete. Label reads "Set
+        // Tooltip" when the entry has none yet, "Edit Tooltip" once one exists.
+        function editTooltipKebabHtml(entry) {
+            var label = (entry && entry.tooltip) ? 'Edit Tooltip' : 'Set Tooltip';
+            return '<button data-edit-tip type="button" class="wo-kebab-item">' + TH_TIP_SVG + '<span>' + label + '</span></button>';
+        }
 
         // Wires that item: prompts for the entry's plain-English explanation
         // (shown on hover via entryTipIconHtml/wireEntryTipIcon above),
@@ -6470,11 +6499,53 @@
             tabBarResizeObserver.disconnect();
             document.body.style.marginLeft = '';
         };
+        // Custom-styled (not native confirm()) prompt shown only when closing
+        // with unsaved changes — nested inside #__wo_setup_modal so it picks
+        // up that root's own CSS reset/tokens instead of the host page's.
+        function showUnsavedChangesDialog(onSave, onDiscard) {
+            var old = modal.querySelector('#__s_unsaved_dlg');
+            if (old) old.remove();
+            var overlay = document.createElement('div');
+            overlay.id = '__s_unsaved_dlg';
+            overlay.style.cssText = 'position:absolute;inset:0;z-index:20000000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;border-radius:inherit;';
+            overlay.innerHTML =
+                '<div style="background:var(--wo-surface);border:1px solid var(--wo-border);border-radius:var(--wo-r-panel);box-shadow:0 10px 40px rgba(0,0,0,.6);padding:18px;max-width:320px;width:88%;">' +
+                '<div style="font-size:13px;font-weight:800;margin-bottom:8px;">Unsaved changes</div>' +
+                '<div style="font-size:12px;color:var(--wo-muted);margin-bottom:16px;line-height:1.5;">Your changes to Setup haven\'t been saved yet. What would you like to do?</div>' +
+                '<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;">' +
+                '<button id="__s_ud_cancel" type="button" class="wo-btn-ghost">Cancel</button>' +
+                '<button id="__s_ud_discard" type="button" class="wo-btn wo-btn-danger">Discard &amp; Exit</button>' +
+                '<button id="__s_ud_save" type="button" class="wo-btn wo-btn-primary">Save</button>' +
+                '</div>' +
+                '</div>';
+            modal.appendChild(overlay);
+            overlay.querySelector('#__s_ud_cancel').onclick = function() {
+                overlay.remove();
+            };
+            overlay.querySelector('#__s_ud_discard').onclick = function() {
+                overlay.remove();
+                onDiscard();
+            };
+            overlay.querySelector('#__s_ud_save').onclick = function() {
+                overlay.remove();
+                onSave();
+            };
+        }
+        function doCloseSetup() {
+            modal._woCleanup();
+            modal.remove();
+        }
         modal.querySelector('#__s_close').onclick = function() {
             closeTabCtxMenu();
             closeRuleMenu();
-            modal._woCleanup();
-            modal.remove();
+            if (isSetupDirty()) {
+                showUnsavedChangesDialog(function() {
+                    modal.querySelector('#__s_save').click();
+                    doCloseSetup();
+                }, doCloseSetup);
+                return;
+            }
+            doCloseSetup();
         };
         modal.querySelector('#__s_save').onclick = function() {
             saveCfg(cfg);
@@ -6536,6 +6607,237 @@
 
         function formulaBox(obj, prop) {
             return '<textarea data-f class="wo-code" style="width:100%;height:80px;margin-top:6px;">' + String(obj[prop]).replace(/</g, '&lt;') + '</textarea>';
+        }
+
+        // Formula helper reference — signature + one short explanation per
+        // arg, used by both the Excel-style signature tooltip and (for F/T/V)
+        // the completion dropdown. Kept in sync with index.html's Formula
+        // Reference table — update both if a helper is added/changed.
+        var HELPER_REF = {
+            F: { sig: "F(field)", args: ["field — \"Tab :: Label\" of a registered field (or just the label, matched by suffix)"], desc: "Get a field's value." },
+            T: { sig: "T(table)", args: ["table — captured table name"], desc: "All rows of a captured table, as an array of objects keyed by column header." },
+            rowCount: { sig: "rowCount(table)", args: ["table — captured table name"], desc: "Number of rows in a captured table." },
+            col: { sig: "col(table, colName)", args: ["table — captured table name", "colName — column header"], desc: "Array of values from one column across all rows." },
+            has: { sig: "has(table, colName, value)", args: ["table — captured table name", "colName — column header", "value — value to look for"], desc: "true if any row has that value in that column." },
+            hours: { sig: "hours(str)", args: ["str — \"HH:MM\" or decimal string"], desc: "Parses into a numeric hours value." },
+            hoursBetween: { sig: "hoursBetween(a, b)", args: ["a — start datetime \"DD/MM/YYYY HH:MM\"", "b — end datetime, same format"], desc: "Hours between two datetime strings." },
+            oneOf: { sig: "oneOf(val, arr)", args: ["val — value to check", "arr — array of allowed values"], desc: "true if val is in the array." },
+            contains: { sig: "contains(text, pattern)", args: ["text — string to test", "pattern — regex pattern"], desc: "Regex test, returns a boolean." },
+            matches: { sig: "matches(text, pattern)", args: ["text — string to search", "pattern — regex pattern"], desc: "Array of unique regex matches." },
+            isEmpty: { sig: "isEmpty(v)", args: ["v — value to check"], desc: "true if v is null/undefined/empty string." },
+            notEmpty: { sig: "notEmpty(v)", args: ["v — value to check"], desc: "true if v is NOT null/undefined/empty string." },
+            maxLaborHours: { sig: "maxLaborHours(tableTitle, nameCol, hoursCol)", args: ["tableTitle — captured labor table name", "nameCol — column with each person's name", "hoursCol — column with hours"], desc: "The highest total hours attributed to any one person." },
+            V: { sig: "V(id)", args: ["id — a variable's ID or label"], desc: "A variable's computed value." }
+        };
+
+        // Scans backward from the cursor to find the nearest unclosed "("
+        // and the identifier immediately before it, plus which comma-
+        // separated argument the cursor sits in. One parse feeds both the
+        // F(/T(/V( completion dropdown and the Excel-style signature
+        // tooltip, so they can never disagree about what's under the cursor.
+        function parseFormulaContext(text, pos) {
+            var depth = 0,
+                i = pos - 1;
+            while (i >= 0) {
+                var ch = text[i];
+                if (ch === ')') depth++;
+                else if (ch === '(') {
+                    if (depth === 0) break;
+                    depth--;
+                }
+                i--;
+            }
+            if (i < 0) return null;
+            var openParenIdx = i;
+            var j = i - 1;
+            while (j >= 0 && /[A-Za-z0-9_$]/.test(text[j])) j--;
+            var name = text.slice(j + 1, i);
+            if (!name) return null;
+            var argIndex = 0,
+                d2 = 0,
+                argStart = openParenIdx + 1;
+            for (var k = openParenIdx + 1; k < pos; k++) {
+                var c2 = text[k];
+                if (c2 === '(') d2++;
+                else if (c2 === ')') d2--;
+                else if (c2 === ',' && d2 === 0) {
+                    argIndex++;
+                    argStart = k + 1;
+                }
+            }
+            return {
+                func: name,
+                argIndex: argIndex,
+                argStart: argStart,
+                prefix: text.slice(argStart, pos).replace(/^[\s'"]+/, '')
+            };
+        }
+
+        // Wires an F(/T(/V( completion dropdown + Excel-style signature
+        // tooltip onto a single formula/condition field. Only meant for
+        // genuine formula fields (rule/variable/scan-target formulas, scan
+        // action value/condition, row-detail collect condition, per-entry
+        // condition) — never plain text fields like labels or message boxes.
+        function attachFormulaAssist(el) {
+            var dropdown = null,
+                sigTip = null;
+
+            function closeDropdown() {
+                if (dropdown) {
+                    dropdown.remove();
+                    dropdown = null;
+                }
+            }
+
+            function closeSigTip() {
+                if (sigTip) {
+                    sigTip.remove();
+                    sigTip = null;
+                }
+            }
+
+            function completionSource(func) {
+                if (func === 'F') return opts.fields;
+                if (func === 'T') return opts.tables;
+                if (func === 'V') return getVars().map(function(v) {
+                    return v.label;
+                });
+                return null;
+            }
+
+            function insertCompletion(ctx, value) {
+                var pos = el.selectionStart;
+                var before = el.value.slice(0, ctx.argStart);
+                var after = el.value.slice(pos);
+                var quoted = "'" + value.replace(/'/g, "\\'") + "'";
+                el.value = before + quoted + after;
+                var newPos = (before + quoted).length;
+                el.selectionStart = el.selectionEnd = newPos;
+                // Programmatic .value writes don't fire oninput — every one
+                // of these fields already has an oninput that persists the
+                // edit into cfg/scan, so without this the inserted text
+                // would look right but silently not save.
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                closeDropdown();
+                el.focus();
+            }
+
+            function showDropdown(ctx) {
+                var source = completionSource(ctx.func);
+                if (!source || ctx.argIndex !== 0) {
+                    closeDropdown();
+                    return;
+                }
+                var q = ctx.prefix.replace(/['"]/g, '').toLowerCase();
+                var matches = source.filter(function(s) {
+                    return s.toLowerCase().indexOf(q) >= 0;
+                }).slice(0, 8);
+                if (!matches.length) {
+                    closeDropdown();
+                    return;
+                }
+                closeDropdown();
+                dropdown = document.createElement('div');
+                dropdown.className = 'wo-fa-dropdown';
+                // Appended to document.body (like attachTooltip's floating
+                // tip) rather than nested in #__wo_setup_modal, so its own
+                // --wo-* custom properties wouldn't cascade here — hardcoded
+                // to match those token values instead.
+                dropdown.style.cssText = 'position:fixed;z-index:9999999;background:#1f2630;border:1px solid #30363d;border-radius:6px;max-height:170px;overflow:auto;box-shadow:0 6px 20px rgba(0,0,0,.5);font-size:11px;font-family:"Segoe UI",Arial,sans-serif;';
+                matches.forEach(function(m) {
+                    var item = document.createElement('div');
+                    item.textContent = m;
+                    item.style.cssText = 'padding:5px 9px;cursor:pointer;color:#f0f3f6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                    item.onmouseenter = function() {
+                        item.style.background = 'rgba(255,255,255,.08)';
+                    };
+                    item.onmouseleave = function() {
+                        item.style.background = 'none';
+                    };
+                    item.onmousedown = function(e) {
+                        e.preventDefault();
+                        insertCompletion(ctx, m);
+                    };
+                    dropdown.appendChild(item);
+                });
+                document.body.appendChild(dropdown);
+                var r = el.getBoundingClientRect();
+                dropdown.style.left = Math.max(4, r.left) + 'px';
+                dropdown.style.width = Math.min(320, Math.max(180, r.width)) + 'px';
+                // Flip above the field instead of running off the bottom of
+                // the viewport — the Scan tab's tables put some of these
+                // fields near the bottom of a long scrolled list.
+                var belowSpace = window.innerHeight - r.bottom;
+                if (belowSpace < dropdown.offsetHeight + 8 && r.top > dropdown.offsetHeight + 8) {
+                    dropdown.style.top = (r.top - dropdown.offsetHeight - 2) + 'px';
+                } else {
+                    dropdown.style.top = (r.bottom + 2) + 'px';
+                }
+            }
+
+            function showSigTip(ctx) {
+                var ref = HELPER_REF[ctx.func];
+                if (!ref) {
+                    closeSigTip();
+                    return;
+                }
+                closeSigTip();
+                sigTip = document.createElement('div');
+                sigTip.className = 'wo-fa-sigtip';
+                sigTip.style.cssText = 'position:fixed;z-index:9999999;background:#1f2630;color:#f0f3f6;font-size:11px;font-family:Consolas,"Cascadia Mono",monospace;padding:7px 10px;border-radius:6px;max-width:300px;white-space:pre-wrap;box-shadow:0 4px 14px rgba(0,0,0,.5);border:1px solid #30363d;pointer-events:none;';
+                var lines = [ref.sig, ''];
+                (ref.args || []).forEach(function(a, idx) {
+                    lines.push((idx === ctx.argIndex ? '→ ' : '   ') + a);
+                });
+                lines.push('');
+                lines.push(ref.desc);
+                sigTip.textContent = lines.join('\n');
+                document.body.appendChild(sigTip);
+                var r = el.getBoundingClientRect();
+                sigTip.style.left = Math.max(4, r.left) + 'px';
+                var belowSpace = window.innerHeight - r.bottom;
+                if (belowSpace < sigTip.offsetHeight + 8 && r.top > sigTip.offsetHeight + 8) {
+                    sigTip.style.top = (r.top - sigTip.offsetHeight - 2) + 'px';
+                } else {
+                    sigTip.style.top = (r.bottom + 2) + 'px';
+                }
+            }
+
+            function update() {
+                var ctx = parseFormulaContext(el.value, el.selectionStart);
+                if (!ctx) {
+                    closeDropdown();
+                    closeSigTip();
+                    return;
+                }
+                var source = completionSource(ctx.func);
+                if (source && ctx.argIndex === 0) {
+                    closeSigTip();
+                    showDropdown(ctx);
+                } else {
+                    closeDropdown();
+                    showSigTip(ctx);
+                }
+            }
+            el.addEventListener('input', update);
+            el.addEventListener('click', update);
+            el.addEventListener('keyup', function(e) {
+                if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') update();
+            });
+            el.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    closeDropdown();
+                    closeSigTip();
+                }
+            });
+            el.addEventListener('blur', function() {
+                // Delayed so a dropdown item's onmousedown (which fires
+                // before blur takes effect) still gets a chance to run.
+                setTimeout(function() {
+                    closeDropdown();
+                    closeSigTip();
+                }, 120);
+            });
         }
         // ── VARIABLES TAB ──
         function varsTab() {
@@ -6611,6 +6913,7 @@
                     v.formula = fa.value;
                     saveVars(vars);
                 };
+                attachFormulaAssist(fa);
                 box.querySelector('[data-vi]').onchange = function(e) {
                     if (!e.target.value) return;
                     var sn = "F('" + e.target.value.replace(/'/g, "\\'") + "')";
@@ -6636,7 +6939,7 @@
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
                         '<span>Duplicate</span>' +
                         '</button>' +
-                        EDIT_TOOLTIP_KEBAB_HTML +
+                        editTooltipKebabHtml(v) +
                         '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger">' +
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
                         '<span>Delete</span>' +
@@ -6717,6 +7020,39 @@
         // parsing, so a condition referencing a qualified field name like
         // "Tab :: Field" can never corrupt the message) — and, for fail/warn,
         // an inline "include in return message" control.
+        // Matches a call to any known formula helper (F, T, V, col, etc.)
+        // Message boxes are plain string templates — only text inside
+        // {{expr}} spans gets evaluated, so a bare call typed directly into
+        // one just shows up as literal text, which is almost never intended.
+        var HELPER_NAME_RE = /\b(F|T|V|rowCount|col|has|hours|hoursBetween|oneOf|contains|matches|isEmpty|notEmpty|maxLaborHours)\s*\(/;
+
+        function hasUnwrappedHelperCall(text) {
+            if (!text) return false;
+            var stripped = String(text).replace(/\{\{[\s\S]*?\}\}/g, '');
+            return HELPER_NAME_RE.test(stripped);
+        }
+
+        // Wires a small inline warning under a plain message-text input,
+        // shown live whenever it contains a helper/variable call that isn't
+        // wrapped in {{ }} (and so won't actually be evaluated).
+        // afterEl lets a caller put the warning below a wrapping row instead
+        // of directly after the input itself — needed when the input is one
+        // of several flex children in an inline row (e.g. a Long entry's
+        // condition/message/remove row), where "afterend" on the input would
+        // otherwise land the warning as another flex item in that same row.
+        function wireUnwrappedHelperWarning(inputEl, afterEl) {
+            var warn = document.createElement('div');
+            warn.className = 'wo-unwrapped-warn';
+            warn.style.cssText = 'display:none;margin-top:3px;font-size:10px;color:var(--wo-warn);';
+            warn.textContent = '⚠ Looks like a formula reference — wrap it in {{ }} to evaluate it, otherwise it will show as plain text.';
+            (afterEl || inputEl).insertAdjacentElement('afterend', warn);
+            function check() {
+                warn.style.display = hasUnwrappedHelperCall(inputEl.value) ? '' : 'none';
+            }
+            inputEl.addEventListener('input', check);
+            check();
+        }
+
         function msgSection(rule, key, label, color, includeReturn) {
             var side = rule[key];
             var sec = document.createElement('div');
@@ -6753,6 +7089,7 @@
             sec.querySelector('[data-short]').oninput = function(e) {
                 side.short = e.target.value;
             };
+            wireUnwrappedHelperWarning(sec.querySelector('[data-short]'));
 
             function renderLongList() {
                 var wrap = sec.querySelector('[data-long-list]');
@@ -6767,6 +7104,7 @@
                     row.querySelector('[data-cond]').oninput = function(e) {
                         entry.condition = e.target.value;
                     };
+                    attachFormulaAssist(row.querySelector('[data-cond]'));
                     row.querySelector('[data-msg]').oninput = function(e) {
                         entry.msg = e.target.value;
                     };
@@ -6775,6 +7113,7 @@
                         renderLongList();
                     };
                     wrap.appendChild(row);
+                    wireUnwrappedHelperWarning(row.querySelector('[data-msg]'), row);
                 });
             }
             renderLongList();
@@ -6796,6 +7135,7 @@
                 sec.querySelector('[data-ret-custom]').oninput = function(e) {
                     side.returnCustom = e.target.value;
                 };
+                wireUnwrappedHelperWarning(sec.querySelector('[data-ret-custom]'));
             }
             return sec;
         }
@@ -6878,6 +7218,7 @@
                 fa.oninput = function() {
                     rule.formula = fa.value;
                 };
+                attachFormulaAssist(fa);
 
                 box.querySelector('[data-i]').onchange = function(e) {
                     if (!e.target.value) return;
@@ -6903,7 +7244,7 @@
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
                         '<span>Duplicate</span>' +
                         '</button>' +
-                        EDIT_TOOLTIP_KEBAB_HTML +
+                        editTooltipKebabHtml(rule) +
                         '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger">' +
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
                         '<span>Delete</span>' +
@@ -7216,7 +7557,7 @@
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
                         '<span>Duplicate</span>' +
                         '</button>' +
-                        EDIT_TOOLTIP_KEBAB_HTML +
+                        editTooltipKebabHtml(group) +
                         '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger">' +
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
                         '<span>Delete</span>' +
@@ -7610,9 +7951,11 @@
                                 row.querySelector('[data-act-val]').oninput = function(e) {
                                     act.value = e.target.value;
                                 };
+                                attachFormulaAssist(row.querySelector('[data-act-val]'));
                                 row.querySelector('[data-act-cond]').oninput = function(e) {
                                     act.condition = e.target.value || undefined;
                                 };
+                                attachFormulaAssist(row.querySelector('[data-act-cond]'));
                                 var runonSel = row.querySelector('[data-act-runon]');
                                 if (runonSel) {
                                     runonSel.onchange = function(e) {
@@ -7688,6 +8031,7 @@
                         row.querySelector('[data-rdf-cond]').oninput = function(e) {
                             rdf.collectCondition = e.target.value || undefined;
                         };
+                        attachFormulaAssist(row.querySelector('[data-rdf-cond]'));
                         row.querySelector('[data-rdf-del]').onclick = function() {
                             s.rowDetailFields.splice(ri, 1);
                             renderRdfList();
@@ -7752,6 +8096,7 @@
                 box.querySelector('[data-f]').oninput = function(e) {
                     s.condition = e.target.value;
                 };
+                attachFormulaAssist(box.querySelector('[data-f]'));
                 var kebabBtn = box.querySelector('[data-kebab]');
                 kebabBtn.onclick = function() {
                     var wasOpen = !!openRuleMenu;
@@ -7768,7 +8113,7 @@
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
                         '<span>Duplicate</span>' +
                         '</button>' +
-                        EDIT_TOOLTIP_KEBAB_HTML +
+                        editTooltipKebabHtml(s) +
                         '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger">' +
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
                         '<span>Delete</span>' +
@@ -8148,7 +8493,7 @@
                 // Save & Apply, same as every other Setup tab.
                 e.stopPropagation();
                 st.channel = e.target.value;
-                setStatus('Channel set to ' + st.channel + ' — click Save & Apply to check for updates.');
+                setStatus('Channel set to ' + st.channel + ' — click Save to check for updates.');
             };
 
             var pinSel = updSettDiv.querySelector('#__st_pin');
@@ -8211,8 +8556,8 @@
                 e.stopPropagation(); // stage only — see the channel handler's comment above
                 st.pinnedVersion = e.target.value;
                 setStatus(st.pinnedVersion ?
-                    'Version set to ' + st.pinnedVersion + ' — click Save & Apply to check for updates.' :
-                    'Unpinned — click Save & Apply to follow the channel.');
+                    'Version set to ' + st.pinnedVersion + ' — click Save to check for updates.' :
+                    'Unpinned — click Save to follow the channel.');
             };
 
             updSettDiv.querySelector('#__st_upd_disable').onchange = function(e) {
