@@ -1,10 +1,21 @@
 {
-  "latest": "0.23.0",
+  "latest": "0.23.1",
   "channels": {
-    "stable": "0.23.0",
-    "beta": "0.23.0"
+    "stable": "0.23.1",
+    "beta": "0.23.1"
   },
   "versions": [
+    {
+      "version": "0.23.1",
+      "name": "Route Icon Fix + Layout Tweaks",
+      "changes": [
+        "Fixed: the Route symbol's icon artwork only used a fraction of its own viewBox, so it rendered shrunk into one corner with a lot of dead space around it - it's now cropped tight so it fills its space properly.",
+        "Reverted the Route/Fix/Approve button row to its original height - the bigger Route icon from the last release was stretching the whole row taller.",
+        "The Fix button is narrower now instead of sharing equal width with Return/Approve.",
+        "Removed a redundant sentence from the Beta tab's intro text.",
+        "Fixed: the \"...\" overflow menu for Guide/Feedback/Export/Import (when Setup is too narrow) opened and immediately closed again in the same click - it stayed open like every other menu."
+      ]
+    },
     {
       "version": "0.23.0",
       "name": "Editable Return Message + New Default Hotkeys",

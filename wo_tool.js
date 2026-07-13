@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.23.0';
+    var TOOL_VERSION = '0.23.1';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -3855,7 +3855,7 @@
             // beta_1-only: a plain non-interactive glyph, never a button —
             // no background/border/hover, no click handler. Purely a visual
             // label ahead of Return/Fix/Approve, not one of the actions.
-            "#__wo_dock .wo-route-symbol{display:flex;align-items:center;justify-content:center;flex:0 0 auto;width:70px;color:var(--wo-muted);cursor:default;}" +
+            "#__wo_dock .wo-route-symbol{display:flex;align-items:center;justify-content:center;flex:0 0 auto;width:36px;color:var(--wo-muted);cursor:default;}" +
             "#__wo_dock .wo-btn-block.wo-btn-icon{display:inline-flex;align-items:center;justify-content:center;gap:7px;}" +
             "#__wo_dock .wo-btn-pass{background:var(--wo-pass);color:#04210c;border-color:var(--wo-pass);}" +
             "#__wo_dock .wo-btn-warn{background:var(--wo-warn);color:#241900;border-color:var(--wo-warn);}" +
@@ -4622,7 +4622,13 @@
             // Three nodes converging into one checked final node — a
             // visual label, not a control: no button element, no
             // border/background, no click handler.
-            routeSymbol.innerHTML = '<svg width="60" height="60" viewBox="0 0 320 320" fill="none">' +
+            // viewBox is a tight crop around the actual artwork's bounding
+            // box (x/y 30-137.5, +5 padding) — the old "0 0 320 320" viewBox
+            // was ~3x the artwork's real extent, so the whole glyph rendered
+            // shrunk into one corner with dead space filling the rest of the
+            // box. Cropping tight makes the same pixel size look properly
+            // filled instead of tiny.
+            routeSymbol.innerHTML = '<svg width="24" height="24" viewBox="25 25 118 118" fill="none">' +
                 '<g stroke="currentColor" stroke-width="10" stroke-linecap="round">' +
                 '<line x1="65" y1="50" x2="95" y2="50"/>' +
                 '<line x1="100" y1="60" x2="60" y2="100"/>' +
@@ -4658,7 +4664,10 @@
             // the tool being a stroke-only inline SVG instead of a Unicode
             // symbol or emoji.
             fixBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" style="vertical-align:-2px;margin-right:4px;" aria-hidden="true"><path d="M11.6 2.7C10.3 2.1 8.7 2.4 7.7 3.4C6.6 4.5 6.4 6.1 7.1 7.4L2.5 12C2 12.5 2 13.3 2.5 13.8C3 14.3 3.8 14.3 4.3 13.8L8.9 9.2C10.2 9.9 11.8 9.7 12.9 8.6C13.9 7.6 14.2 6 13.6 4.7L11.2 7.1C10.6 7.7 9.6 7.7 9 7.1C8.4 6.5 8.4 5.5 9 4.9L11.6 2.7Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/></svg>Fix';
-            fixBtn.className = 'wo-btn wo-btn-warn wo-btn-block';
+            // Not .wo-btn-block (flex:1, equal share with Return/Approve) —
+            // "Fix" is a much shorter label and doesn't need that much room.
+            fixBtn.className = 'wo-btn wo-btn-warn';
+            fixBtn.style.cssText = 'flex:0 0 auto;padding:9px 16px;font-size:12.5px;';
             fixBtn.onclick = function() {
                 runScan(render, 'fix');
             };
@@ -5530,7 +5539,16 @@
         var moreTabBtn = modal.querySelector('#__s_more');
         if (moreTabBtn) {
             attachTooltip(moreTabBtn, 'More');
-            moreTabBtn.onclick = function() {
+            moreTabBtn.onclick = function(ev) {
+                // Without this, the click bubbles to modal's own
+                // `click -> closeRuleMenu` listener (added so clicking
+                // anywhere closes an open kebab menu) and closes the menu
+                // this handler just opened, in the same event — the "..."
+                // menu would visibly never open. Every other kebab
+                // trigger avoids this via a wrapping
+                // onclick="event.stopPropagation()" span; this button has
+                // no such wrapper, so it has to stop propagation itself.
+                ev.stopPropagation();
                 var wasOpen = !!openRuleMenu;
                 closeRuleMenu();
                 if (wasOpen) return;
@@ -7815,7 +7833,7 @@
             var grants = getGrants();
             var intro = document.createElement('div');
             intro.style.cssText = 'color:var(--wo-muted);font-size:11px;margin-bottom:10px;';
-            intro.textContent = 'Your access: ' + (grants.join(', ') || 'user') + '. Holding a grant just means you can opt in below — nothing turns on by itself.';
+            intro.textContent = 'Your access: ' + (grants.join(', ') || 'user') + '.';
             content.appendChild(intro);
 
             BETA_FEATURES.filter(function(f) {
