@@ -232,6 +232,31 @@ re-snapshotting after save** — skip it and the grey-out from §4.2 breaks
 (the button would stay permanently enabled after the first save, since the
 snapshot would never again match the live objects).
 
+**Button label is just "Save"** (v0.24.0; renamed from "Save & Apply" — it
+always did both in one action, so a second word added nothing). Hovering it
+runs `setupChangedAreasText()`, which re-parses `__woSetupSnapshot` and
+diffs `cfg.rules`/`cfg.groups`/`scan`/`st` against the live objects — a
+**coarse, top-level diff** ("Rules", "Groups", "Scan targets & actions",
+"Settings"), not per-field, on purpose: per-field would mean hand-listing
+every property, defeating the whole-object-compare design in §4.2. Variables
+are deliberately excluded from this list — `saveVars()` already persists on
+every keystroke (see §4.4), so they're never part of what this button
+actually applies.
+
+**Closing with unsaved changes** — `#__s_close` now calls `isSetupDirty()`
+(same compare as `updateSaveButtonState()`, factored out so both share one
+definition) before removing the modal. If dirty, `showUnsavedChangesDialog()`
+shows a small overlay **appended as a child of `#__wo_setup_modal` itself**
+(so it inherits that root's `--wo-*` CSS reset/tokens) with Cancel / Discard
+& Exit / Save buttons — a custom `pointer-events`-blocking overlay, not
+`confirm()`, per the standing "no browser-chrome dialogs" preference for
+this UI. Save re-uses the existing `#__s_save` click handler
+(`.click()`) rather than duplicating its logic, then closes. **Only the
+Close button is gated** — the Settings tab's Reset/Full-Reset paths
+(`#__st_reset_all` etc.) call `modal.remove()` directly and deliberately stay
+that way: they've already destroyed the config being asked about, so there's
+nothing left to warn about saving.
+
 ### 4.3 Reset / Uninstall (Settings tab)
 
 Two buttons, both explicitly framed as resets, not permanent removal — the
@@ -261,10 +286,16 @@ separate, new location, not a duplicate feature). Three shared helpers
 - `wireEntryTipIcon(box, entry)` — attaches the floating tooltip to whatever
   `entryTipIconHtml()` rendered (a no-op if it rendered nothing).
 - `wireEditTooltipKebabItem(menu, entry, entryLabel, rerenderFn)` — wires the
-  4th kebab-menu item (`EDIT_TOOLTIP_KEBAB_HTML`, alongside Rename/
-  Duplicate/Delete) to a `prompt()`-based editor. A plain prompt rather than
-  an inline field — four near-identical call sites, not worth a richer
-  editor for one short text value.
+  4th kebab-menu item (alongside Rename/Duplicate/Delete) to a `prompt()`-based
+  editor. A plain prompt rather than an inline field — four near-identical
+  call sites, not worth a richer editor for one short text value.
+- `editTooltipKebabHtml(entry)` (v0.24.0; was the static const
+  `EDIT_TOOLTIP_KEBAB_HTML`) — now a function so the label can read "Set
+  Tooltip" when `entry.tooltip` is empty/falsy and "Edit Tooltip" once one's
+  set. Called at menu-build time (`editTooltipKebabHtml(v)` /
+  `(rule)`/`(group)`/`(s)`), so it must be re-called on every kebab-menu
+  rebuild — the label is a snapshot of `entry.tooltip` at that moment, not
+  reactive.
 
 The icon itself only becomes visible on `[data-reorder-card]:hover` /
 `:focus-within` (`.wo-entry-tip-icon`, CSS), the same show-on-card-hover
@@ -274,8 +305,8 @@ entries with tooltips set doesn't look any busier at rest than one without.
 **Adding tooltip support to a new Setup entry type**: give it a `.tooltip`
 field, call `entryTipIconHtml(entry)` right after the title in its header
 markup, call `wireEntryTipIcon(box, entry)` after the card is built, and add
-`EDIT_TOOLTIP_KEBAB_HTML` + `wireEditTooltipKebabItem(...)` to its kebab menu
-alongside the other three items.
+`editTooltipKebabHtml(entry)` + `wireEditTooltipKebabItem(...)` to its kebab
+menu alongside the other three items.
 
 ---
 
@@ -330,6 +361,70 @@ while the panel is collapsed and the textarea doesn't exist at all.
 - `copyReturnMessage()` is the one clipboard implementation, shared by the
   Copy button's click handler and the `copyReturn` hotkey action — don't
   duplicate the temp-textarea/execCommand dance a second time anywhere.
+
+### 5.2 Formula autocomplete + signature tooltip (v0.24.0)
+
+One parser, `parseFormulaContext(text, pos)`, drives both an F(/T(/V(
+completion dropdown and an Excel-style signature tooltip for every helper —
+so they can never disagree about what the cursor is inside. It scans
+backward from the cursor for the nearest **unclosed** `(` and the identifier
+before it, and counts top-level commas between that `(` and the cursor to
+get an arg index, returning `{func, argIndex, argStart, prefix}` (or `null`
+outside any call). Deliberately naive about parens inside string literals
+(e.g. `F('a)b'`) — degrades to "no context" rather than throwing, which is
+fine since the fallback (no popup) is harmless. Unit-tested in isolation
+(not from a browser) before shipping since it's the one piece of pure,
+easily-wrong logic in this feature.
+
+`attachFormulaAssist(el)` wires both UI pieces onto one field:
+- `argIndex === 0` **and** `func` is `F`/`T`/`V` → completion dropdown,
+  sourced from `opts.fields`/`opts.tables`/`getVars().map(v => v.label)`,
+  substring-filtered against `ctx.prefix`, click-to-insert.
+- Otherwise, if `func` is any key in `HELPER_REF` (the full helper list —
+  `F`, `T`, `V`, `rowCount`, `col`, `has`, `hours`, `hoursBetween`, `oneOf`,
+  `contains`, `matches`, `isEmpty`, `notEmpty`, `maxLaborHours`) → signature
+  tooltip, current arg bolded via `→`. **Keep `HELPER_REF` in sync with
+  `index.html`'s Formula Reference table** — same source of truth, two
+  copies, no shared code between the client tool and the static Guide page.
+- Insertion writes `el.value` directly then **dispatches a synthetic
+  `input` event** — every one of these fields already has its own `oninput`
+  that persists the edit into `cfg`/`scan`; a bare `.value` write doesn't
+  fire it, so skipping the dispatch would make the completion look right
+  and silently not save.
+- Dropdown/tooltip are `position:fixed`, appended to `document.body` (like
+  `attachTooltip`'s floating tip), anchored below the field's own
+  `getBoundingClientRect()` — **not** the caret's pixel position, which
+  would need a hidden mirror-`<div>` to compute reliably. Flips above the
+  field if there isn't room below (checked against `window.innerHeight`).
+  Because they're outside `#__wo_setup_modal`, they use **hardcoded hex
+  colors matching that root's `--wo-*` token values**, not `var(--wo-*)` —
+  those custom properties don't cascade to a `document.body` child.
+
+**Wired at every genuine formula/condition field** — Rules/Variables
+`[data-f]`, a rule's per-Long-entry `[data-cond]`, a scan target's own
+condition (`[data-f]` via `formulaBox`), Scan Actions' `[data-act-val]`/
+`[data-act-cond]`, and Row Detail Fields' `[data-rdf-cond]`. **Deliberately
+not wired** on plain text fields — labels/titles, Prefix/Suffix, the Install
+tab's raw-source paste box, or message boxes' `[data-msg]`/`[data-short]`/
+`[data-ret-custom]` (those are plain string templates, not formulas — see
+§5.3).
+
+### 5.3 Unwrapped-helper warning in message boxes (v0.24.0)
+
+Message boxes (`[data-short]`, a Long entry's `[data-msg]`,
+`[data-ret-custom]`) only evaluate text inside `{{expr}}` spans — anything
+else is shown to the user literally. `wireUnwrappedHelperWarning(inputEl,
+afterEl?)` shows a small inline hint whenever the field's value contains a
+call to a known helper name (`hasUnwrappedHelperCall()`, same `HELPER_REF`
+name set as §5.2) **outside** any `{{...}}` span — a likely sign someone
+meant to interpolate a formula and forgot the braces. Non-blocking (doesn't
+stop saving) since it's a heuristic that can false-positive on ordinary
+prose containing "(" near one of the shorter helper names (`F`, `T`, `V`,
+`has`). The optional `afterEl` param exists because a Long entry's
+`[data-msg]` is one of several flex children in an inline row — inserting
+the warning `afterend` of the input itself would make it a 4th flex item in
+that row instead of a full-width line below it; callers there pass the
+wrapping `row` element instead.
 
 ---
 
@@ -427,29 +522,55 @@ overwrite fields with no confirmation, unlike Return/Approve which confirm.
 
 ## 9. Release process
 
-**Every release needs the same `vX.Y.Z` tag pushed to BOTH repos**, or
-pinned-version installs / the Worker's `?version=` param silently fail to
-resolve on whichever repo is missing it. Order that's been safe in practice:
+**Two stages, deliberately separate (standing instruction as of v0.24.0):
+push to dev first, only promote to stable/beta when the user explicitly says
+so.** This exists because `worker.js`'s `/tool` endpoint resolves an
+unpinned/"dev channel" request straight from `GITHUB_BRANCH` (the private
+repo's live `main` — see §3), while a pinned request (`?version=X`, which is
+what `channels.stable`/`channels.beta`/exact-pins in `version.json` all
+resolve to) fetches an **immutable git tag**. Pushing new code to `main`
+therefore only ever reaches dev-grant holders on the dev channel — everyone
+on stable/beta is completely unaffected until a new tag exists and
+`version.json` is updated to point at it. That gap is the whole point: it's
+a live, low-blast-radius way to exercise interactive code that can't be
+verified from this environment (no browser here) before it reaches
+everyone.
 
-1. Bump `TOOL_VERSION` in `wo_tool.js`, add a `version.json` entry (public repo).
-2. **There is no persistent local checkout of the private repo** — `gh repo
-   clone WilliamZitzmann/WO-Review-Tool-Private` into a scratch/tmp dir each
-   release, copy the updated `wo_tool.js` in (don't touch its
-   `permissions.json`), set local `git config user.name`/`user.email` in that
-   fresh clone (it won't inherit global config), commit, tag `vX.Y.Z`, push
-   (main + tag), then delete the scratch clone. Confirmed with the user this
-   is the actual workflow (v0.22.0) — don't go looking for a local checkout
-   that isn't there.
-3. If `access-control/worker.js` changed: `wrangler deploy` (needs
-   `CLOUDFLARE_API_TOKEN` set — not persisted across sessions, the user
-   re-provides it each time it's needed).
-4. Commit + tag + push the public repo (main + tag).
+### 9.1 Stage 1 — push to dev
+
+1. Bump `TOOL_VERSION` in `wo_tool.js`. **Do not** touch `version.json`
+   (`latest`, `channels`, or add a `versions[]` entry) — that's what keeps
+   stable/beta users unaffected.
+2. Commit + push `wo_tool.js` to the **public** repo's `main`.
+3. Same file to the **private** repo's `main` — `gh repo clone
+   WilliamZitzmann/WO-Review-Tool-Private` into a scratch/tmp dir (**no
+   persistent local checkout exists** — confirmed with the user, v0.22.0;
+   don't go looking for one), copy `wo_tool.js` in (leave its
+   `permissions.json` alone), set local `git config user.name`/`user.email`
+   (the fresh clone won't inherit global config), commit, push `main` — **no
+   tag yet** — then delete the scratch clone.
+4. Tell the user it's live on dev and wait for them to test and explicitly
+   say when to promote.
+
+### 9.2 Stage 2 — promote to stable/beta (only on explicit go-ahead)
+
+1. Add the `version.json` changelog entry (public repo) describing the
+   already-pushed changes.
+2. Tag `vX.Y.Z` on **both** repos at the commit already pushed in stage 1
+   (don't re-push code — it's already there) — pinned-version installs and
+   `?version=` silently fail to resolve on whichever repo is missing the tag.
+3. Update `version.json`'s `latest` and the relevant `channels` entries
+   (`stable`, and `beta` if applicable) to `X.Y.Z`, commit, push (public repo).
+4. If `access-control/worker.js` changed: `wrangler deploy` (needs
+   `CLOUDFLARE_API_TOKEN` — not persisted across sessions, re-provided each
+   time it's needed).
 5. Smoke-test: `curl /bootstrap`, `curl -X POST /check-access`, then
    `curl "/tool?token=...&version=X.Y.Z"` and grep for the expected
    `TOOL_VERSION` string in the response.
 
-Skipping step 2 (or tagging only one repo) is the single most likely release
-mistake — check both tags exist before considering a release done.
+Skipping the private-repo tag (or tagging only one repo) is the single most
+likely release mistake at promotion time — check both tags exist before
+considering a promotion done.
 
 ---
 
