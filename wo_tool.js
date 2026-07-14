@@ -4217,7 +4217,23 @@
         injectPanelStyles();
         panel = document.createElement('div');
         panel.id = '__wo_dock';
-        var startCollapsed = getPanelCollapsed();
+        // Opening the tool always starts expanded. panelCollapsed used to be
+        // honored here too (persisted across reloads, same as the collapse
+        // button's own state) — but that meant collapsing it once silently
+        // reopened collapsed every time after, easy to mistake for the tool
+        // not having loaded. The collapse button/hotkey still work exactly
+        // as before for the rest of THIS session; only the initial open no
+        // longer restores a collapsed state. Reset the stored flag too (not
+        // just the local var) so getPanelCollapsed()'s other reader,
+        // pushLayout(), doesn't disagree with the panel's own actual width.
+        var startCollapsed = false;
+        try {
+            var __woSt = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+            if (__woSt.panelCollapsed) {
+                __woSt.panelCollapsed = false;
+                localStorage.setItem('__wo_settings', JSON.stringify(__woSt));
+            }
+        } catch (e) {}
         panel.className = startCollapsed ? 'is-collapsed' : '';
         // #__wo_status / #__wo_scanlog / #__wo_groups / #__wo_footer_area are
         // singleton structural containers, not repeated components — their
