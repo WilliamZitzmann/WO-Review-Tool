@@ -190,6 +190,7 @@
         label: 'Scan',
         defaultHotkey: DEFAULT_HOTKEY,
         run: function() {
+            if (actionsBusy()) return;
             runScan(render);
         }
     }, {
@@ -198,8 +199,11 @@
         label: 'Return',
         defaultHotkey: 'Alt+R',
         run: function() {
+            if (actionsBusy()) return;
             woConfirm('Return this Work Order?\n\nThe return message will be filled into the Memo field.').then(function(ok) {
-                if (!ok) return;
+                if (!ok || actionsBusy()) return;
+                routing = true;
+                setActionsLocked(true);
                 routeWorkflow('return');
             });
         }
@@ -209,8 +213,11 @@
         label: 'Approve',
         defaultHotkey: '',
         run: function() {
+            if (actionsBusy()) return;
             woConfirm('Approve this Work Order?\n\nThis will route with Complete Review selected.').then(function(ok) {
-                if (!ok) return;
+                if (!ok || actionsBusy()) return;
+                routing = true;
+                setActionsLocked(true);
                 routeWorkflow('approve');
             });
         }
@@ -221,6 +228,7 @@
         defaultHotkey: '',
         betaFeature: 'beta_1', // only registered/assignable at all while this beta feature is on
         run: function() {
+            if (actionsBusy()) return;
             runScan(render, 'fix');
         }
     }, {
@@ -2651,6 +2659,54 @@
         return false;
     }
     var scanning = false;
+    // True for the whole in-flight duration of a Return/Approve route
+    // (routeWorkflow) — separate from `scanning` since Scan/Fix already
+    // self-guard via that flag, but routeWorkflow previously had no
+    // re-entrancy guard at all. Checked together with `scanning` (see
+    // actionsBusy()) so a route and a scan/fix can never overlap either —
+    // both drive the same shared Maximo tabs/dialogs.
+    var routing = false;
+
+    function actionsBusy() {
+        return scanning || routing;
+    }
+    // Disables (and dims) the Scan/Return/Fix/Approve buttons for the
+    // duration of actionsBusy() so a second click — or the matching hotkey,
+    // see hotkeyActionActive()'s caller in applyHotkeys() — can't fire a
+    // second overlapping automation run on top of one already in progress.
+    // Buttons are recreated on every render(), so this both flips the live
+    // DOM nodes right now AND (via the disabled= at creation time in
+    // buildPanel/render) stays correct across any render that happens
+    // mid-lock.
+    function setActionsLocked(locked) {
+        if (!panel) return;
+        ['__wo_rescan', '__wo_action_return', '__wo_action_fix', '__wo_action_approve'].forEach(function(id) {
+            var b = panel.querySelector('#' + id);
+            if (!b) return;
+            b.disabled = locked;
+            b.style.opacity = locked ? '0.55' : '';
+            b.style.cursor = locked ? 'not-allowed' : '';
+        });
+    }
+    // Releases the routing lock — called from every terminal branch inside
+    // routeWorkflow (whether it finished cleanly, hit an error, or handed
+    // off to the user to click Maximo's own OK button by hand), plus once
+    // more from a safety-net timeout in case some branch was missed —
+    // better to unlock a little late than to leave Return/Approve/Scan/Fix
+    // permanently disabled until the page is reloaded. The timer itself is
+    // tracked so it can be cancelled here (a clean finish shouldn't leave a
+    // stale timer armed to fire mid-flight during a LATER route) and
+    // re-armed fresh at the top of every routeWorkflow() call.
+    var __woRouteSafetyTimer = null;
+    function finishRoute() {
+        if (!routing) return;
+        routing = false;
+        if (__woRouteSafetyTimer) {
+            clearTimeout(__woRouteSafetyTimer);
+            __woRouteSafetyTimer = null;
+        }
+        setActionsLocked(false);
+    }
     var scanLog = [];
     // null = no manual edit yet, so Return/Copy use the freshly computed
     // buildReturnMessage() as-is. Once the user types in the return-message
@@ -3065,9 +3121,10 @@
     // pipeline, just with a different set of post-scan actions eligible to
     // fire (see runActions). Everything else about a run is identical.
     function runScan(done, mode) {
-        if (scanning) return;
+        if (actionsBusy()) return;
         mode = mode || 'scan';
         scanning = true;
+        setActionsLocked(true);
         scanLog = [];
         currentReturnMsg = null;
         cache = {
@@ -3223,6 +3280,7 @@
                 }
                 mergeSnapshot(extractSnapshotFull());
                 scanning = false;
+                setActionsLocked(false);
                 setStatus('Scan complete ' + new Date().toLocaleTimeString());
                 done();
                 return;
@@ -3238,6 +3296,7 @@
             }, 2000, function() {
                 mergeSnapshot(extractSnapshotFull());
                 scanning = false;
+                setActionsLocked(false);
                 setStatus('Scan complete ' + new Date().toLocaleTimeString());
                 done();
             });
@@ -3582,6 +3641,18 @@
 
 
     function routeWorkflow(action) {
+        // Safety net — 180s comfortably exceeds the worst legitimate case
+        // (90s password-wait poll, reached only AFTER the 6s dialog poll,
+        // with the 8s page2 poll + 1.5s action-select + 4s memo poll still
+        // to come after that — a slow-to-type-password user can genuinely
+        // still be mid-route past 100s). Every terminal branch also calls
+        // finishRoute() directly the moment it's reached; this just
+        // guarantees the lock can never survive past a branch this
+        // function's own instrumentation missed. Cancelled+rearmed (not
+        // just set) so a stale timer from an earlier, already-finished
+        // route can't fire mid-flight during a later one.
+        if (__woRouteSafetyTimer) clearTimeout(__woRouteSafetyTimer);
+        __woRouteSafetyTimer = setTimeout(finishRoute, 180000);
         var retMsg = action === 'return' ? currentOrComputedReturnMessage() : '';
 
         var sew = findSendEventWin();
@@ -3605,6 +3676,7 @@
         }, 6000, function(page1Ready) {
             if (!page1Ready) {
                 setStatus('Route Workflow dialog did not appear.');
+                finishRoute();
                 return;
             }
             setStatus('Dialog open. Checking password...');
@@ -3635,6 +3707,7 @@
                 var dw = findDialogWin('m66ed908c-tb') || findDialogWin('m11eaa01a-tb');
                 if (!dw) {
                     setStatus('Could not find dialog frame. Fill manually.');
+                    finishRoute();
                     return;
                 }
 
@@ -3653,6 +3726,7 @@
                     var dw2 = findDialogWin('m66ed908c-tb') || findDialogWin('m11eaa01a-tb');
                     if (!dw2) {
                         setStatus('Could not find dialog frame at submit time. Fill manually.');
+                        finishRoute();
                         return;
                     }
 
@@ -3679,6 +3753,7 @@
                         setStatus('Page 1 submitted. Waiting for action page...');
                     } catch (e) {
                         setStatus('Could not auto-submit page 1: ' + e.message + '. Fill manually.');
+                        finishRoute();
                         return;
                     }
 
@@ -3687,6 +3762,7 @@
                     }, 8000, function(page2Ready) {
                         if (!page2Ready) {
                             setStatus('Action page did not appear. Select action manually.');
+                            finishRoute();
                             return;
                         }
 
@@ -3707,6 +3783,7 @@
                             var p2 = findPage2Frame();
                             if (!p2) {
                                 setStatus('Cannot find action page frame. Select manually.');
+                                finishRoute();
                                 return;
                             }
 
@@ -3716,6 +3793,7 @@
                                     var p2r = findPage2Frame();
                                     if (!p2r) {
                                         setStatus('Lost page 2 frame.');
+                                        finishRoute();
                                         return;
                                     }
                                     try {
@@ -3731,6 +3809,7 @@
                                         ].join('\n'));
                                     } catch (e) {
                                         setStatus('Could not select Return radio: ' + e.message);
+                                        finishRoute();
                                         return;
                                     }
                                     setTimeout(function() {
@@ -3745,6 +3824,7 @@
                                             }, 300);
                                         } else {
                                             setStatus('Return radio did not stick — select manually.');
+                                            finishRoute();
                                         }
                                     }, 400);
                                 }
@@ -3759,17 +3839,20 @@
                                     }, 4000, function(memoReady) {
                                         if (!memoReady) {
                                             setStatus('Return selected. Memo field not found — fill manually.');
+                                            finishRoute();
                                             return;
                                         }
                                         var p2c = findPage2Frame();
                                         if (!p2c) {
                                             setStatus('Lost page 2 frame. Fill memo manually.');
+                                            finishRoute();
                                             return;
                                         }
                                         try {
                                             p2c.win.__wo_pending_memo = retMsg;
                                         } catch (e) {
                                             setStatus('Cannot write to dialog frame. Fill memo manually.');
+                                            finishRoute();
                                             return;
                                         }
                                         try {
@@ -3793,6 +3876,7 @@
                                         } catch (e) {
                                             setStatus('Could not fill memo: ' + e.message + '. Fill manually.');
                                         }
+                                        finishRoute();
                                     });
                                 }
 
@@ -3812,6 +3896,7 @@
                                     ].join('\n'));
                                 } catch (e) {}
                                 setStatus('Approve selected. Click OK to complete.');
+                                finishRoute();
                             }
 
                         }, 1500);
@@ -3830,6 +3915,7 @@
                 }, 90000, function(pwFilled) {
                     if (!pwFilled) {
                         setStatus('Timed out waiting for password. Fill manually.');
+                        finishRoute();
                         return;
                     }
                     submitPage1();
@@ -4197,6 +4283,7 @@
         bodyEl.addEventListener('scroll', updateScrollShadows);
         new ResizeObserver(updateScrollShadows).observe(bodyEl);
         panel.querySelector('#__wo_rescan').onclick = function() {
+            if (actionsBusy()) return;
             runScan(render);
         };
         panel.querySelector('#__wo_setup').onclick = openSetup;
@@ -4896,11 +4983,16 @@
 
         var returnBtn = document.createElement('button');
         returnBtn.type = 'button';
+        returnBtn.id = '__wo_action_return';
         returnBtn.textContent = '↩ Return';
         returnBtn.className = 'wo-btn wo-btn-danger wo-btn-block';
+        returnBtn.disabled = actionsBusy();
         returnBtn.onclick = function() {
+            if (actionsBusy()) return;
             woConfirm('Return this Work Order?\n\nThe return message will be filled into the Memo field.').then(function(ok) {
-                if (!ok) return;
+                if (!ok || actionsBusy()) return;
+                routing = true;
+                setActionsLocked(true);
                 routeWorkflow('return');
             });
         };
@@ -4909,6 +5001,7 @@
         if (betaRouteOn) {
             var fixBtn = document.createElement('button');
             fixBtn.type = 'button';
+            fixBtn.id = '__wo_action_fix';
             // A color emoji glyph here (the previous 🔧) renders in the
             // system emoji font, visibly mismatched against the button's own
             // Segoe UI Semibold text — same reasoning as every other icon in
@@ -4919,7 +5012,9 @@
             // "Fix" is a much shorter label and doesn't need that much room.
             fixBtn.className = 'wo-btn wo-btn-warn';
             fixBtn.style.cssText = 'flex:0 0 auto;padding:9px 16px;font-size:12.5px;';
+            fixBtn.disabled = actionsBusy();
             fixBtn.onclick = function() {
+                if (actionsBusy()) return;
                 runScan(render, 'fix');
             };
             actionRow.appendChild(fixBtn);
@@ -4927,11 +5022,16 @@
 
         var approveBtn = document.createElement('button');
         approveBtn.type = 'button';
+        approveBtn.id = '__wo_action_approve';
         approveBtn.textContent = '✓ Approve';
         approveBtn.className = 'wo-btn wo-btn-pass wo-btn-block';
+        approveBtn.disabled = actionsBusy();
         approveBtn.onclick = function() {
+            if (actionsBusy()) return;
             woConfirm('Approve this Work Order?\n\nThis will route with Complete Review selected.').then(function(ok) {
-                if (!ok) return;
+                if (!ok || actionsBusy()) return;
+                routing = true;
+                setActionsLocked(true);
                 routeWorkflow('approve');
             });
         };
@@ -6111,15 +6211,28 @@
         })();
 
         var content = modal.querySelector('#__s_content');
-        // Whole-object snapshot rather than per-field dirty flags — every
-        // tab mutates cfg/scan/st in place via this same closure, so a
-        // straight JSON comparison against the snapshot taken at open time
-        // automatically covers any setting added later with no extra
-        // wiring required.
+        // Only channel/pinnedVersion are actually staged until Save & Apply
+        // (see the #__st_channel handler's comment) — every other st.*
+        // field (betaEnabled, autoScan, autoBackup, tabDisplayModes, the
+        // update-prefs checkboxes, etc.) calls saveSettingsCfg() itself the
+        // moment it changes. Diffing the WHOLE st object against the
+        // open-time snapshot would flag those already-saved fields as
+        // pending too — e.g. flipping a Beta toggle would ungrey Save and
+        // its tooltip would claim "Will save changes to: Settings" for a
+        // change that was already persisted.
+        function deferredSettingsSlice(s) {
+            return {
+                channel: s.channel,
+                pinnedVersion: s.pinnedVersion
+            };
+        }
+        // Whole-object snapshot for cfg/scan (every tab mutates those in
+        // place via this same closure with no auto-save of its own), but
+        // only the deferred slice for st — see deferredSettingsSlice().
         var __woSetupSnapshot = JSON.stringify({
             cfg: cfg,
             scan: scan,
-            st: st
+            st: deferredSettingsSlice(st)
         });
         var saveBtn = modal.querySelector('#__s_save');
 
@@ -6127,7 +6240,7 @@
             return JSON.stringify({
                 cfg: cfg,
                 scan: scan,
-                st: st
+                st: deferredSettingsSlice(st)
             }) !== __woSetupSnapshot;
         }
 
@@ -6152,7 +6265,9 @@
         // Coarse per-area diff (not per-field) for the Save button's hover
         // tooltip — variables are excluded since those already persist
         // immediately on every edit (see saveVars() call sites) and aren't
-        // part of what this button applies.
+        // part of what this button applies. Settings only compares the
+        // deferred slice (channel/pinnedVersion) for the same reason — see
+        // deferredSettingsSlice()'s comment.
         function setupChangedAreasText() {
             var before;
             try {
@@ -6164,7 +6279,7 @@
             if (JSON.stringify(cfg.rules) !== JSON.stringify(before.cfg.rules)) areas.push('Rules');
             if (JSON.stringify(cfg.groups) !== JSON.stringify(before.cfg.groups)) areas.push('Groups');
             if (JSON.stringify(scan) !== JSON.stringify(before.scan)) areas.push('Scan targets & actions');
-            if (JSON.stringify(st) !== JSON.stringify(before.st)) areas.push('Settings');
+            if (JSON.stringify(deferredSettingsSlice(st)) !== JSON.stringify(before.st)) areas.push('Update channel/version pin');
             if (!areas.length) return 'No changes to save.';
             return 'Will save changes to:\n' + areas.map(function(a) {
                 return '• ' + a;
@@ -8814,7 +8929,7 @@
                         }
                     }
                     // Group by major.minor, preserving remoteV.versions' existing
-                    // newest-first order. Each line gets a floating "X.Y.x"
+                    // newest-first order. Each line gets a floating "X.Y"
                     // option — always tracks that line's newest patch — plus
                     // every exact patch underneath for the "the newest patch
                     // broke something, freeze at the previous one" rollback case.
@@ -8843,7 +8958,7 @@
                     lines.forEach(function(key) {
                         var floatOpt = document.createElement('option');
                         floatOpt.value = key;
-                        floatOpt.textContent = key + '.x';
+                        floatOpt.textContent = key;
                         if (st.pinnedVersion === key) floatOpt.selected = true;
                         pinSel.appendChild(floatOpt);
                         byLine[key].forEach(function(vstr) {
