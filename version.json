@@ -1,23 +1,34 @@
 {
-  "latest": "0.23.2",
+  "latest": "0.24.0",
   "channels": {
-    "stable": "0.23.2",
-    "beta": "0.23.2"
+    "stable": "0.24.0",
+    "beta": "0.24.0"
   },
   "versions": [
     {
       "version": "0.24.0",
-      "name": "Formula Autocomplete, Save/Close UX, Version Rollback",
-      "grant": "dev",
+      "name": "Formula Autocomplete, Custom Dialogs, Tables Tab, Text Cleanup",
       "changes": [
         "New: every formula/condition field (Rules, Variables, Scan targets/actions, Row Detail Fields) now offers F(/T(/V( completion (fields, tables, variables) and an Excel-style signature tooltip for every helper function (col, has, hours, hoursBetween, oneOf, contains, matches, isEmpty, notEmpty, maxLaborHours) as you type.",
         "New: message boxes (Short/Long/custom return message) show an inline warning if they contain a formula/variable call that isn't wrapped in {{ }} - that text would otherwise just show up literally instead of being evaluated.",
+        "New: a Tables Setup tab lists every table referenced by Groups/Scan and lets you give it a friendly display name (the downtime history table ships with one built in) - the raw table stays untouched, this only changes what's displayed.",
+        "New: every delete action (Rules, Groups, Variables, Scan targets, Profiles) now asks for confirmation first.",
+        "Every native browser alert/confirm/prompt popup has been replaced with the tool's own dark-themed dialogs, matching the rest of the UI.",
+        "Return, Approve, Fix, and Scan now share a busy lock - the buttons dim and hotkeys no-op while one of them is already running, closing a real risk of two actions firing at once (e.g. Approve firing mid-Return).",
+        "Reduced text throughout Settings, buttons, confirmation dialogs, tooltips, and status messages for a more compact interface - colors/icons now carry meaning that used to be repeated in words (e.g. a green check no longer also says \"OK\", an N/A rule dims instead of showing \"N/A\" text).",
+        "Default group/rule titles are shorter on brand-new installs (e.g. \"Work Order Summary\" - \"Summary\") - existing configs are unaffected and can still be renamed freely in Setup.",
         "Setup's Save & Apply button is now just \"Save\" - hovering it shows which areas (Rules/Groups/Scan/Settings) actually have pending changes.",
         "Closing Setup with unsaved changes now shows a custom Cancel/Save/Discard & Exit dialog instead of just closing silently.",
         "The kebab menu's tooltip-editor item now reads \"Set Tooltip\" when an entry has none yet, \"Edit Tooltip\" once one exists.",
-        "Halved the visual gap between the Route symbol and the Return button.",
+        "The update-available banner has a new button to re-enable automatic (or auto-patch-only) updates in one click, if you'd previously turned that off.",
+        "Removed the \"(var)\" suffix from variable field labels - the blue label color already distinguishes them from real Maximo fields.",
+        "Fixed: the panel could get stuck reopening collapsed on every page load after collapsing it once - it now always opens expanded (the collapse button/hotkey still work for the rest of that session).",
+        "Fixed: the Save button's dirty-tracking flagged an already-saved Settings change (e.g. toggling a Beta feature) as still pending.",
+        "Fixed: switching profiles, saving as a new profile, or starting a blank profile could silently drop unsaved edits made in Setup.",
+        "Fixed: the version picker's \"Latest\" option reflected your own dev/beta access level rather than the update channel you actually had selected, so it could show a version your channel wouldn't actually install.",
         "Update checking: if a pinned or channel-tracked version gets trimmed from this file's list, the tool now falls back to the nearest still-available version instead of erroring or silently jumping - always reported on the status line, never silent.",
-        "Version picker: entries can now be gated to a specific grant (dev/beta) and the \"Latest\" option reflects your own access level instead of always showing the plain-user latest."
+        "Version picker entries can now be gated to a specific grant (dev/beta).",
+        "Halved the visual gap between the Route symbol and the Return button."
       ]
     },
     {
