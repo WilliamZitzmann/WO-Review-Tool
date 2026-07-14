@@ -1134,7 +1134,8 @@ rows.forEach(<span class="kw">function</span>(r) {
   </div>
 
   <h3>Table &amp; Dialog Capture</h3>
-  <p>When a scan target's Wait Table (or a group's Linked Table) names a table, the tool reads its rows directly off the page, available in formulas via <code>T('Table Name')</code>, <code>rowCount(...)</code>, <code>col(...)</code>, and <code>has(...)</code> (see the <a href="#s17">Formula Reference</a>). A Dialog-type target opens a Maximo popup instead of switching tabs, captures data the same way, then dismisses it automatically — you won't see it stay open.</p>
+  <p>When a scan target's Wait Table (or a group's Linked Table) names a table, the tool reads its rows directly off the page, available in formulas via <code>T('Table Name')</code>, <code>rowCount(...)</code>, <code>col(...)</code>, <code>has(...)</code>, and <code>lookup(...)</code> (see the <a href="#s17">Formula Reference</a>). A Dialog-type target opens a Maximo popup instead of switching tabs, captures data the same way, then dismisses it automatically — you won't see it stay open.</p>
+  <p>Setup's <b>Tables</b> tab lists every table your Groups/Scan config references and lets you give it a friendlier display name. It also lets you build a <b>custom table</b> — small hand-entered lookup data that didn't come from a Maximo scan (e.g. part numbers, cost centers) — which formulas can read with the exact same <code>T()</code>/<code>col()</code>/<code>has()</code>/<code>lookup()</code> functions as a scanned table.</p>
 </section>
 
 <!-- ══════════════════════════════════════════════════ -->
@@ -1319,6 +1320,7 @@ rows.forEach(<span class="kw">function</span>(r) {
       <tr><td><code>rowCount(table)</code></td><td>Number of rows in a captured table</td></tr>
       <tr><td><code>col(table, colName)</code></td><td>Array of values from one column across all rows</td></tr>
       <tr><td><code>has(table, colName, value)</code></td><td><code>true</code> if any row has that value in that column</td></tr>
+      <tr><td><code>lookup(table, keyCol, keyVal, returnCol)</code></td><td>VLOOKUP-style: finds the first row where <code>keyCol</code> equals <code>keyVal</code>, returns its <code>returnCol</code> value (or <code>''</code> if nothing matches). Works on a scanned table or a hand-entered custom table (Setup &gt; Tables)</td></tr>
       <tr><td><code>hours(str)</code></td><td>Parses an <code>HH:MM</code> or decimal string into a numeric hours value</td></tr>
       <tr><td><code>hoursBetween(a, b)</code></td><td>Hours between two datetime strings (format <code>DD/MM/YYYY HH:MM</code>)</td></tr>
       <tr><td><code>oneOf(val, arr)</code></td><td><code>true</code> if <code>val</code> is in the array</td></tr>

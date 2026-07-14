@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.24.0';
+    var TOOL_VERSION = '0.25.0';
     // Format YYDDD.HHMMz (2-digit year, day-of-year, UTC hour+minute) —
     // computed via `date -u +"%y%j.%H%M"z` and substituted in right before
     // every commit that touches this file, on ANY channel/repo (unlike
@@ -32,7 +32,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26195.1505z';
+    var BUILD_ID = '26195.1951z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -359,7 +359,8 @@
             fail: { short: '', long: [], returnMode: 'none', returnCustom: '' },
             warn: { short: '', long: [], returnMode: 'none', returnCustom: '' }
         }],
-        tableNames: {}
+        tableNames: {},
+        customTables: {}
     };
     var DEFAULT_SCAN = {
         woTabId: 'mbf28cd64-tab',
@@ -898,8 +899,16 @@
             return fk ? data.fields[fk] : '';
         }
 
+        // Scanned tables (data.tables, captured from the live Maximo DOM)
+        // take priority; a custom table (cfg.customTables, hand-entered in
+        // the Tables Setup tab) only fills in when no scanned table exists
+        // under that same id — this is what makes a custom lookup table
+        // resolve even pre-scan (data.tables is empty before the first
+        // scan), since customTables comes from config, not the cache.
         function T(t) {
-            return data.tables[t] || [];
+            if (data.tables && data.tables.hasOwnProperty(t)) return data.tables[t];
+            var custom = getCfg().customTables || {};
+            return (custom[t] && custom[t].rows) || [];
         }
         return {
             F: F,
@@ -916,6 +925,13 @@
                 return T(t).some(function(r) {
                     return (r[c] || '').indexOf(v) >= 0;
                 });
+            },
+            lookup: function(t, keyCol, keyVal, returnCol) {
+                var rows = T(t);
+                for (var i = 0; i < rows.length; i++) {
+                    if (String(rows[i][keyCol]) === String(keyVal)) return rows[i][returnCol];
+                }
+                return '';
             },
             isEmpty: isEmptyFn,
             notEmpty: notEmptyFn,
@@ -940,11 +956,11 @@
         };
     }
 
-    var ARGN = ['F', 'T', 'rowCount', 'col', 'has', 'isEmpty', 'notEmpty', 'hours', 'hoursBetween', 'oneOf', 'contains', 'matches', 'maxLaborHours', 'V'];
+    var ARGN = ['F', 'T', 'rowCount', 'col', 'has', 'lookup', 'isEmpty', 'notEmpty', 'hours', 'hoursBetween', 'oneOf', 'contains', 'matches', 'maxLaborHours', 'V'];
 
     function runVariable(formula, data) {
         var c = buildCtx(data);
-        var av = [c.F, c.T, c.rowCount, c.col, c.has, c.isEmpty, c.notEmpty, c.hours, c.hoursBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.V];
+        var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.isEmpty, c.notEmpty, c.hours, c.hoursBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.V];
         var fn;
         try {
             fn = Function.apply(null, ARGN.concat(['return (' + formula + ');']));
@@ -974,7 +990,7 @@
 
     function runFormula(formula, data) {
         var c = buildCtx(data);
-        var av = [c.F, c.T, c.rowCount, c.col, c.has, c.isEmpty, c.notEmpty, c.hours, c.hoursBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.V];
+        var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.isEmpty, c.notEmpty, c.hours, c.hoursBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.V];
         var fn;
         try {
             fn = Function.apply(null, ARGN.concat(['return (' + formula + ');']));
@@ -2756,6 +2772,32 @@
     // collapsed). Reset to null at the top of runScan() so a fresh scan
     // always starts from a freshly computed message again.
     var currentReturnMsg = null;
+
+    // Tells a group's empty/errored table apart from an intentionally-
+    // skipped one: finds the scan step (if any) whose waitTable matches this
+    // table id, then reads that step's own scanLog outcome for the run that
+    // just completed. 'skipped (condition false)' means the step never ran
+    // this time on purpose — not a capture failure — so the caller should
+    // show plain "No rows", not an error. Same for a step that reported 'OK'
+    // but the table came back empty anyway (a legitimately empty result,
+    // e.g. no downtime logged this run). Only TIMEOUT/FAILED — or no
+    // matching step at all, since that means this table isn't gated by any
+    // condition and 0 rows genuinely is unexpected — should read as an error.
+    function tableRunStatus(tableId, scanCfg) {
+        var step = null;
+        var steps = (scanCfg && scanCfg.scans) || [];
+        for (var i = 0; i < steps.length; i++) {
+            if (steps[i].waitTable === tableId) {
+                step = steps[i];
+                break;
+            }
+        }
+        if (!step) return 'unknown';
+        for (var j = scanLog.length - 1; j >= 0; j--) {
+            if (scanLog[j].title === step.title) return scanLog[j].result;
+        }
+        return 'unknown';
+    }
     window.__wo_laborTypeCache = [];
 
     // mode is 'scan' (default) or 'fix' — Fix is the beta_1-only rescan
@@ -2782,7 +2824,7 @@
                 var val = '';
                 try {
                     var c = buildCtx(cache);
-                    var av = [c.F, c.T, c.rowCount, c.col, c.has, c.isEmpty, c.notEmpty, c.hours, c.hoursBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.V];
+                    var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.isEmpty, c.notEmpty, c.hours, c.hoursBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.V];
                     var fn = Function.apply(null, ARGN.concat(['return (' + action.value + ');']));
                     val = fn.apply(null, av);
                     if (val == null) val = '';
@@ -3000,7 +3042,7 @@
         return msg.replace(/\{\{([\s\S]+?)\}\}/g, function(_, expr) {
             try {
                 var c = buildCtx(data);
-                var av = [c.F, c.T, c.rowCount, c.col, c.has, c.isEmpty, c.notEmpty, c.hours, c.hoursBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.V];
+                var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.isEmpty, c.notEmpty, c.hours, c.hoursBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.V];
 
                 var fn = Function.apply(null, ARGN.concat(['return (' + expr.trim() + ');']));
                 var r = fn.apply(null, av);
@@ -4471,7 +4513,8 @@
         if (!panel) buildPanel();
         renderScanLog();
         var cfg = getCfg(),
-            gs = getGS();
+            gs = getGS(),
+            scanCfgForTables = getScan();
         var results = {};
         cfg.rules.forEach(function(r) {
             var res = runFormula(r.formula, cache);
@@ -4755,8 +4798,16 @@
             if (group.table) {
                 var rows = cache.tables[group.table] || [];
                 var err = cache.tableErrors[group.table];
+                var showTableErr = false;
                 if (err && !rows.length) {
-                    bodyHtml += '<div style="color:var(--wo-fail);margin-top:4px;font-size:11px;">' + err + '</div>';
+                    var runStatus = tableRunStatus(group.table, scanCfgForTables);
+                    // 'skipped ...' (condition false, intentional) and 'OK ...'
+                    // (step ran, table's just genuinely empty) both fall through
+                    // to the plain "No rows" branch below, not an error.
+                    showTableErr = runStatus === 'unknown' || runStatus.indexOf('TIMEOUT') === 0 || runStatus.indexOf('FAILED') === 0;
+                }
+                if (showTableErr) {
+                    bodyHtml += '<div style="color:var(--wo-fail);margin-top:4px;font-size:11px;">Couldn\'t load this table — try rescanning.</div>';
                 } else if (rows.length === 0) {
                     bodyHtml += '<div style="color:var(--wo-muted);margin-top:4px;font-size:11px;">No rows</div>';
                 } else {
@@ -5173,6 +5224,14 @@
             var e = cfg[k];
             if (e.type === 'table-column') t[e.tableTitle] = 1;
             else f.push(e.tab + ' :: ' + e.label);
+        });
+        // Custom lookup tables (Tables tab, cfg.customTables) are just as
+        // valid a T()/lookup() target as a scanned one, so they belong in
+        // the same list — the Groups Table dropdown and formula-assist
+        // autocomplete both read this one list without knowing/caring which
+        // kind a given entry is.
+        Object.keys(getCfg().customTables || {}).forEach(function(id) {
+            t[id] = 1;
         });
         return {
             fields: f.sort(),
@@ -6362,6 +6421,7 @@
             if (JSON.stringify(cfg.rules) !== JSON.stringify(before.cfg.rules)) areas.push('Rules');
             if (JSON.stringify(cfg.groups) !== JSON.stringify(before.cfg.groups)) areas.push('Groups');
             if (JSON.stringify(cfg.tableNames || {}) !== JSON.stringify(before.cfg.tableNames || {})) areas.push('Table names');
+            if (JSON.stringify(cfg.customTables || {}) !== JSON.stringify(before.cfg.customTables || {})) areas.push('Custom tables');
             if (JSON.stringify(scan) !== JSON.stringify(before.scan)) areas.push('Scan targets & actions');
             if (JSON.stringify(deferredSettingsSlice(st)) !== JSON.stringify(before.st)) areas.push('Update channel/version pin');
             if (!areas.length) return 'No changes to save.';
@@ -7088,6 +7148,7 @@
             rowCount: { sig: "rowCount(table)", args: ["table — captured table name"], desc: "Number of rows in a captured table." },
             col: { sig: "col(table, colName)", args: ["table — captured table name", "colName — column header"], desc: "Array of values from one column across all rows." },
             has: { sig: "has(table, colName, value)", args: ["table — captured table name", "colName — column header", "value — value to look for"], desc: "true if any row has that value in that column." },
+            lookup: { sig: "lookup(table, keyCol, keyVal, returnCol)", args: ["table — captured table name, or a custom table from the Tables tab", "keyCol — column to search for a match", "keyVal — value to match", "returnCol — column to return from the matching row"], desc: "VLOOKUP-style: finds the first row where keyCol equals keyVal, returns its returnCol value (or '' if no row matches)." },
             hours: { sig: "hours(str)", args: ["str — \"HH:MM\" or decimal string"], desc: "Parses into a numeric hours value." },
             hoursBetween: { sig: "hoursBetween(a, b)", args: ["a — start datetime \"DD/MM/YYYY HH:MM\"", "b — end datetime, same format"], desc: "Hours between two datetime strings." },
             oneOf: { sig: "oneOf(val, arr)", args: ["val — value to check", "arr — array of allowed values"], desc: "true if val is in the array." },
@@ -7167,7 +7228,7 @@
 
             function completionSource(func) {
                 if (func === 'F') return opts.fields;
-                if (func === 'T') return opts.tables;
+                if (func === 'T' || func === 'lookup') return opts.tables;
                 if (func === 'V') return getVars().map(function(v) {
                     return v.label;
                 });
@@ -8663,6 +8724,7 @@
         function tablesTab() {
             content.innerHTML = '';
             if (!cfg.tableNames) cfg.tableNames = {};
+            if (!cfg.customTables) cfg.customTables = {};
 
             // id -> { groups: [title...], scans: [title...] }
             var usage = {};
@@ -8684,16 +8746,15 @@
                 });
             });
 
-            var ids = Object.keys(usage).sort();
-            if (!ids.length) {
+            var scannedIds = Object.keys(usage).sort();
+            if (!scannedIds.length) {
                 var emptyDiv = document.createElement('div');
-                emptyDiv.style.cssText = 'color:var(--wo-muted);font-size:11px;';
-                emptyDiv.textContent = 'No tables referenced yet — set one in a Group\'s Table field or a Scan target\'s Wait for table option.';
+                emptyDiv.style.cssText = 'color:var(--wo-muted);font-size:11px;margin-bottom:10px;';
+                emptyDiv.textContent = 'No scanned tables referenced yet — set one in a Group\'s Table field or a Scan target\'s Wait for table option.';
                 content.appendChild(emptyDiv);
-                return;
             }
 
-            ids.forEach(function(id) {
+            scannedIds.forEach(function(id) {
                 var u = usage[id];
                 var box = document.createElement('div');
                 box.className = 'wo-card';
@@ -8717,6 +8778,154 @@
                     else delete cfg.tableNames[id];
                 };
             });
+
+            // ── Custom tables — hand-entered lookup data, not scraped from
+            // Maximo. Same T()/col()/has()/lookup() access as a scanned
+            // table (see buildCtx's T() fallback), just sourced from config
+            // instead of the DOM. The id is fixed at creation (it's what
+            // formulas reference) - only columns/rows/values are editable
+            // afterward, to avoid silently breaking a formula that already
+            // references the id.
+            var customHeader = document.createElement('div');
+            customHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin:14px 0 8px;';
+            customHeader.innerHTML = '<span class="wo-rule-title">Custom Tables</span>' +
+                '<button type="button" id="__ct_add" class="wo-btn wo-btn-primary" style="font-size:11px;">+ Add Custom Table</button>';
+            content.appendChild(customHeader);
+
+            var customIds = Object.keys(cfg.customTables).sort();
+            if (!customIds.length) {
+                var emptyCustom = document.createElement('div');
+                emptyCustom.style.cssText = 'color:var(--wo-muted);font-size:11px;';
+                emptyCustom.textContent = 'None yet — use this for lookup data that doesn\'t come from a Maximo scan (e.g. part numbers, cost centers).';
+                content.appendChild(emptyCustom);
+            }
+
+            customIds.forEach(function(id) {
+                var t = cfg.customTables[id];
+                if (!t.columns || !t.columns.length) t.columns = ['Column 1'];
+                if (!t.rows) t.rows = [];
+
+                var box = document.createElement('div');
+                box.className = 'wo-card';
+                var head = '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
+                    '<code class="wo-mono" style="font-size:11px;">' + String(id).replace(/</g, '&lt;') + '</code>' +
+                    '<button type="button" class="__ct_del wo-btn-ghost wo-kebab-item-danger" aria-label="Delete table">' + TRASH_SVG + '</button>' +
+                    '</div>';
+
+                var tableHtml = '<div class="wo-table-wrap" style="margin-top:6px;"><table class="wo-table"><tr>';
+                t.columns.forEach(function(col, ci) {
+                    tableHtml += '<th style="padding:2px;"><div style="display:flex;align-items:center;gap:3px;">' +
+                        '<input type="text" data-ct-col="' + ci + '" value="' + String(col).replace(/"/g, '&quot;') + '" style="width:100%;font-size:10.5px;">' +
+                        (t.columns.length > 1 ? '<button type="button" class="__ct_delcol" data-col="' + ci + '" aria-label="Remove column" style="flex:0 0 auto;">✕</button>' : '') +
+                        '</div></th>';
+                });
+                tableHtml += '<th style="width:1%;"></th></tr>';
+                t.rows.forEach(function(row, ri) {
+                    tableHtml += '<tr>';
+                    t.columns.forEach(function(col, ci) {
+                        tableHtml += '<td style="padding:2px;"><input type="text" data-ct-cell data-row="' + ri + '" data-col-idx="' + ci + '" value="' + String(row[col] || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;"></td>';
+                    });
+                    tableHtml += '<td><button type="button" class="__ct_delrow" data-row="' + ri + '" aria-label="Remove row" style="flex:0 0 auto;">' + TRASH_SVG + '</button></td></tr>';
+                });
+                tableHtml += '</table></div>' +
+                    '<div style="margin-top:6px;display:flex;gap:6px;">' +
+                    '<button type="button" class="__ct_addcol wo-btn" style="font-size:11px;">+ Column</button>' +
+                    '<button type="button" class="__ct_addrow wo-btn" style="font-size:11px;">+ Row</button>' +
+                    '</div>';
+
+                box.innerHTML = head + tableHtml;
+                content.appendChild(box);
+
+                box.querySelector('.__ct_del').onclick = function() {
+                    woConfirm('Delete custom table "' + id + '"? Any formula referencing it will start returning empty results.').then(function(ok) {
+                        if (!ok) return;
+                        delete cfg.customTables[id];
+                        tablesTab();
+                    });
+                };
+                box.querySelectorAll('[data-ct-col]').forEach(function(input) {
+                    input.oninput = function(e) {
+                        var ci = +e.target.getAttribute('data-ct-col');
+                        var oldName = t.columns[ci];
+                        var newName = e.target.value;
+                        t.columns[ci] = newName;
+                        // Rows are keyed by column name, not index - carry each
+                        // row's existing value across the rename so retyping
+                        // the header doesn't silently blank every cell in it.
+                        if (oldName !== newName) {
+                            t.rows.forEach(function(row) {
+                                if (row.hasOwnProperty(oldName)) {
+                                    row[newName] = row[oldName];
+                                    delete row[oldName];
+                                }
+                            });
+                        }
+                    };
+                });
+                box.querySelectorAll('.__ct_delcol').forEach(function(btn) {
+                    btn.onclick = function() {
+                        var ci = +btn.getAttribute('data-col');
+                        var name = t.columns[ci];
+                        t.columns.splice(ci, 1);
+                        t.rows.forEach(function(row) {
+                            delete row[name];
+                        });
+                        tablesTab();
+                    };
+                });
+                box.querySelectorAll('[data-ct-cell]').forEach(function(input) {
+                    input.oninput = function(e) {
+                        var ri = +e.target.getAttribute('data-row');
+                        // Resolved by column INDEX, not a name baked into the
+                        // markup at render time - a column rename mutates
+                        // t.columns in place without a full re-render (so
+                        // typing isn't interrupted), so a name captured at
+                        // render time would go stale the moment the header
+                        // was renamed and this cell was edited afterward.
+                        var ci = +e.target.getAttribute('data-col-idx');
+                        var col = t.columns[ci];
+                        t.rows[ri][col] = e.target.value;
+                    };
+                });
+                box.querySelectorAll('.__ct_delrow').forEach(function(btn) {
+                    btn.onclick = function() {
+                        var ri = +btn.getAttribute('data-row');
+                        t.rows.splice(ri, 1);
+                        tablesTab();
+                    };
+                });
+                box.querySelector('.__ct_addcol').onclick = function() {
+                    var n = 1;
+                    while (t.columns.indexOf('Column ' + n) >= 0) n++;
+                    t.columns.push('Column ' + n);
+                    tablesTab();
+                };
+                box.querySelector('.__ct_addrow').onclick = function() {
+                    t.rows.push({});
+                    tablesTab();
+                };
+            });
+
+            customHeader.querySelector('#__ct_add').onclick = function() {
+                woPrompt('Table ID (used in formulas via T()/lookup() — letters, numbers, underscores only):').then(function(id) {
+                    if (!id) return;
+                    id = id.trim();
+                    if (!id) return;
+                    if (!/^[A-Za-z0-9_]+$/.test(id)) {
+                        woAlert('Table ID can only contain letters, numbers, and underscores.');
+                        return;
+                    }
+                    if (cfg.customTables[id] || usage[id]) {
+                        woAlert('A table with that ID already exists.');
+                        return;
+                    }
+                    cfg.customTables[id] = {
+                        columns: ['Column 1'],
+                        rows: [{}]
+                    };
+                    tablesTab();
+                });
+            };
         }
 
 
@@ -9392,6 +9601,7 @@
                 '<option value="Suggestion">Suggestion</option>' +
                 '</select></div>' +
                 '<textarea id="__fb_body" placeholder="What happened, or what would help?" style="width:100%;height:140px;"></textarea>' +
+                '<label style="display:block;margin-top:6px;font-size:11px;color:var(--wo-muted);"><input type="checkbox" id="__fb_pii"> Include my Maximo name/username/email</label>' +
                 '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;">' +
                 '<button id="__fb_send" type="button" class="wo-btn wo-btn-primary">Send</button>' +
                 '<span id="__fb_status" style="color:var(--wo-muted);font-size:10px;"></span>' +
@@ -9403,6 +9613,7 @@
             div.querySelector('#__fb_send').onclick = function() {
                 var type = div.querySelector('#__fb_type').value;
                 var body = div.querySelector('#__fb_body').value.trim();
+                var includePii = div.querySelector('#__fb_pii').checked;
                 var statusSpan = div.querySelector('#__fb_status');
                 var sendBtn = div.querySelector('#__fb_send');
                 if (!body) {
@@ -9417,9 +9628,9 @@
                     '\nBrowser: ' + navigator.userAgent +
                     '\nURL: ' + location.href;
 
-                function fallbackToEmail() {
+                function fallbackToEmail(fullContext) {
                     var subject = 'WO Review Tool ' + type + ' report';
-                    var mailBody = body + '\n\n---\n' + context;
+                    var mailBody = body + '\n\n---\n' + fullContext;
                     window.location.href = 'mailto:' + SUPPORT_EMAIL +
                         '?subject=' + encodeURIComponent(subject) +
                         '&body=' + encodeURIComponent(mailBody);
@@ -9427,26 +9638,40 @@
 
                 sendBtn.disabled = true;
                 statusSpan.textContent = 'Sending...';
-                getWorkerAccessToken().then(function(token) {
-                    return xhrPostJSON(WORKER_BASE_URL + '/feedback', {
-                        token: token,
-                        type: type,
-                        body: body,
-                        context: context
-                    });
-                }).then(function(res) {
-                    sendBtn.disabled = false;
-                    if (res && res.ok) {
-                        statusSpan.textContent = 'Sent — thank you.';
-                        div.querySelector('#__fb_body').value = '';
-                    } else {
-                        statusSpan.textContent = 'Could not file report — opening an email draft instead.';
-                        fallbackToEmail();
+                // Whoami (name/username/email) is opt-in only, per the
+                // checkbox — never fetched or attached unless the user
+                // explicitly asked for it on this specific report.
+                var whoamiPromise = includePii ? readWhoamiCanonical().catch(function() {
+                    return null;
+                }) : Promise.resolve(null);
+                whoamiPromise.then(function(who) {
+                    var fullContext = context;
+                    if (who) {
+                        fullContext += '\nReporter: ' + (who.displayName || who.username || '') +
+                            (who.username ? ' (' + who.username + ')' : '') +
+                            (who.email ? ' <' + who.email + '>' : '');
                     }
-                }).catch(function() {
-                    sendBtn.disabled = false;
-                    statusSpan.textContent = 'Could not reach the report system — opening an email draft instead.';
-                    fallbackToEmail();
+                    getWorkerAccessToken().then(function(token) {
+                        return xhrPostJSON(WORKER_BASE_URL + '/feedback', {
+                            token: token,
+                            type: type,
+                            body: body,
+                            context: fullContext
+                        });
+                    }).then(function(res) {
+                        sendBtn.disabled = false;
+                        if (res && res.ok) {
+                            statusSpan.textContent = 'Sent — thank you.';
+                            div.querySelector('#__fb_body').value = '';
+                        } else {
+                            statusSpan.textContent = 'Could not file report — opening an email draft instead.';
+                            fallbackToEmail(fullContext);
+                        }
+                    }).catch(function() {
+                        sendBtn.disabled = false;
+                        statusSpan.textContent = 'Could not reach the report system — opening an email draft instead.';
+                        fallbackToEmail(fullContext);
+                    });
                 });
             };
         }

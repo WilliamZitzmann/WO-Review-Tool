@@ -344,6 +344,50 @@ raw id so scan logic never has to care about the friendly name at all.
   (' + t + ')'` when the friendly name differs from the raw id, so the raw
   identifier stays visible/searchable even once renamed.
 
+### 4.7 Custom tables (`cfg.customTables`) + `lookup()`
+
+Not every lookup table comes from a Maximo scan — `cfg.customTables` (added
+alongside the Tables tab work, same tab) is a per-profile registry of
+hand-entered tables (part numbers, cost centers, anything static) that
+formulas can read exactly like a scanned one.
+- Shape: `cfg.customTables[id] = { columns: [...], rows: [{...}, ...] }` —
+  rows are plain objects keyed by column name, the same row shape
+  `cache.tables[t]` already uses, so every existing table helper works on a
+  custom table with zero special-casing.
+- `id` is fixed at creation (`/^[A-Za-z0-9_]+$/`, checked for collision
+  against both other custom tables and every scanned id currently in use) —
+  it's what a formula actually references via `T(id)`/`lookup(id, ...)`, so
+  unlike `cfg.tableNames`' friendly-name layer, renaming it after the fact
+  would silently break any formula already written against it. Only the
+  columns/rows/cell values stay editable afterward.
+- `buildCtx()`'s `T(t)` is the single fusion point: it returns
+  `data.tables[t]` (the scan cache) if that id was actually scanned this
+  run, otherwise falls back to `getCfg().customTables[t].rows` — a scanned
+  table always wins if the same id somehow exists in both places. This is
+  also why a custom table resolves correctly even pre-scan: `data.tables` is
+  empty before the first scan, but `cfg.customTables` comes from config, not
+  the cache, so it's available immediately.
+- `lookup(table, keyCol, keyVal, returnCol)` — added alongside custom
+  tables as the actual "look up value A, return column B" primitive the
+  feature exists for; a linear scan via the same `T()`, so it works
+  identically on a scanned or custom table. Wired into `ARGN`/both `av`
+  arrays (`runVariable`/`runFormula`, plus the two inline copies in
+  `runActions()`/`formulaBool()`'s condition evaluator — all four literal
+  arrays must stay in sync, there's no shared constant for them), `HELPER_REF`
+  (signature tooltip), `completionSource()` (its first arg gets the same
+  table-name completion dropdown as `T(`), and index.html's Formula
+  Reference — same sync rule as every other helper (§5.2).
+- `fieldKeyOptions()` (the source both the Groups Table `<select>` and the
+  formula-assist autocomplete read from) merges `Object.keys(cfg.customTables)`
+  into its table list, so a custom table id shows up everywhere a scanned
+  one would — completion, the Table dropdown, everything — without either
+  UI needing to know which kind of table it's looking at.
+- Deleting a custom table (Tables tab, kebab-style delete on the table's own
+  card) goes through the same `woConfirm()` gate as every other delete
+  (§4.5) — its wording explicitly warns that a formula referencing it will
+  start returning empty results, since unlike a Rule/Group there's no
+  natural "nothing references this anymore" signal to check first.
+
 ---
 
 ## 5. Rule / scan engine
@@ -483,6 +527,41 @@ prose containing "(" near one of the shorter helper names (`F`, `T`, `V`,
 the warning `afterend` of the input itself would make it a 4th flex item in
 that row instead of a full-width line below it; callers there pass the
 wrapping `row` element instead.
+
+### 5.5 Telling an intentionally-skipped table apart from a broken one
+
+A group's linked table showing 0 rows is ambiguous on its own: it could mean
+the owning scan step never ran this pass (its `condition` was false — fully
+expected, e.g. no downtime to check this run) or that something genuinely
+failed to capture. Before this fix, `captureTablesAndFields()`'s raw
+diagnostic string (`'Table "id" - 0 rows (prefix: ...)'` or `'... not
+rendered'`) was shown to the user in red regardless of which case it was —
+scary and wrong for the common, intentional case.
+
+`tableRunStatus(tableId, scanCfg)` resolves the ambiguity: it finds the
+`scan.scans` entry (if any) whose `waitTable` matches the table id, then
+looks up that step's own `scanLog` entry for the run that just completed
+(matched by exact `title` equality — a dialog step's `' (nav)'`/`' (close)'`
+suffixed entries are deliberately excluded by this, since only the plain-
+title entry carries the final skipped/OK/TIMEOUT/FAILED outcome). The
+render-time check (`render()`, the `group.table` block) only shows an error
+when that status is `'unknown'` (no step owns this table id at all — 0 rows
+is genuinely unexpected) or starts with `TIMEOUT`/`FAILED`. `'skipped ...'`
+(condition false, intentional) and `'OK ...'` (the step ran; the table's
+just legitimately empty this time, e.g. no downtime logged) both fall
+through to the same plain muted "No rows" the empty-but-no-error case
+already used — no red text, no boilerplate id/prefix string. When an error
+is shown, the wording is a fixed friendly string ("Couldn't load this table
+— try rescanning."), never the raw prefix/id — that diagnostic detail is
+still available via `window.__woDebugTables()`/console for anyone who needs
+it. **Only matches by `waitTable`** — a table populated purely via a
+`rowDetailFields[].tablePrefix` (no step actually waits on it directly) or a
+step using `waitFor` text instead of `waitTable` won't resolve to a step at
+all and falls to the `'unknown'`-is-an-error default; this covers the
+reported case (default config's downtime step sets `waitTable`) but isn't a
+complete solution for every possible scan config shape. **Not yet verified
+in a browser** — confirm with one real scan (both a skipped-condition run
+and a normal run) before trusting it fully.
 
 ---
 
@@ -779,6 +858,15 @@ considering a promotion done.
     as real confusion, not just the latent mismatch this note used to flag.
 - Feedback issues get no labels — could auto-tag `type:bug`/`type:suggestion`
   in the private repo if labels are ever set up there.
+- The Feedback tab's "Include my Maximo name/username/email" checkbox
+  (unchecked by default) is opt-in for that field only: `readWhoamiCanonical()`
+  is only called when it's checked, and only its result (display
+  name/username/email) is appended to the report's `context` as a
+  `Reporter:` line. This does NOT change whether whoami data reaches the
+  Worker at all — `getWorkerAccessToken()`'s own `/check-access` call
+  (needed to get a token to send the report) already sends whoami fields
+  every time, checkbox or not; that's a separate, pre-existing access-check
+  round trip this checkbox was never meant to gate.
 - `settingsTab()` adds a fresh `content.addEventListener('input', saveSettings)`
   every time the tab is (re-)rendered, and never removes the previous one —
   `content` itself is never replaced (only its `innerHTML`), so listeners
