@@ -5996,6 +5996,20 @@
                 st: st
             }) !== __woSetupSnapshot;
         }
+
+        // Flushes Setup's live in-memory cfg/scan/st to localStorage without
+        // touching anything else Save does (no render/checkForUpdate/tab
+        // refresh). Profile actions (Switch, Save Current As New, Start
+        // Blank) all read the CURRENT profile via getCfg()/getScan(), which
+        // read localStorage — not this closure's live objects — so without
+        // this, any unsaved in-Setup edit silently never makes it into the
+        // outgoing profile's snapshot, despite the UI explicitly promising
+        // "your current config will be saved back to its own profile first."
+        function flushLiveConfigToStorage() {
+            saveCfg(cfg);
+            saveScan(scan);
+            saveSettingsCfg(st);
+        }
         function updateSaveButtonState() {
             saveBtn.disabled = !isSetupDirty();
         }
@@ -8576,6 +8590,7 @@
                 '<div style="margin-top:8px;">' +
                 '<label style="color:var(--wo-muted);font-size:11px;">Version:</label><br>' +
                 '<select id="__st_pin" style="width:100%;margin-top:2px;"><option value="">Latest (current version)</option></select>' +
+                '<div id="__st_pin_note" style="display:none;margin-top:4px;color:var(--wo-muted);font-size:10px;">Pinning has no effect on the dev channel — it always tracks the tip of main directly.</div>' +
                 '</div>' +
                 '<div style="margin-top:10px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
@@ -8610,12 +8625,31 @@
                 // change used to trigger an instant install/reload the
                 // moment you touched the dropdown; now it waits for
                 // Save & Apply, same as every other Setup tab.
+                // stopPropagation() also blocks the Save button's OWN dirty
+                // tracker (content's bubbling 'change' listener), which isn't
+                // the thing it was meant to guard against — call it directly
+                // so the button ungreys and its hover tooltip picks this up.
                 e.stopPropagation();
                 st.channel = e.target.value;
                 setStatus('Channel set to ' + st.channel + ' — click Save to check for updates.');
+                updateSaveButtonState();
+                refreshVersionPicker();
             };
 
             var pinSel = updSettDiv.querySelector('#__st_pin');
+            // Pinning is meaningless on the dev channel (it always tracks
+            // main directly, ignoring version.json entirely — see
+            // resolveUpdateTarget()'s early return for channel==='dev') —
+            // grey the control out and say so the instant Channel changes,
+            // instead of leaving a now-irrelevant dropdown looking live.
+            function refreshVersionPicker() {
+                var isDev = st.channel === 'dev';
+                pinSel.disabled = isDev;
+                pinSel.style.opacity = isDev ? '0.5' : '';
+                var note = updSettDiv.querySelector('#__st_pin_note');
+                if (note) note.style.display = isDev ? '' : 'none';
+            }
+            refreshVersionPicker();
             var xhrV = new XMLHttpRequest();
             xhrV.open('GET', REPO_RAW_BASE + '/main/version.json', true);
             xhrV.onload = function() {
@@ -8695,6 +8729,7 @@
                 setStatus(st.pinnedVersion ?
                     'Version set to ' + st.pinnedVersion + ' — click Save to check for updates.' :
                     'Unpinned — click Save to follow the channel.');
+                updateSaveButtonState();
             };
 
             updSettDiv.querySelector('#__st_upd_disable').onchange = function(e) {
@@ -9020,6 +9055,7 @@
                 btn.onclick = function() {
                     var id = btn.getAttribute('data-id');
                     if (!confirm('Switch to "' + (profiles[id].name || id) + '"? Your current config will be saved back to its own profile first.')) return;
+                    flushLiveConfigToStorage();
                     switchProfile(id);
                     alert('Switched to "' + (profiles[id].name || id) + '".');
                     modal.remove();
@@ -9042,6 +9078,7 @@
                 if (!name) return;
                 var id = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || ('profile-' + new Date().toISOString());
                 var desc = prompt('Short description (optional):') || '';
+                flushLiveConfigToStorage();
                 var snap = snapshotProfile({
                     id: id,
                     name: name.trim(),
@@ -9080,6 +9117,7 @@
                     savedAt: new Date().toISOString()
                 };
                 if (!confirm('Switch to a blank "' + name.trim() + '" profile now? Your current live config will be saved back to its own profile first.')) return;
+                flushLiveConfigToStorage();
                 registerProfile(blank);
                 switchProfile(id); // preserves the outgoing profile's live edits, same as any switch
                 alert('Started blank profile "' + name.trim() + '". Build it out in Rules/Groups/Scan/Variables.');
