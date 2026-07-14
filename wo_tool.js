@@ -36,6 +36,132 @@
         } catch (e) {}
         return 48;
     }
+
+    // ── Custom-styled replacements for alert()/confirm()/prompt() ──
+    // Appended straight to document.body, like attachTooltip's floating tip
+    // and the formula-autocomplete popups — never nested inside #__wo_dock
+    // or #__wo_setup_modal, so the SAME dialog works identically whether
+    // it's triggered from the main panel (Return/Approve/Close) or from
+    // inside Setup. Colors are hardcoded to match the shared dark palette
+    // rather than var(--wo-*), since neither scoped root's custom
+    // properties would cascade to a document.body child. All three return
+    // Promises (never rejecting) since a real DOM dialog can't block the
+    // way native alert/confirm/prompt do — every call site that gates
+    // further action must move that action into the .then().
+    function woEscHtml(s) {
+        return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    }
+
+    function woEscAttr(s) {
+        return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    }
+    var WO_DLG_BTN_CSS = 'font:inherit;font-weight:700;font-size:11.5px;padding:6px 14px;border-radius:6px;border:1px solid #30363d;background:#1f2630;color:#f0f3f6;cursor:pointer;';
+    var WO_DLG_BTN_PRIMARY_CSS = WO_DLG_BTN_CSS + 'background:#58a6ff;color:#04101f;border-color:#58a6ff;';
+
+    // wireFn(overlay, cleanup) wires up the dialog's own controls and
+    // returns a keydown handler (or nothing) — cleanup(result) resolves the
+    // promise and removes the dialog; guarded against firing twice (a click
+    // and the Enter/Escape handler could otherwise both fire for one
+    // dismissal). Only one of these is ever open at a time — opening a new
+    // one preempts whatever's currently showing by invoking ITS cleanup
+    // (not just removing its DOM node), so its document-level keydown
+    // listener is torn down too. Otherwise a stale listener from a dialog
+    // that got DOM-removed but never resolved would still be live, and two
+    // overlapping listeners both firing on one Enter/Escape press could
+    // double-resolve (e.g. double-routing a work order).
+    var __woActiveDialogCleanup = null;
+    function woDialogBase(bodyHtml, wireFn) {
+        return new Promise(function(resolve) {
+            if (__woActiveDialogCleanup) __woActiveDialogCleanup();
+            var old = document.getElementById('__wo_dialog');
+            if (old) old.remove();
+            var overlay = document.createElement('div');
+            overlay.id = '__wo_dialog';
+            overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-family:"Segoe UI",Arial,sans-serif;';
+            overlay.innerHTML = '<div style="background:#161b22;border:1px solid #30363d;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);padding:18px;max-width:360px;width:88%;color:#f0f3f6;">' + bodyHtml + '</div>';
+            document.body.appendChild(overlay);
+            var settled = false;
+            function cleanup(result) {
+                if (settled) return;
+                settled = true;
+                document.removeEventListener('keydown', onKeyDown, true);
+                overlay.remove();
+                if (__woActiveDialogCleanup === cleanup) __woActiveDialogCleanup = null;
+                resolve(result);
+            }
+            __woActiveDialogCleanup = cleanup;
+            var onKeyDown = wireFn(overlay, cleanup) || function() {};
+            document.addEventListener('keydown', onKeyDown, true);
+        });
+    }
+
+    function woAlert(message) {
+        return woDialogBase(
+            '<div style="font-size:12.5px;line-height:1.5;margin-bottom:16px;white-space:pre-wrap;">' + woEscHtml(message) + '</div>' +
+            '<div style="display:flex;justify-content:flex-end;">' +
+            '<button id="__wo_dlg_ok" type="button" style="' + WO_DLG_BTN_PRIMARY_CSS + '">OK</button>' +
+            '</div>',
+            function(overlay, cleanup) {
+                var okBtn = overlay.querySelector('#__wo_dlg_ok');
+                okBtn.onclick = function() {
+                    cleanup();
+                };
+                okBtn.focus();
+                return function(e) {
+                    if (e.key === 'Enter' || e.key === 'Escape') cleanup();
+                };
+            }
+        );
+    }
+
+    function woConfirm(message) {
+        return woDialogBase(
+            '<div style="font-size:12.5px;line-height:1.5;margin-bottom:16px;white-space:pre-wrap;">' + woEscHtml(message) + '</div>' +
+            '<div style="display:flex;justify-content:flex-end;gap:8px;">' +
+            '<button id="__wo_dlg_cancel" type="button" style="' + WO_DLG_BTN_CSS + '">Cancel</button>' +
+            '<button id="__wo_dlg_ok" type="button" style="' + WO_DLG_BTN_PRIMARY_CSS + '">OK</button>' +
+            '</div>',
+            function(overlay, cleanup) {
+                overlay.querySelector('#__wo_dlg_ok').onclick = function() {
+                    cleanup(true);
+                };
+                overlay.querySelector('#__wo_dlg_cancel').onclick = function() {
+                    cleanup(false);
+                };
+                overlay.querySelector('#__wo_dlg_ok').focus();
+                return function(e) {
+                    if (e.key === 'Enter') cleanup(true);
+                    if (e.key === 'Escape') cleanup(false);
+                };
+            }
+        );
+    }
+
+    function woPrompt(message, defaultValue) {
+        return woDialogBase(
+            '<div style="font-size:12.5px;line-height:1.5;margin-bottom:10px;white-space:pre-wrap;">' + woEscHtml(message) + '</div>' +
+            '<input id="__wo_dlg_input" type="text" value="' + woEscAttr(defaultValue || '') + '" style="width:100%;box-sizing:border-box;padding:6px 8px;margin-bottom:16px;background:#1f2630;border:1px solid #30363d;border-radius:6px;color:#f0f3f6;font:inherit;font-size:12.5px;">' +
+            '<div style="display:flex;justify-content:flex-end;gap:8px;">' +
+            '<button id="__wo_dlg_cancel" type="button" style="' + WO_DLG_BTN_CSS + '">Cancel</button>' +
+            '<button id="__wo_dlg_ok" type="button" style="' + WO_DLG_BTN_PRIMARY_CSS + '">OK</button>' +
+            '</div>',
+            function(overlay, cleanup) {
+                var input = overlay.querySelector('#__wo_dlg_input');
+                overlay.querySelector('#__wo_dlg_ok').onclick = function() {
+                    cleanup(input.value);
+                };
+                overlay.querySelector('#__wo_dlg_cancel').onclick = function() {
+                    cleanup(null);
+                };
+                input.focus();
+                input.select();
+                return function(e) {
+                    if (e.key === 'Enter') cleanup(input.value);
+                    if (e.key === 'Escape') cleanup(null);
+                };
+            }
+        );
+    }
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -72,8 +198,10 @@
         label: 'Return',
         defaultHotkey: 'Alt+R',
         run: function() {
-            if (!confirm('Return this Work Order?\n\nThe return message will be filled into the Memo field.')) return;
-            routeWorkflow('return');
+            woConfirm('Return this Work Order?\n\nThe return message will be filled into the Memo field.').then(function(ok) {
+                if (!ok) return;
+                routeWorkflow('return');
+            });
         }
     }, {
         id: 'approve',
@@ -81,8 +209,10 @@
         label: 'Approve',
         defaultHotkey: '',
         run: function() {
-            if (!confirm('Approve this Work Order?\n\nThis will route with Complete Review selected.')) return;
-            routeWorkflow('approve');
+            woConfirm('Approve this Work Order?\n\nThis will route with Complete Review selected.').then(function(ok) {
+                if (!ok) return;
+                routeWorkflow('approve');
+            });
         }
     }, {
         id: 'fix',
@@ -1483,8 +1613,7 @@
     // ── Pick new backup file location ──
     function pickBackupFile() {
         if (typeof window.showSaveFilePicker === 'undefined') {
-            alert('Your browser does not support file system access. Use Chrome or Edge for auto-backup.');
-            return Promise.resolve();
+            return woAlert('Your browser does not support file system access. Use Chrome or Edge for auto-backup.');
         }
         return window.showSaveFilePicker({
             suggestedName: 'wo_tool_backup.json',
@@ -1520,8 +1649,7 @@
     // ── Link existing backup file (for cross-browser use) ──
     function linkExistingBackupFile() {
         if (typeof window.showOpenFilePicker === 'undefined') {
-            alert('Your browser does not support file system access. Use Chrome or Edge.');
-            return Promise.resolve();
+            return woAlert('Your browser does not support file system access. Use Chrome or Edge.');
         }
         return window.showOpenFilePicker({
             types: [{
@@ -4073,7 +4201,9 @@
         };
         panel.querySelector('#__wo_setup').onclick = openSetup;
         panel.querySelector('#__wo_exit').onclick = function() {
-            if (confirm('Close WO Validation tool?')) teardown();
+            woConfirm('Close WO Validation tool?').then(function(ok) {
+                if (ok) teardown();
+            });
         };
         panel.querySelector('#__wo_collapse_btn').onclick = function() {
             setPanelCollapsed(!panel.classList.contains('is-collapsed'));
@@ -4769,8 +4899,10 @@
         returnBtn.textContent = '↩ Return';
         returnBtn.className = 'wo-btn wo-btn-danger wo-btn-block';
         returnBtn.onclick = function() {
-            if (!confirm('Return this Work Order?\n\nThe return message will be filled into the Memo field.')) return;
-            routeWorkflow('return');
+            woConfirm('Return this Work Order?\n\nThe return message will be filled into the Memo field.').then(function(ok) {
+                if (!ok) return;
+                routeWorkflow('return');
+            });
         };
         actionRow.appendChild(returnBtn);
 
@@ -4798,8 +4930,10 @@
         approveBtn.textContent = '✓ Approve';
         approveBtn.className = 'wo-btn wo-btn-pass wo-btn-block';
         approveBtn.onclick = function() {
-            if (!confirm('Approve this Work Order?\n\nThis will route with Complete Review selected.')) return;
-            routeWorkflow('approve');
+            woConfirm('Approve this Work Order?\n\nThis will route with Complete Review selected.').then(function(ok) {
+                if (!ok) return;
+                routeWorkflow('approve');
+            });
         };
         actionRow.appendChild(approveBtn);
 
@@ -6396,10 +6530,11 @@
             btn.onclick = function(ev) {
                 ev.stopPropagation();
                 closeRuleMenu();
-                var next = prompt('Tooltip for "' + entryLabel + '" — a short, plain-English explanation shown on hover. Leave blank to remove.', entry.tooltip || '');
-                if (next === null) return;
-                entry.tooltip = next.trim();
-                rerenderFn();
+                woPrompt('Tooltip for "' + entryLabel + '" — a short, plain-English explanation shown on hover. Leave blank to remove.', entry.tooltip || '').then(function(next) {
+                    if (next == null) return;
+                    entry.tooltip = next.trim();
+                    rerenderFn();
+                });
             };
         }
 
@@ -6717,25 +6852,27 @@
             ta.select();
             document.execCommand('copy');
             ta.remove();
-            alert('Full config copied to clipboard - save it in a text file.');
+            woAlert('Full config copied to clipboard - save it in a text file.');
         };
         modal.querySelector('#__s_imp').onclick = function() {
-            var raw = prompt('Paste exported config JSON:');
-            if (!raw) return;
-            try {
-                var b = JSON.parse(raw);
-                if (b.rules) saveCfg(b.rules);
-                if (b.scan) saveScan(b.scan);
-                if (b.fields) saveFieldCfg(b.fields);
-                if (b.state) saveGS(b.state);
-                if (b.vars) saveVars(b.vars);
+            woPrompt('Paste exported config JSON:').then(function(raw) {
+                if (!raw) return;
+                try {
+                    var b = JSON.parse(raw);
+                    if (b.rules) saveCfg(b.rules);
+                    if (b.scan) saveScan(b.scan);
+                    if (b.fields) saveFieldCfg(b.fields);
+                    if (b.state) saveGS(b.state);
+                    if (b.vars) saveVars(b.vars);
 
-                alert('Imported. Reopen Setup.');
-                modal.remove();
-                render();
-            } catch (e) {
-                alert('Invalid JSON: ' + e.message);
-            }
+                    woAlert('Imported. Reopen Setup.').then(function() {
+                        modal.remove();
+                        render();
+                    });
+                } catch (e) {
+                    woAlert('Invalid JSON: ' + e.message);
+                }
+            });
         };
 
         function formulaBox(obj, prop) {
@@ -8489,7 +8626,7 @@
                 dbgDiv.querySelector('#__st_debug').onclick = function() {
                     window.__woDebugTables();
                     window.__woDebugCache();
-                    alert('Check DevTools console for debug dump.');
+                    woAlert('Check DevTools console for debug dump.');
                 };
             }
 
@@ -8777,41 +8914,49 @@
             makeCollapsible(dangerDiv, 'Reset / Uninstall', true);
 
             dangerDiv.querySelector('#__st_reset_tool').onclick = function() {
-                if (!confirm('Reset the tool but keep your config?\n\nThe cached tool code and session data will be cleared now. Your rules, groups, variables, and scan config are saved first and will be restored automatically the next time you click the bookmarklet.')) return;
-                var snapshot = {};
-                Object.keys(localStorage).forEach(function(k) {
-                    if (k.indexOf('__wo_') !== 0) return;
-                    if (EPHEMERAL_KEYS.indexOf(k) !== -1) return;
-                    if (k === REVOKED_BACKUP_KEY) return;
-                    snapshot[k] = localStorage.getItem(k);
+                woConfirm('Reset the tool but keep your config?\n\nThe cached tool code and session data will be cleared now. Your rules, groups, variables, and scan config are saved first and will be restored automatically the next time you click the bookmarklet.').then(function(ok) {
+                    if (!ok) return;
+                    var snapshot = {};
+                    Object.keys(localStorage).forEach(function(k) {
+                        if (k.indexOf('__wo_') !== 0) return;
+                        if (EPHEMERAL_KEYS.indexOf(k) !== -1) return;
+                        if (k === REVOKED_BACKUP_KEY) return;
+                        snapshot[k] = localStorage.getItem(k);
+                    });
+                    localStorage.setItem(REVOKED_BACKUP_KEY, JSON.stringify({
+                        savedAt: Date.now(),
+                        data: snapshot
+                    }));
+                    Object.keys(localStorage).filter(function(k) {
+                        return k.indexOf('__wo_') === 0 && k !== REVOKED_BACKUP_KEY;
+                    }).forEach(function(k) {
+                        localStorage.removeItem(k);
+                    });
+                    woAlert('Tool reset. Click the bookmarklet again to reinstall — your config will come back automatically.').then(function() {
+                        modal._woCleanup();
+                        modal.remove();
+                        teardown();
+                    });
                 });
-                localStorage.setItem(REVOKED_BACKUP_KEY, JSON.stringify({
-                    savedAt: Date.now(),
-                    data: snapshot
-                }));
-                Object.keys(localStorage).filter(function(k) {
-                    return k.indexOf('__wo_') === 0 && k !== REVOKED_BACKUP_KEY;
-                }).forEach(function(k) {
-                    localStorage.removeItem(k);
-                });
-                alert('Tool reset. Click the bookmarklet again to reinstall — your config will come back automatically.');
-                modal._woCleanup();
-                modal.remove();
-                teardown();
             };
             dangerDiv.querySelector('#__st_reset_all').onclick = function() {
-                if (!confirm('Erase EVERYTHING — all rules, groups, scans, and settings — plus the tool itself?\n\nThis cannot be undone. There is no backup for this option.')) return;
-                if (!confirm('Really sure? This permanently deletes your entire configuration.')) return;
-                Object.keys(localStorage).filter(function(k) {
-                    return k.indexOf('__wo_') === 0;
-                }).forEach(function(k) {
-                    localStorage.removeItem(k);
+                woConfirm('Erase EVERYTHING — all rules, groups, scans, and settings — plus the tool itself?\n\nThis cannot be undone. There is no backup for this option.').then(function(ok1) {
+                    if (!ok1) return;
+                    woConfirm('Really sure? This permanently deletes your entire configuration.').then(function(ok2) {
+                        if (!ok2) return;
+                        Object.keys(localStorage).filter(function(k) {
+                            return k.indexOf('__wo_') === 0;
+                        }).forEach(function(k) {
+                            localStorage.removeItem(k);
+                        });
+                        if (window.indexedDB) indexedDB.deleteDatabase('__wo_tool_db');
+                        woAlert('Everything erased. Click the bookmarklet again for a fresh install.').then(function() {
+                            modal._woCleanup();
+                            modal.remove();
+                            teardown();
+                        });
+                    });
                 });
-                if (window.indexedDB) indexedDB.deleteDatabase('__wo_tool_db');
-                alert('Everything erased. Click the bookmarklet again for a fresh install.');
-                modal._woCleanup();
-                modal.remove();
-                teardown();
             };
         }
 
@@ -8954,7 +9099,7 @@
                 var statusSpan = div.querySelector('#__fb_status');
                 var sendBtn = div.querySelector('#__fb_send');
                 if (!body) {
-                    alert('Describe the bug or suggestion first.');
+                    woAlert('Describe the bug or suggestion first.');
                     return;
                 }
                 var stCtx = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
@@ -9054,75 +9199,90 @@
             localDiv.querySelectorAll('.__pf_switch').forEach(function(btn) {
                 btn.onclick = function() {
                     var id = btn.getAttribute('data-id');
-                    if (!confirm('Switch to "' + (profiles[id].name || id) + '"? Your current config will be saved back to its own profile first.')) return;
-                    flushLiveConfigToStorage();
-                    switchProfile(id);
-                    alert('Switched to "' + (profiles[id].name || id) + '".');
-                    modal.remove();
-                    render();
+                    woConfirm('Switch to "' + (profiles[id].name || id) + '"? Your current config will be saved back to its own profile first.').then(function(ok) {
+                        if (!ok) return;
+                        flushLiveConfigToStorage();
+                        switchProfile(id);
+                        woAlert('Switched to "' + (profiles[id].name || id) + '".').then(function() {
+                            modal.remove();
+                            render();
+                        });
+                    });
                 };
             });
             localDiv.querySelectorAll('.__pf_delete').forEach(function(btn) {
                 if (!btn.disabled) attachTooltip(btn, 'Delete profile');
                 btn.onclick = function() {
                     var id = btn.getAttribute('data-id');
-                    if (!confirm('Delete profile "' + (profiles[id].name || id) + '"? This cannot be undone.')) return;
-                    var p2 = getProfiles();
-                    delete p2[id];
-                    saveProfiles(p2);
-                    profilesTab();
+                    woConfirm('Delete profile "' + (profiles[id].name || id) + '"? This cannot be undone.').then(function(ok) {
+                        if (!ok) return;
+                        var p2 = getProfiles();
+                        delete p2[id];
+                        saveProfiles(p2);
+                        profilesTab();
+                    });
                 };
             });
             localDiv.querySelector('#__pf_save_new').onclick = function() {
-                var name = prompt('Name for this profile:');
-                if (!name) return;
-                var id = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || ('profile-' + new Date().toISOString());
-                var desc = prompt('Short description (optional):') || '';
-                flushLiveConfigToStorage();
-                var snap = snapshotProfile({
-                    id: id,
-                    name: name.trim(),
-                    description: desc
+                woPrompt('Name for this profile:').then(function(name) {
+                    if (!name) return;
+                    var id = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || ('profile-' + new Date().toISOString());
+                    woPrompt('Short description (optional):').then(function(desc) {
+                        desc = desc || '';
+                        flushLiveConfigToStorage();
+                        var snap = snapshotProfile({
+                            id: id,
+                            name: name.trim(),
+                            description: desc
+                        });
+                        // Set active BEFORE registerProfile's own auto-save fires, so a
+                        // linked PC backup file reflects the new active profile right away.
+                        localStorage.setItem(ACTIVE_PROFILE_KEY, id);
+                        registerProfile(snap);
+                        woAlert('Saved as "' + name.trim() + '".').then(function() {
+                            profilesTab();
+                        });
+                    });
                 });
-                // Set active BEFORE registerProfile's own auto-save fires, so a
-                // linked PC backup file reflects the new active profile right away.
-                localStorage.setItem(ACTIVE_PROFILE_KEY, id);
-                registerProfile(snap);
-                alert('Saved as "' + name.trim() + '".');
-                profilesTab();
             };
 
             localDiv.querySelector('#__pf_blank').onclick = function() {
-                var name = prompt('Name for the new blank profile:');
-                if (!name) return;
-                var id = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || ('profile-' + new Date().toISOString());
-                var desc = prompt('Short description (optional):') || '';
-                var blank = {
-                    id: id,
-                    name: name.trim(),
-                    description: desc,
-                    configVersion: 1,
-                    rules: {
-                        groups: [],
-                        rules: []
-                    },
-                    scan: {
-                        woTabId: DEFAULT_SCAN.woTabId,
-                        scans: []
-                    },
-                    fields: {},
-                    state: {},
-                    vars: [],
-                    settings: {},
-                    savedAt: new Date().toISOString()
-                };
-                if (!confirm('Switch to a blank "' + name.trim() + '" profile now? Your current live config will be saved back to its own profile first.')) return;
-                flushLiveConfigToStorage();
-                registerProfile(blank);
-                switchProfile(id); // preserves the outgoing profile's live edits, same as any switch
-                alert('Started blank profile "' + name.trim() + '". Build it out in Rules/Groups/Scan/Variables.');
-                modal.remove();
-                render();
+                woPrompt('Name for the new blank profile:').then(function(name) {
+                    if (!name) return;
+                    var id = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || ('profile-' + new Date().toISOString());
+                    woPrompt('Short description (optional):').then(function(desc) {
+                        desc = desc || '';
+                        var blank = {
+                            id: id,
+                            name: name.trim(),
+                            description: desc,
+                            configVersion: 1,
+                            rules: {
+                                groups: [],
+                                rules: []
+                            },
+                            scan: {
+                                woTabId: DEFAULT_SCAN.woTabId,
+                                scans: []
+                            },
+                            fields: {},
+                            state: {},
+                            vars: [],
+                            settings: {},
+                            savedAt: new Date().toISOString()
+                        };
+                        woConfirm('Switch to a blank "' + name.trim() + '" profile now? Your current live config will be saved back to its own profile first.').then(function(ok) {
+                            if (!ok) return;
+                            flushLiveConfigToStorage();
+                            registerProfile(blank);
+                            switchProfile(id); // preserves the outgoing profile's live edits, same as any switch
+                            woAlert('Started blank profile "' + name.trim() + '". Build it out in Rules/Groups/Scan/Variables.').then(function() {
+                                modal.remove();
+                                render();
+                            });
+                        });
+                    });
+                });
             };
 
             // ── GitHub presets ──
@@ -9150,6 +9310,22 @@
                     btn.onclick = function() {
                         var id = btn.getAttribute('data-id');
                         var already = !!profiles[id];
+                        function proceed() {
+                            btn.disabled = true;
+                            btn.textContent = 'Importing...';
+                            installProfileFromGitHub(id).then(function(result) {
+                                var ok = !!(result && result.ok);
+                                if (ok) {
+                                    woAlert('Imported and switched.' + (result.backupId ? ' Your previous version was saved as a backup profile — see Local Profiles.' : '')).then(function() {
+                                        modal.remove();
+                                        render();
+                                    });
+                                } else {
+                                    btn.disabled = false;
+                                    btn.textContent = 'Failed — retry';
+                                }
+                            });
+                        }
                         if (already) {
                             var isActive = getActiveProfileId() === id;
                             var msg = 'Re-import "' + id + '"?\n\n' +
@@ -9157,21 +9333,12 @@
                                     'This is your currently active config — it will be overwritten with the latest shared version.' :
                                     'Your locally saved "' + id + '" profile will be overwritten with the latest shared version.') +
                                 '\n\nWhatever it currently holds will be saved as a backup profile first, so nothing is lost — but any local edits you made under this profile stop being the "' + id + '" profile once this runs.';
-                            if (!confirm(msg)) return;
+                            woConfirm(msg).then(function(ok) {
+                                if (ok) proceed();
+                            });
+                        } else {
+                            proceed();
                         }
-                        btn.disabled = true;
-                        btn.textContent = 'Importing...';
-                        installProfileFromGitHub(id).then(function(result) {
-                            var ok = !!(result && result.ok);
-                            if (ok) {
-                                alert('Imported and switched.' + (result.backupId ? ' Your previous version was saved as a backup profile — see Local Profiles.' : ''));
-                                modal.remove();
-                                render();
-                            } else {
-                                btn.disabled = false;
-                                btn.textContent = 'Failed — retry';
-                            }
-                        });
                     };
                 });
             });
