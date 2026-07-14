@@ -21,8 +21,10 @@
 
     var PANEL_W = 360;
     var TOOL_VERSION = '0.24.0';
-    // Bumped (to "now", UTC) on every push to ANY channel/repo, unlike
-    // TOOL_VERSION — which only changes on a tagged stable/beta release.
+    // Format YYDDD.HHMMz (2-digit year, day-of-year, UTC hour+minute) —
+    // computed via `date -u +"%y%j.%H%M"z` and substituted in right before
+    // every commit that touches this file, on ANY channel/repo (unlike
+    // TOOL_VERSION, which only changes on a tagged stable/beta release).
     // The dev channel always tracks the live tip of main (see
     // resolveUpdateTarget()'s early return for channel==='dev'), so several
     // DIFFERENT dev pushes in a row can share the same TOOL_VERSION with no
@@ -30,7 +32,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '2026-07-14 11:42Z';
+    var BUILD_ID = '26195.1307z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -2339,7 +2341,7 @@
                         return;
                     }
                     setStatus(rolledNote + 'Update available - current version: v' + TOOL_VERSION);
-                    showUpdatePrompt(remote, target);
+                    showUpdatePrompt(remote, target, isPatchOnly);
                 }
 
             } catch (e) {
@@ -2369,7 +2371,7 @@
     }
 
     // ── Show update prompt with cumulative changelog ──
-    function showUpdatePrompt(remote, target) {
+    function showUpdatePrompt(remote, target, isPatchOnly) {
         var old = document.getElementById('__wo_update_banner');
         if (old) old.remove();
         var relevantVersions = (remote.versions || []).filter(function(v) {
@@ -2388,6 +2390,14 @@
                 }).join('') +
                 '</ul></div>';
         }).join('');
+        // This banner only ever shows because the relevant auto-install
+        // setting (autoUpdatePatch for a same-line patch, autoUpdate for
+        // everything else — see the branch above) is currently OFF for
+        // this kind of update. The third button reactivates that SAME
+        // existing Settings toggle (not a new setting) and installs this
+        // update right away, so opting in doesn't also require a separate
+        // trip to Settings to get the update you're already looking at.
+        var autoBtnLabel = isPatchOnly ? 'Enable Auto-Patch Updates' : 'Enable Automatic Updates';
         var banner = document.createElement('div');
         banner.id = '__wo_update_banner';
         banner.className = 'wo-notice wo-pass';
@@ -2396,12 +2406,21 @@
             '<div style="max-height:120px;overflow-y:auto;margin-bottom:8px;">' + changelogHtml + '</div>' +
             '<div class="wo-notice-actions">' +
             '<button id="__wo_update_btn" type="button" class="wo-btn wo-btn-pass">Install Update</button>' +
+            '<button id="__wo_update_auto" type="button" class="wo-btn-ghost">' + autoBtnLabel + '</button>' +
             '<button id="__wo_update_skip" type="button" class="wo-btn-ghost">Skip</button>' +
             '<button id="__wo_update_disable" type="button" class="wo-btn-ghost">Disable Updates</button>' +
             '</div>';
 
         if (bodyEl) bodyEl.insertBefore(banner, bodyEl.firstChild);
         document.getElementById('__wo_update_btn').onclick = function() {
+            installUpdate(target.version);
+        };
+        document.getElementById('__wo_update_auto').onclick = function() {
+            var s = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+            if (isPatchOnly) s.autoUpdatePatch = true;
+            else s.autoUpdate = true;
+            localStorage.setItem('__wo_settings', JSON.stringify(s));
+            setStatus((isPatchOnly ? 'Auto-patch updates' : 'Automatic updates') + ' enabled. Installing v' + target.version + '...');
             installUpdate(target.version);
         };
         document.getElementById('__wo_update_skip').onclick = function() {
@@ -4143,7 +4162,6 @@
             "#__wo_dock .wo-field-v{font-size:12px;}" +
             "#__wo_dock .wo-field-v.wo-empty{color:var(--wo-border);}" +
             "#__wo_dock .wo-field-k.wo-varlabel{color:var(--wo-accent);text-transform:none;letter-spacing:0;}" +
-            "#__wo_dock .wo-vartag{color:var(--wo-muted);font-size:9px;text-transform:none;}" +
             "#__wo_dock .wo-table-bar{display:flex;align-items:center;gap:8px;margin-bottom:4px;}" +
             "#__wo_dock .wo-table-count{color:var(--wo-muted);font-size:10.5px;flex:1;}" +
             "#__wo_dock .__wo_col_toggle_btn{font-size:10.5px;padding:3px 8px;border-radius:var(--wo-r-ctl);border:1px solid var(--wo-border);background:var(--wo-surface-2);color:var(--wo-text);cursor:pointer;}" +
@@ -4659,7 +4677,7 @@
                         if (vDef) {
                             var val = varCache[fk];
                             bodyHtml += '<div class="wo-field" style="' + style + '">' +
-                                '<span class="wo-field-k wo-varlabel">' + String(vDef.label).replace(/</g, '&lt;') + ' <span class="wo-vartag">(var)</span></span>' +
+                                '<span class="wo-field-k wo-varlabel">' + String(vDef.label).replace(/</g, '&lt;') + '</span>' +
                                 '<div class="wo-field-v' + (!preScan && val ? '' : ' wo-empty') + '">' + (!preScan && val ? String(val).replace(/</g, '&lt;') : '—') + '</div></div>';
                         } else {
                             var v = cache.fields[fk],
@@ -4684,7 +4702,7 @@
                     var vDef = varById[vid];
                     if (!vDef) return;
                     var val = varCache[vid];
-                    bodyHtml += '<div class="wo-field"><span class="wo-field-k wo-varlabel">' + String(vDef.label).replace(/</g, '&lt;') + ' <span class="wo-vartag">(var)</span></span>' +
+                    bodyHtml += '<div class="wo-field"><span class="wo-field-k wo-varlabel">' + String(vDef.label).replace(/</g, '&lt;') + '</span>' +
                         '<div class="wo-field-v' + (!preScan && val ? '' : ' wo-empty') + '">' + (!preScan && val ? String(val).replace(/</g, '&lt;') : '—') + '</div></div>';
                 });
                 bodyHtml += '</div>';
@@ -8859,7 +8877,7 @@
                 '</select>' +
                 '</div>' +
                 (devTier === 'dev' ?
-                    '<div style="margin-top:6px;color:var(--wo-muted);font-size:10px;">Build: <code class="wo-mono">' + BUILD_ID + '</code> — changes on every dev push even when the version number (v' + TOOL_VERSION + ') doesn\'t.</div>' :
+                    '<div style="margin-top:6px;color:var(--wo-muted);font-size:10px;">Build: <code class="wo-mono">' + BUILD_ID + '</code></div>' :
                     '') +
                 '<div style="margin-top:8px;">' +
                 '<label style="color:var(--wo-muted);font-size:11px;">Version:</label><br>' +
