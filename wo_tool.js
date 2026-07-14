@@ -21,6 +21,16 @@
 
     var PANEL_W = 360;
     var TOOL_VERSION = '0.24.0';
+    // Bumped (to "now", UTC) on every push to ANY channel/repo, unlike
+    // TOOL_VERSION — which only changes on a tagged stable/beta release.
+    // The dev channel always tracks the live tip of main (see
+    // resolveUpdateTarget()'s early return for channel==='dev'), so several
+    // DIFFERENT dev pushes in a row can share the same TOOL_VERSION with no
+    // other way to tell them apart. Surfaced (dev-grant only) via
+    // grantsStatusLine() so it rides along on every status message that
+    // already reports "running vX" or "up to date", plus a standalone line
+    // in Settings > Updates.
+    var BUILD_ID = '2026-07-14 11:42Z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -2281,9 +2291,9 @@
                 if (target.version === TOOL_VERSION) {
                     dismissUpdateBanner();
                     var pinnedLabel = target.pinMissing ?
-                        'Pin ' + target.pinRaw + '.x has no builds left in the manifest — staying on v' + TOOL_VERSION :
+                        'Pin ' + target.pinRaw + ' has no builds left in the manifest — staying on v' + TOOL_VERSION :
                         (target.pinKind === 'floating' ?
-                            'Pinned to ' + target.pinRaw + '.x (v' + TOOL_VERSION + ')' :
+                            'Pinned to ' + target.pinRaw + ' (v' + TOOL_VERSION + ')' :
                             'Pinned to v' + TOOL_VERSION);
                     setStatus(rolledNote + (target.pinned ?
                         pinnedLabel :
@@ -2300,7 +2310,7 @@
                     // pin was set must not linger and offer a conflicting install.
                     dismissUpdateBanner();
                     setStatus(rolledNote + (target.pinKind === 'floating' ?
-                        'Installing v' + target.version + ' (latest ' + target.pinRaw + '.x)...' :
+                        'Installing v' + target.version + ' (latest ' + target.pinRaw + ')...' :
                         (target.rolledFrom ?
                             'installing closest available v' + target.version + ' instead...' :
                             'Installing pinned v' + target.version + '...')));
@@ -3551,17 +3561,25 @@
     // A second status line naming which non-default grants are currently
     // active, shown right after a "you're up to date" message so dev/beta
     // access is visible every launch, not just discoverable via console.
-    // Empty for plain users — nothing to announce.
+    // Empty for plain users — nothing to announce. Dev-grant holders also
+    // get BUILD_ID here — see its own comment — so every status message
+    // that already reports "running vX"/"up to date" doubles as a build
+    // freshness check, without touching each of those call sites.
     function grantsStatusLine() {
         var grants = getGrants().filter(function(g) { return g !== 'user'; });
-        if (!grants.length) return '';
-        var labels = grants.map(function(g) {
-            if (g === 'dev') return 'Dev mode enabled';
-            if (g === 'beta_0') return 'Beta access enabled (all features)';
-            var m = /^beta_(.+)$/.exec(g);
-            if (m) return 'Beta_' + m[1] + ' access enabled';
-            return g + ' access enabled';
+        var labels = [];
+        if (grants.indexOf('dev') !== -1) labels.push('Build ' + BUILD_ID);
+        grants.forEach(function(g) {
+            if (g === 'dev') {
+                labels.push('Dev mode enabled');
+            } else if (g === 'beta_0') {
+                labels.push('Beta access enabled (all features)');
+            } else {
+                var m = /^beta_(.+)$/.exec(g);
+                labels.push(m ? ('Beta_' + m[1] + ' access enabled') : (g + ' access enabled'));
+            }
         });
+        if (!labels.length) return '';
         return '\n' + labels.join(' · ');
     }
 
@@ -8840,6 +8858,9 @@
                 }).join('') +
                 '</select>' +
                 '</div>' +
+                (devTier === 'dev' ?
+                    '<div style="margin-top:6px;color:var(--wo-muted);font-size:10px;">Build: <code class="wo-mono">' + BUILD_ID + '</code> — changes on every dev push even when the version number (v' + TOOL_VERSION + ') doesn\'t.</div>' :
+                    '') +
                 '<div style="margin-top:8px;">' +
                 '<label style="color:var(--wo-muted);font-size:11px;">Version:</label><br>' +
                 '<select id="__st_pin" style="width:100%;margin-top:2px;"><option value="">Latest (current version)</option></select>' +
