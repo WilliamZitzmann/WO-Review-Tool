@@ -582,20 +582,64 @@ considering a promotion done.
   copies list the same 6 keys as of v0.21.2 — `__wo_grant_cache` was missing
   from `wo_tool.js`'s copy until then, added for consistency.)
 - `caches.default` (Worker edge cache) is regional, not global — see §3.1.
-- `version.json` grows unbounded — nothing trims old entries. **Trimming old
-  `versions` array entries is safe** for exact pins and unpinned
-  channels — `resolveUpdateTarget()` fetches by git tag (`/tool?version=X`),
-  independent of whether the manifest still lists that version. The one path
-  that isn't safe: a **floating minor pin** (`"0.20"`) whose entire line has
-  no entries left in `versions` — `resolveFloatingMinor()` used to silently
-  fall back to the channel/latest version while the UI kept saying "pinned to
-  0.20.x," a real track-jump with no warning. Fixed (see the `pinMissing`
-  flag on `resolveUpdateTarget()`'s return value): it now holds at the
-  currently-installed version and reports "pin has no builds left in the
-  manifest" instead. **Rule for future manifest cleanup: never delete the git
-  tag; trimming the changelog entry is fine except it can strand a floating
-  pin exactly as described above** — if trimming an entire minor line that
-  someone might have floating-pinned to, expect them to see that message.
+- `version.json` grows unbounded — nothing trims old entries automatically,
+  but trimming is a supported, expected admin action (as of v0.24.0). **The
+  standing policy this all depends on: git tags are NEVER deleted, only
+  `versions[]` entries are trimmed.** `versions[]` is purely the curated
+  "available" list; the tag stays fetchable regardless. If that policy is
+  ever violated (a tag actually deleted), `?version=X` 404s and none of the
+  below fires — there's no handling in the fetch-failure path for that case,
+  only in the manifest-read path.
+  - **Exact pin or a channel's target (`channels.stable`/`channels.beta`)
+    trimmed out of `versions[]`** — `resolveUpdateTarget()` calls
+    `resolveNearestAvailable(from, remote.versions, tier)`: prefers the
+    closest still-listed, permission-appropriate version AT OR ABOVE `from`
+    (a deliberate downgrade-pin lands as close to where it was as possible),
+    falling back to the single highest available version this tier can use
+    only if nothing qualifies above (the genuine rollback case — e.g. the
+    whole channel's target vanished with nothing newer behind it). Surfaced
+    via `target.rolledFrom` and a `rolledNote` prefix on the status line in
+    `checkForUpdate()` — never silent. **Deliberately does not persist**
+    (`resolveUpdateTarget()` stays a pure read, no `st.pinnedVersion` write):
+    Setup's `openSetup()` holds its own long-lived shared `st` (§4.1) that
+    wouldn't know about a write made through a freshly-parsed copy here, and
+    since `checkForUpdate()` can run while Setup is open (Save & Apply
+    triggers it without closing the modal), a later Save & Apply would
+    re-persist Setup's stale in-memory pin and clobber a write made here —
+    the same bug class as the v0.21.2 Beta-tab fix. The one path that DOES
+    need the pin reconciled (an active exact/floating pin) is instead handled
+    downstream in `installUpdate()`, which is safe for a different reason:
+    its write there is immediately followed by `rawInstall()`'s
+    teardown-and-reload, so Setup's stale in-memory `st` never survives to
+    overwrite it. Not persisting here isn't "safe because idempotent" on its
+    own — it's safe because that one path is covered elsewhere, by a write
+    that's reload-guarded instead of race-prone.
+  - **A floating minor pin** (`"0.20"`) **whose entire line has no entries
+    left** — different, narrower case, left as-is: `resolveFloatingMinor()`
+    holds at the currently-installed version and reports "pin has no builds
+    left in the manifest" (via `pinMissing`) rather than rolling forward to
+    a different line — a floating pin's whole point is staying on one
+    specific line, so jumping it to another line isn't "nearest available,"
+    it's picking a different feature set the user never asked for.
+  - **Version picker gating** (Settings > Updates): each `version.json` entry
+    can now optionally carry `"grant": "dev"` / `"beta_0"` / `"beta_1"` etc.
+    (same convention as `HOTKEY_ACTIONS`' `betaFeature`) to gate one specific
+    version to one specific grant, checked via the real `hasGrant()` (not the
+    coarse tier string) so a `"beta_1"`-gated entry needs that exact grant.
+    `isVersionEntryAllowed(entry, tier)` is the single gating check, reused by
+    the picker's list-building AND by `resolveNearestAvailable()`'s rollback
+    candidates — a gated version a user can't see is also never offered as a
+    rollback target for them. The picker's "Latest" default option's LABEL is
+    computed via `highestAllowedVersion()` (highest entry this tier can see —
+    "Latest stable (vX)" for a plain user, "Latest (vX)" for dev/beta,
+    reflecting their own personal ceiling). **This only relabels the option —
+    it does NOT change what an unpinned selection actually resolves to**,
+    which is still `channels[channel]` in `resolveUpdateTarget()`. No live
+    versions are grant-gated yet, so this is latent: once one exists, confirm
+    whether unpinned resolution should also start pulling from
+    `highestAllowedVersion()` for a dev/beta channel, or whether the label is
+    meant to describe the picker's ceiling only, independent of what
+    "unpinned" resolves to on that person's current channel.
 - Feedback issues get no labels — could auto-tag `type:bug`/`type:suggestion`
   in the private repo if labels are ever set up there.
 - `settingsTab()` adds a fresh `content.addEventListener('input', saveSettings)`

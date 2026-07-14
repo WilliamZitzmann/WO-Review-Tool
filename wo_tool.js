@@ -1688,6 +1688,68 @@
         });
     }
 
+    // Per-entry version.json gating, for the Settings version picker:
+    // `entry.grant` (optional — a single grant id, same convention as
+    // HOTKEY_ACTIONS' betaFeature, e.g. "dev"/"beta_0"/"beta_1") lets a
+    // SPECIFIC version require a specific grant, checked via the real
+    // per-flag hasGrant() (so a "beta_1"-gated entry needs that exact grant,
+    // not just any beta access) rather than the coarse tier string. The
+    // older "-suffix" prerelease convention (checked via `tier`) is honored
+    // alongside it, not replaced by it — no version has ever actually
+    // shipped with a "-" suffix in practice, but the check is kept for
+    // whichever convention a given entry happens to use.
+    function isVersionEntryAllowed(entry, tier) {
+        if (isPrerelease(entry.version) && tier !== 'beta' && tier !== 'dev') return false;
+        if (entry.grant && !hasGrant(entry.grant)) return false;
+        return true;
+    }
+
+    // Highest version.json entry this tier/grant-set can see at all — used
+    // for the version picker's "Latest" option, computed fresh from the
+    // manifest rather than trusted from a single flat `remote.latest` field,
+    // so a dev/beta holder's "Latest" reflects the newest gated build they
+    // can actually use, not just the plain-user latest.
+    function highestAllowedVersion(remoteVersions, tier) {
+        var allowed = (remoteVersions || []).filter(function(v) {
+            return isVersionEntryAllowed(v, tier);
+        });
+        if (!allowed.length) return '';
+        return allowed.reduce(function(best, v) {
+            return versionGt(v.version, best.version) ? v : best;
+        }).version;
+    }
+
+    // Called when whatever version a pin/channel would naively resolve to
+    // (`from`) isn't actually listed in the manifest anymore — e.g. an admin
+    // trimmed its entry (or a whole channel's target) out of `versions[]`.
+    // Git tags are never deleted (see ARCHITECTURE.md §9/§10), so this is
+    // purely about respecting the manifest as the curated "available" list,
+    // not a fetch failure. Prefers the closest still-available version AT OR
+    // ABOVE `from` (a deliberate downgrade-pin should land as close to where
+    // it was as possible); only falls back to the single highest available
+    // version this tier can use if nothing qualifies above — that's the
+    // genuine rollback case (e.g. the tier's whole channel target vanished
+    // with nothing newer behind it).
+    function resolveNearestAvailable(from, remoteVersions, tier) {
+        var allowed = (remoteVersions || [])
+            .filter(function(v) {
+                return isVersionEntryAllowed(v, tier);
+            })
+            .map(function(v) {
+                return v.version;
+            });
+        if (!allowed.length) return '';
+        var atOrAbove = allowed.filter(function(v) {
+            return v === from || versionGt(v, from);
+        });
+        var pool = atOrAbove.length ? atOrAbove : allowed;
+        var pickLowest = atOrAbove.length; // closest-above wants the smallest of the qualifying set; a true rollback wants the overall highest
+        return pool.reduce(function(best, v) {
+            if (pickLowest) return versionGt(best, v) ? v : best;
+            return versionGt(v, best) ? v : best;
+        });
+    }
+
     // ── Dev/beta unlock (console-only, deliberately not in Setup UI) ──
     // Stored outside __wo_settings so it never rides along in a shared/exported backup.
     // GRANTS_KEY holds a JSON array (e.g. ["user","dev","beta_0"]) rather
@@ -1980,6 +2042,7 @@
         var pinned = !!pin;
         var version;
         var pinMissing = false;
+        var rolledFrom = null;
         if (pinned && isFloatingMinorPin(pin)) {
             version = resolveFloatingMinor(pin, remote.versions);
             if (!version) {
@@ -1998,15 +2061,62 @@
                 pinMissing = true;
             }
         } else {
-            version = pin || channels[channel] || channels.stable || remote.latest;
+            var naive = pin || channels[channel] || channels.stable || remote.latest;
+            var naiveListed = !naive || (remote.versions || []).some(function(v) {
+                return v.version === naive;
+            });
+            if (naive && !naiveListed) {
+                // Whatever this exact pin (or channel/latest) would naively
+                // resolve to has been trimmed out of the manifest — e.g. an
+                // exact pin whose one entry got cleaned up, or (per the
+                // user's own example) a whole channel's target version
+                // deleted out from under everyone following it. Move to the
+                // closest still-available, permission-appropriate version —
+                // see resolveNearestAvailable() for the up-then-fallback
+                // ordering.
+                var fallback = resolveNearestAvailable(naive, remote.versions, tier);
+                if (fallback) {
+                    rolledFrom = naive;
+                    version = fallback;
+                    // Deliberately NOT persisted here (no st.pinnedVersion
+                    // write) — this function must stay a pure read, same
+                    // discipline pinMissing already follows below. Setup's
+                    // openSetup() holds its own long-lived `st` closure
+                    // (§4.1) that doesn't know about a write made through a
+                    // freshly-parsed copy here; if Setup is open when this
+                    // runs (checkForUpdate() fires from Save & Apply, which
+                    // no longer closes the modal), Setup's next Save & Apply
+                    // would re-persist its stale in-memory pin and silently
+                    // clobber a write made here. The actual pin reconciliation
+                    // happens downstream in installUpdate() instead, which is
+                    // safe for a DIFFERENT reason: it only runs once the user
+                    // is pinned (target.pinned, auto-installed immediately) and
+                    // its write is immediately followed by rawInstall()'s
+                    // teardown-and-reload — Setup's stale in-memory `st`
+                    // doesn't survive to overwrite it, since the whole page's
+                    // JS context is torn down first. Not persisting here isn't
+                    // "safe because idempotent" on its own; it's safe because
+                    // the one path that DOES need to persist (an active pin)
+                    // is handled by that reload-guarded write instead.
+                } else {
+                    // Nothing in the manifest is usable at all — same
+                    // fail-safe as the floating-pin-missing case above: hold
+                    // at the currently-installed build rather than error out.
+                    version = TOOL_VERSION;
+                    pinMissing = true;
+                }
+            } else {
+                version = naive;
+            }
         }
         return {
             channel: channel,
             version: version,
             pinned: pinned,
             pinKind: pinned ? (isFloatingMinorPin(pin) ? 'floating' : 'exact') : null,
-            pinRaw: pin,
-            pinMissing: pinMissing
+            pinRaw: (pinned && rolledFrom) ? version : pin,
+            pinMissing: pinMissing,
+            rolledFrom: rolledFrom
         };
     }
 
@@ -2040,6 +2150,13 @@
                     return;
                 }
 
+                // Surfaced whenever resolveUpdateTarget() had to move a pin
+                // or channel target off a version that's no longer in the
+                // manifest — same "never silently track-jump" principle as
+                // pinMissing below, just for the rollback/roll-forward case
+                // instead of the "nothing left at all" case.
+                var rolledNote = target.rolledFrom ? ('v' + target.rolledFrom + ' is no longer available — ') : '';
+
                 if (target.version === TOOL_VERSION) {
                     dismissUpdateBanner();
                     var pinnedLabel = target.pinMissing ?
@@ -2047,7 +2164,7 @@
                         (target.pinKind === 'floating' ?
                             'Pinned to ' + target.pinRaw + '.x (v' + TOOL_VERSION + ')' :
                             'Pinned to v' + TOOL_VERSION);
-                    setStatus((target.pinned ?
+                    setStatus(rolledNote + (target.pinned ?
                         pinnedLabel :
                         'Running the latest ' + target.channel + ' version (v' + TOOL_VERSION + ')') + grantsStatusLine());
                     return;
@@ -2061,9 +2178,11 @@
                     // No banner ever shows while pinned; a stale one from before the
                     // pin was set must not linger and offer a conflicting install.
                     dismissUpdateBanner();
-                    setStatus(target.pinKind === 'floating' ?
+                    setStatus(rolledNote + (target.pinKind === 'floating' ?
                         'Installing v' + target.version + ' (latest ' + target.pinRaw + '.x)...' :
-                        'Installing pinned v' + target.version + '...');
+                        (target.rolledFrom ?
+                            'installing closest available v' + target.version + ' instead...' :
+                            'Installing pinned v' + target.version + '...')));
                     installUpdate(target.version);
                     return;
                 }
@@ -2077,18 +2196,18 @@
                 var isPatchOnly = sameMinor(target.version, TOOL_VERSION) && versionGt(target.version, TOOL_VERSION);
                 var patchAutoUpdate = st.autoUpdatePatch !== false;
                 if (isPatchOnly && patchAutoUpdate) {
-                    setStatus('Installing patch update v' + target.version + '...');
+                    setStatus(rolledNote + 'Installing patch update v' + target.version + '...');
                     installUpdate(target.version);
                 } else if (st.autoUpdate) {
-                    setStatus('Auto-installing update v' + target.version + '...');
+                    setStatus(rolledNote + 'Auto-installing update v' + target.version + '...');
                     installUpdate(target.version);
                 } else {
                     var skipped = st.skippedVersion || '';
                     if (skipped === target.version) {
-                        setStatus('Update v' + target.version + ' available (skipped — see Settings to re-enable)');
+                        setStatus(rolledNote + 'Update v' + target.version + ' available (skipped — see Settings to re-enable)');
                         return;
                     }
-                    setStatus('Update available - current version: v' + TOOL_VERSION);
+                    setStatus(rolledNote + 'Update available - current version: v' + TOOL_VERSION);
                     showUpdatePrompt(remote, target);
                 }
 
@@ -8506,8 +8625,23 @@
                     // The default option is a placeholder until this fetch
                     // resolves — once it does, say which version "Latest"
                     // actually means instead of leaving that unstated.
+                    // Computed as the highest version THIS tier can use, not
+                    // trusted from the flat remote.latest field — a plain
+                    // user gets "Latest stable", a dev/beta holder gets
+                    // whichever gated build is actually their ceiling, with
+                    // no indication a higher one exists otherwise (a plain
+                    // user's ceiling is invisibly just the stable line).
                     var defaultOpt = pinSel.querySelector('option[value=""]');
-                    if (defaultOpt && remoteV.latest) defaultOpt.textContent = 'Latest (' + remoteV.latest + ')';
+                    if (defaultOpt) {
+                        var highest = highestAllowedVersion(remoteV.versions, devTier);
+                        if (highest) {
+                            defaultOpt.textContent = (devTier === 'beta' || devTier === 'dev') ?
+                                ('Latest (' + highest + ')') :
+                                ('Latest stable (' + highest + ')');
+                        } else if (remoteV.latest) {
+                            defaultOpt.textContent = 'Latest (' + remoteV.latest + ')';
+                        }
+                    }
                     // Group by major.minor, preserving remoteV.versions' existing
                     // newest-first order. Each line gets a floating "X.Y.x"
                     // option — always tracks that line's newest patch — plus
@@ -8515,10 +8649,10 @@
                     // broke something, freeze at the previous one" rollback case.
                     var lines = [],
                         byLine = {},
-                        nameByVersion = {};
+                        nameByVersion = {},
+                        grantByVersion = {};
                     (remoteV.versions || []).forEach(function(v) {
-                        var isPre = isPrerelease(v.version);
-                        if (isPre && devTier !== 'beta' && devTier !== 'dev') return; // beta/dev builds stay hidden
+                        if (!isVersionEntryAllowed(v, devTier)) return; // gated version, not visible to this tier
                         var key = minorKey(v.version);
                         if (!byLine[key]) {
                             byLine[key] = [];
@@ -8526,6 +8660,7 @@
                         }
                         byLine[key].push(v.version);
                         if (v.name) nameByVersion[v.version] = v.name;
+                        if (v.grant) grantByVersion[v.version] = v.grant;
                     });
                     // Flat list, not <optgroup> — an optgroup's own label
                     // isn't selectable, which fought the "auto-patch is the
@@ -8543,7 +8678,9 @@
                         byLine[key].forEach(function(vstr) {
                             var opt = document.createElement('option');
                             opt.value = vstr;
-                            opt.textContent = '    ' + vstr + (nameByVersion[vstr] ? ' — ' + nameByVersion[vstr] : '');
+                            opt.textContent = '    ' + vstr +
+                                (nameByVersion[vstr] ? ' — ' + nameByVersion[vstr] : '') +
+                                (grantByVersion[vstr] ? ' (' + grantByVersion[vstr] + ')' : '');
                             if (st.pinnedVersion === vstr) opt.selected = true;
                             pinSel.appendChild(opt);
                         });
