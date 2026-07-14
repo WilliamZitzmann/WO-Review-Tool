@@ -600,18 +600,23 @@ already-captured synchronous `cache`/`cfg` data:
   or the cache is already warm, otherwise fetches once and populates
   `whoamiCache` (swallowing a fetch failure into `{}` rather than leaving
   `null`, so a broken fetch doesn't retry forever on every scan).
-- **`refreshWhoamiIfEnabled()`** — the actual call site wrapper used at the
-  three places this needs triggering (tool startup, top of `runScan()`, and
-  the Settings checkbox's own `onchange`): checks `st.whoamiInFormulas`
-  **before** touching `ensureWhoamiCache()`'s promise chain at all, so the
-  overwhelmingly common case (feature off, true for ~everyone) costs one
-  `localStorage` read and nothing else — no extra full `render()` fired on
-  every scan for a feature almost nobody has on. Each call site is
-  fire-and-forget (`.then(render)`, never awaited) since none of them can
-  block on a network round trip: startup's `render()` already happened
-  once synchronously (pre-scan formulas just see `''` until this resolves
-  and re-renders), and `runScan()` has its own long async step sequence
-  already running independently.
+- **`refreshWhoamiIfEnabled()`** — the actual call site wrapper, used at
+  exactly two places: tool startup, and the Settings checkbox's own
+  `onchange` (to cover turning the toggle on mid-session without a reload).
+  Checks `st.whoamiInFormulas` **before** touching `ensureWhoamiCache()`'s
+  promise chain at all, so the common case (feature off) costs one
+  `localStorage` read and nothing else. **Deliberately not called from
+  `runScan()`** — whoami data essentially never changes within a session,
+  and `ensureWhoamiCache()`'s "already have a cached value" guard means a
+  second call can never actually refresh anything anyway (success or
+  fetch-failure, the cache is treated as settled either way) — a scan-time
+  call would only ever be a wasted `localStorage` read, or in the narrow
+  window before startup's own fetch resolves, a pointless duplicate
+  in-flight request. Both real call sites are fire-and-forget (`.then(render)`,
+  never awaited) since neither can block on a network round trip: startup's
+  own `render()` already happened synchronously before this fires (pre-scan
+  formulas just see `''` until this resolves and re-renders), and toggling
+  the checkbox doesn't block anything either.
 - Its first argument (`field`) gets the same completion-dropdown treatment
   as a table name in `T(`/`lookup(`/`count(` — `completionSource()` returns
   the fixed six field names (`username`, `email`, `displayName`,

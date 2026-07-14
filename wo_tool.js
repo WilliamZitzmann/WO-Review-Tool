@@ -32,7 +32,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26195.2033z';
+    var BUILD_ID = '26195.2040z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -2123,12 +2123,16 @@
         });
     }
 
-    // Called from the scan/startup hot paths, which run for everyone
-    // regardless of whether this opt-in feature is on. Checks the toggle
-    // BEFORE touching ensureWhoamiCache's promise chain at all, so the
-    // overwhelmingly common case (feature off) costs one localStorage read
-    // and nothing else — no extra full render() on every scan for a
-    // feature almost nobody enables.
+    // Called once at tool startup, and again from the Settings checkbox's
+    // own onchange (to cover turning the toggle on mid-session) — NOT from
+    // runScan(), since whoami data essentially never changes within a
+    // session and ensureWhoamiCache() only ever fetches once anyway (its
+    // guard treats "already have a cached value" as done, success or not);
+    // a scan-time call would just be a wasted localStorage read at best, or
+    // a duplicate in-flight fetch at worst, never an actual refresh. Checks
+    // the toggle BEFORE touching ensureWhoamiCache's promise chain at all,
+    // so the common case (feature off) costs one localStorage read and
+    // nothing else.
     function refreshWhoamiIfEnabled() {
         var s;
         try {
@@ -3358,10 +3362,6 @@
         };
         var sew = findSendEventWin();
         var scan = getScan();
-        // Fire-and-forget — a no-op unless the opt-in toggle is on; a rule
-        // that reads whoami() will just see '' until the next re-render
-        // either way, never blocks the scan itself.
-        refreshWhoamiIfEnabled();
         setStatus('Reading WO tab...');
         // Capture whatever's on the currently-open tab (normally the WO tab
         // itself, since that's where a scan starts) before evaluating any
