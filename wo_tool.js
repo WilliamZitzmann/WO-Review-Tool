@@ -32,7 +32,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26195.1307z';
+    var BUILD_ID = '26195.1505z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -212,7 +212,7 @@
         defaultHotkey: 'Alt+R',
         run: function() {
             if (actionsBusy()) return;
-            woConfirm('Return this Work Order?\n\nThe return message will be filled into the Memo field.').then(function(ok) {
+            woConfirm('Return this work order?\n\nThe return message will be inserted into Memo.').then(function(ok) {
                 if (!ok || actionsBusy()) return;
                 routing = true;
                 setActionsLocked(true);
@@ -226,7 +226,7 @@
         defaultHotkey: '',
         run: function() {
             if (actionsBusy()) return;
-            woConfirm('Approve this Work Order?\n\nThis will route with Complete Review selected.').then(function(ok) {
+            woConfirm('Approve this work order?\n\nRoutes using Complete Review.').then(function(ok) {
                 if (!ok || actionsBusy()) return;
                 routing = true;
                 setActionsLocked(true);
@@ -246,7 +246,7 @@
     }, {
         id: 'copyReturn',
         settingsKey: 'copyReturnHotkey',
-        label: 'Copy Return Message',
+        label: 'Copy',
         defaultHotkey: 'Alt+C',
         run: function() {
             copyReturnMessage();
@@ -268,7 +268,7 @@
     var DEFAULT_CFG = {
         groups: [{
             id: 'g_core',
-            title: 'Work Order Summary',
+            title: 'Summary',
             layout: 'vertical',
             fields: ['Work Order :: Work Order', 'Work Order :: Description', 'Work Order :: Asset', 'Work Order :: Location', 'Work Order :: Work Type', 'Work Order :: Status'],
             table: null,
@@ -276,7 +276,7 @@
             defaultCollapsed: false
         }, {
             id: 'g_time',
-            title: 'Time Check',
+            title: 'Time',
             layout: 'horizontal',
             fields: ['Work Order :: Actual Start', 'Work Order :: Actual Finish', 'Work Order :: Duration'],
             table: null,
@@ -284,7 +284,7 @@
             defaultCollapsed: false
         }, {
             id: 'g_lot',
-            title: 'Lot Number',
+            title: 'Lot',
             layout: 'vertical',
             fields: ['Work Order :: Production Run Lot #'],
             table: null,
@@ -292,7 +292,7 @@
             defaultCollapsed: false
         }, {
             id: 'g_downtime',
-            title: 'Downtime History',
+            title: 'Downtime',
             layout: 'vertical',
             fields: [],
             table: 'm69f3c12d',
@@ -300,7 +300,7 @@
             defaultCollapsed: true
         }, {
             id: 'g_related',
-            title: 'Related Work Orders',
+            title: 'Related WOs',
             layout: 'vertical',
             fields: [],
             table: 'Related Work Orders',
@@ -325,21 +325,21 @@
         }],
         rules: [{
             id: 'r_lot',
-            label: 'Lot Number Provided',
+            label: 'Lot Present',
             formula: "var lot=(F('Work Order :: Production Run Lot #')||'').trim();\nif(/^n\\/?a$/i.test(lot)) return 'na';\nreturn lot.length>3;",
             pass: { short: '', long: [] },
             fail: { short: '', long: [], returnMode: 'none', returnCustom: '' },
             warn: { short: '', long: [], returnMode: 'none', returnCustom: '' }
         }, {
             id: 'r_duration',
-            label: 'Time Validated',
+            label: 'Time Valid',
             formula: "var d=hours(F('Work Order :: Duration'));\nvar a=hoursBetween(F('Work Order :: Actual Start'),F('Work Order :: Actual Finish'));\nif(d==null) return 'na';\nif(a==null) return 'na';\nreturn d<=a;",
             pass: { short: '', long: [] },
             fail: { short: '', long: [], returnMode: 'none', returnCustom: '' },
             warn: { short: '', long: [], returnMode: 'none', returnCustom: '' }
         }, {
             id: 'r_downtime',
-            label: 'Downtime Logged',
+            label: 'Downtime',
             formula: "var wt=F('Work Order :: Work Type');\nif(!oneOf(wt,['DM'])) return 'na';\nreturn rowCount('m69f3c12d')>0;",
             pass: { short: '', long: [] },
             fail: { short: '', long: [], returnMode: 'none', returnCustom: '' },
@@ -353,12 +353,13 @@
             warn: { short: '', long: [], returnMode: 'none', returnCustom: '' }
         }, {
             id: 'r_approver',
-            label: 'Production Approver',
+            label: 'Approver',
             formula: "var lot=(F('Work Order :: Production Run Lot #')||'').trim();\nif(/^n\\/?a$/i.test(lot)||lot.length<=3) return 'na';\nvar loc=F('Work Order :: Location')||'';\nvar field='Approvers :: Approval Group 3';\nif(loc.indexOf('AVWP-B1')===0) field='Approvers :: Approval Group 1';\nelse if(loc.indexOf('AVWP-B2')===0) field='Approvers :: Approval Group 2';\nreturn notEmpty(F(field));",
             pass: { short: '', long: [] },
             fail: { short: '', long: [], returnMode: 'none', returnCustom: '' },
             warn: { short: '', long: [], returnMode: 'none', returnCustom: '' }
-        }]
+        }],
+        tableNames: {}
     };
     var DEFAULT_SCAN = {
         woTabId: 'mbf28cd64-tab',
@@ -697,6 +698,31 @@
 
     function looksLikePrefix(s) {
         return /^m[0-9a-f]{6,}/.test(s) || (/^[a-z][a-z0-9]{5,}$/.test(s) && s.indexOf(' ') < 0);
+    }
+
+    // Built-in friendly names for raw internal table identifiers that ship
+    // with the tool's own defaults (e.g. the Downtime dialog's grid has no
+    // discoverable header text, so its "table" is the raw Maximo widget
+    // prefix). Covers every user out of the box, including ones with an
+    // existing saved config from before cfg.tableNames existed — a per-
+    // profile override in cfg.tableNames always takes precedence over this.
+    var KNOWN_TABLE_NAMES = {
+        'm69f3c12d': 'Downtime History'
+    };
+
+    // Resolves a raw table identifier (a human title like "Related Work
+    // Orders", already fine as-is, OR an opaque internal prefix like
+    // "m69f3c12d") to whatever a user should actually see for it: their own
+    // per-profile rename (cfg.tableNames), falling back to a built-in known
+    // name, falling back to the raw identifier itself. Never changes what's
+    // actually STORED anywhere (group.table, scan waitTable, rowDetailFields
+    // tablePrefix all keep the raw id as their real value) — this is a
+    // display-only lookup, called fresh at render time so a rename in the
+    // Tables tab shows up everywhere immediately.
+    function friendlyTableName(cfg, id) {
+        if (!id) return id;
+        var overrides = (cfg && cfg.tableNames) || {};
+        return overrides[id] || KNOWN_TABLE_NAMES[id] || id;
     }
 
     function findPrefixDoc(prefix) {
@@ -1530,7 +1556,7 @@
             '<div class="wo-notice-title">⚠ Config was reset — backup file found</div>' +
             '<div class="wo-notice-body">Click below to restore your settings from <b>' + (handle.name || 'backup') + '</b></div>' +
             '<div class="wo-notice-actions">' +
-            '<button id="__wo_restore_btn" type="button" class="wo-btn wo-btn-primary">Restore Config</button>' +
+            '<button id="__wo_restore_btn" type="button" class="wo-btn wo-btn-primary">Restore</button>' +
             '<button id="__wo_restore_skip" type="button" class="wo-btn-ghost">Start Fresh</button>' +
             '</div>';
         if (bodyEl) bodyEl.insertBefore(banner, bodyEl.firstChild);
@@ -1607,8 +1633,8 @@
             '<div class="wo-notice-title">⚠ No backup protection</div>' +
             '<div class="wo-notice-body">' + message + '</div>' +
             '<div class="wo-notice-actions">' +
-            '<button id="__wo_set_new_backup" type="button" class="wo-btn wo-btn-fail">Set New Backup Location</button>' +
-            '<button id="__wo_link_backup" type="button" class="wo-btn">Link Existing Backup File</button>' +
+            '<button id="__wo_set_new_backup" type="button" class="wo-btn wo-btn-fail">New Location</button>' +
+            '<button id="__wo_link_backup" type="button" class="wo-btn">Link Existing</button>' +
             '<button id="__wo_backup_dismiss" type="button" class="wo-btn-ghost">Don\'t ask again</button>' +
             '</div>';
         if (bodyEl) bodyEl.insertBefore(banner, bodyEl.firstChild);
@@ -1633,7 +1659,7 @@
     // ── Pick new backup file location ──
     function pickBackupFile() {
         if (typeof window.showSaveFilePicker === 'undefined') {
-            return woAlert('Your browser does not support file system access. Use Chrome or Edge for auto-backup.');
+            return woAlert('File System Access isn\'t supported here — use Chrome or Edge for auto-backup.');
         }
         return window.showSaveFilePicker({
             suggestedName: 'wo_tool_backup.json',
@@ -1669,7 +1695,7 @@
     // ── Link existing backup file (for cross-browser use) ──
     function linkExistingBackupFile() {
         if (typeof window.showOpenFilePicker === 'undefined') {
-            return woAlert('Your browser does not support file system access. Use Chrome or Edge.');
+            return woAlert('File System Access isn\'t supported here — use Chrome or Edge.');
         }
         return window.showOpenFilePicker({
             types: [{
@@ -2405,7 +2431,7 @@
             '<div class="wo-notice-title">Latest ' + target.channel + ' version: v' + target.version + '</div>' +
             '<div style="max-height:120px;overflow-y:auto;margin-bottom:8px;">' + changelogHtml + '</div>' +
             '<div class="wo-notice-actions">' +
-            '<button id="__wo_update_btn" type="button" class="wo-btn wo-btn-pass">Install Update</button>' +
+            '<button id="__wo_update_btn" type="button" class="wo-btn wo-btn-pass">Install</button>' +
             '<button id="__wo_update_auto" type="button" class="wo-btn-ghost">' + autoBtnLabel + '</button>' +
             '<button id="__wo_update_skip" type="button" class="wo-btn-ghost">Skip</button>' +
             '<button id="__wo_update_disable" type="button" class="wo-btn-ghost">Disable Updates</button>' +
@@ -3295,7 +3321,7 @@
                 mergeSnapshot(extractSnapshotFull());
                 scanning = false;
                 setActionsLocked(false);
-                setStatus('Scan complete ' + new Date().toLocaleTimeString());
+                setStatus('Complete ' + new Date().toLocaleTimeString());
                 done();
                 return;
             }
@@ -3311,7 +3337,7 @@
                 mergeSnapshot(extractSnapshotFull());
                 scanning = false;
                 setActionsLocked(false);
-                setStatus('Scan complete ' + new Date().toLocaleTimeString());
+                setStatus('Complete ' + new Date().toLocaleTimeString());
                 done();
             });
         }
@@ -4438,7 +4464,7 @@
                 }, 1500);
             }
         }
-        setStatus('Return message copied to clipboard.');
+        setStatus('Copied to clipboard.');
     }
 
     function render() {
@@ -4610,6 +4636,7 @@
                     var color = statusColor(s);
                     var statusLabel = '';
                     var subMsgs = [];
+                    var dimRow = false;
                     if (s === 'pass') {
                         var passLong = resolveMsgList(rule.pass && rule.pass.long, cache);
                         if (passLong.length) {
@@ -4619,25 +4646,42 @@
                             subMsgs = passLong;
                         } else {
                             var passShort = (rule.pass && rule.pass.short) ? resolveMsg(rule.pass.short, cache) : '';
-                            statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">' + (passShort ? '✓ ' + String(passShort).replace(/</g, '&lt;') : '✓ OK') + '</span>';
+                            // A bare checkmark already means "passed" — only
+                            // show text here if the rule has something more
+                            // specific to say than the generic "OK" runFormula()
+                            // falls back to.
+                            statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">' + (passShort ? '✓ ' + String(passShort).replace(/</g, '&lt;') : '✓') + '</span>';
                         }
                     } else if (s === 'fail') {
                         var failLong = resolveMsgList(rule.fail && rule.fail.long, cache);
                         if (failLong.length) {
                             subMsgs = failLong;
                         } else {
-                            statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">✗ ' + String(res.detail).replace(/</g, '&lt;') + '</span>';
+                            var failShort = (rule.fail && rule.fail.short) ? resolveMsg(rule.fail.short, cache) : '';
+                            statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">' + (failShort ? '✗ ' + String(failShort).replace(/</g, '&lt;') : '✗') + '</span>';
                         }
                     } else if (s === 'warn') {
                         var warnLong = resolveMsgList(rule.warn && rule.warn.long, cache);
                         if (warnLong.length) {
                             subMsgs = warnLong;
                         } else {
-                            statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">⚠ ' + String(res.detail).replace(/</g, '&lt;') + '</span>';
+                            var warnShort = (rule.warn && rule.warn.short) ? resolveMsg(rule.warn.short, cache) : '';
+                            statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">' + (warnShort ? '⚠ ' + String(warnShort).replace(/</g, '&lt;') : '⚠') + '</span>';
                         }
                         // override subHtml color for warn
                     } else if (s === 'na') {
-                        statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">— N/A</span>';
+                        // The generic "Not applicable" default carries no
+                        // information beyond the status itself — grey out the
+                        // whole row instead (border + label + icon all read as
+                        // muted) rather than repeating it in text. A formula
+                        // that returned something unexpected still surfaces
+                        // that diagnostic detail, since that's actually useful
+                        // (a misbehaving rule), not boilerplate.
+                        if (res.detail === 'Not applicable') {
+                            dimRow = true;
+                        } else {
+                            statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">— ' + String(res.detail).replace(/</g, '&lt;') + '</span>';
+                        }
                     } else {
                         statusLabel = '<span class="wo-rule-status" style="color:' + color + ';">⚠ ' + String(res.detail).replace(/</g, '&lt;') + '</span>';
                     }
@@ -4647,7 +4691,7 @@
                         return '<div class="wo-rule-msg" style="color:' + subColor + ';">• ' + String(m).replace(/</g, '&lt;') + '</div>';
                     }).join('');
 
-                    rulesHtml += '<div class="wo-rule" style="border-left-color:' + color + ';">' + '<div class="wo-rule-top">' + '<span class="wo-rule-label">' + String(res.label).replace(/</g, '&lt;') + '</span>' + statusLabel + '</div>' + subHtml + '</div>';
+                    rulesHtml += '<div class="wo-rule" style="border-left-color:' + color + ';' + (dimRow ? 'opacity:0.5;' : '') + '">' + '<div class="wo-rule-top">' + '<span class="wo-rule-label">' + String(res.label).replace(/</g, '&lt;') + '</span>' + statusLabel + '</div>' + subHtml + '</div>';
                 });
             }
             var bodyHtml = '';
@@ -5026,7 +5070,7 @@
         returnBtn.disabled = actionsBusy();
         returnBtn.onclick = function() {
             if (actionsBusy()) return;
-            woConfirm('Return this Work Order?\n\nThe return message will be filled into the Memo field.').then(function(ok) {
+            woConfirm('Return this work order?\n\nThe return message will be inserted into Memo.').then(function(ok) {
                 if (!ok || actionsBusy()) return;
                 routing = true;
                 setActionsLocked(true);
@@ -5065,7 +5109,7 @@
         approveBtn.disabled = actionsBusy();
         approveBtn.onclick = function() {
             if (actionsBusy()) return;
-            woConfirm('Approve this Work Order?\n\nThis will route with Complete Review selected.').then(function(ok) {
+            woConfirm('Approve this work order?\n\nRoutes using Complete Review.').then(function(ok) {
                 if (!ok || actionsBusy()) return;
                 routing = true;
                 setActionsLocked(true);
@@ -5259,7 +5303,7 @@
             '<div style="margin-top:8px;display:flex;justify-content:flex-end;gap:8px;">' +
             '<button id="__fb_selall" type="button" class="wo-btn">Select All Visible</button>' +
             '<button id="__fb_selnone" type="button" class="wo-btn">Deselect All</button>' +
-            '<button id="__fb_save" type="button" class="wo-btn wo-btn-pass">Save Selected</button>' +
+            '<button id="__fb_save" type="button" class="wo-btn wo-btn-pass">Save</button>' +
             '</div>';
         document.body.appendChild(bModal);
 
@@ -5753,6 +5797,7 @@
             groups: '<rect x="2.5" y="2.5" width="7" height="7" rx="1.2" stroke="currentColor" stroke-width="1.3"/><rect x="6.5" y="6.5" width="7" height="7" rx="1.2" stroke="currentColor" stroke-width="1.3"/>',
             vars: '<path d="M5.6 2.8C4.1 2.8 3.7 3.6 3.7 4.6V6.4C3.7 7.1 3.4 7.5 2.6 7.7V8.3C3.4 8.5 3.7 8.9 3.7 9.6V11.4C3.7 12.4 4.1 13.2 5.6 13.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M10.4 2.8C11.9 2.8 12.3 3.6 12.3 4.6V6.4C12.3 7.1 12.6 7.5 13.4 7.7V8.3C12.6 8.5 12.3 8.9 12.3 9.6V11.4C12.3 12.4 11.9 13.2 10.4 13.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>',
             scan: '<path d="M2.5 5.5V3.5C2.5 2.9 2.9 2.5 3.5 2.5H5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M10.5 2.5H12.5C13.1 2.5 13.5 2.9 13.5 3.5V5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M13.5 10.5V12.5C13.5 13.1 13.1 13.5 12.5 13.5H10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M5.5 13.5H3.5C2.9 13.5 2.5 13.1 2.5 12.5V10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="8" r="1.6" stroke="currentColor" stroke-width="1.3"/>',
+            tables: '<rect x="2.3" y="3" width="11.4" height="10" rx="1.2" stroke="currentColor" stroke-width="1.2"/><path d="M2.3 6.3H13.7" stroke="currentColor" stroke-width="1.2"/><path d="M6.5 6.3V13" stroke="currentColor" stroke-width="1.2"/>',
             profiles: '<circle cx="8" cy="5.3" r="2.3" stroke="currentColor" stroke-width="1.3"/><path d="M3 13.2C3.6 10.6 5.5 9.3 8 9.3C10.5 9.3 12.4 10.6 13 13.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>',
             // 8-tooth flat-topped gear (Chrome/Material "settings" glyph
             // shape) traced as one outline path, not filled — see the
@@ -5793,9 +5838,10 @@
             '<div class="wo-modal-tabs">' +
             '<div class="wo-tab-group">' +
             tabBtn('__s_rules', 'rules', 'Rules') +
-            tabBtn('__s_groups', 'groups', 'Groups & Display') +
+            tabBtn('__s_groups', 'groups', 'Groups') +
             tabBtn('__s_vars', 'vars', 'Variables') +
             tabBtn('__s_scan', 'scan', 'Scan') +
+            tabBtn('__s_tables', 'tables', 'Tables') +
             tabBtn('__s_profiles', 'profiles', 'Profiles') +
             tabBtn('__s_settings', 'settings', 'Settings') +
             (hasAnyBetaGrant() ? tabBtn('__s_beta', 'beta', 'Beta') : '') +
@@ -6288,7 +6334,7 @@
         // read localStorage — not this closure's live objects — so without
         // this, any unsaved in-Setup edit silently never makes it into the
         // outgoing profile's snapshot, despite the UI explicitly promising
-        // "your current config will be saved back to its own profile first."
+        // "your current config is saved first."
         function flushLiveConfigToStorage() {
             saveCfg(cfg);
             saveScan(scan);
@@ -6315,6 +6361,7 @@
             var areas = [];
             if (JSON.stringify(cfg.rules) !== JSON.stringify(before.cfg.rules)) areas.push('Rules');
             if (JSON.stringify(cfg.groups) !== JSON.stringify(before.cfg.groups)) areas.push('Groups');
+            if (JSON.stringify(cfg.tableNames || {}) !== JSON.stringify(before.cfg.tableNames || {})) areas.push('Table names');
             if (JSON.stringify(scan) !== JSON.stringify(before.scan)) areas.push('Scan targets & actions');
             if (JSON.stringify(deferredSettingsSlice(st)) !== JSON.stringify(before.st)) areas.push('Update channel/version pin');
             if (!areas.length) return 'No changes to save.';
@@ -6682,7 +6729,7 @@
             btn.onclick = function(ev) {
                 ev.stopPropagation();
                 closeRuleMenu();
-                woPrompt('Tooltip for "' + entryLabel + '" — a short, plain-English explanation shown on hover. Leave blank to remove.', entry.tooltip || '').then(function(next) {
+                woPrompt('Tooltip for "' + entryLabel + '" (shown on hover). Leave blank to remove.', entry.tooltip || '').then(function(next) {
                     if (next == null) return;
                     entry.tooltip = next.trim();
                     rerenderFn();
@@ -7004,7 +7051,7 @@
             ta.select();
             document.execCommand('copy');
             ta.remove();
-            woAlert('Full config copied to clipboard - save it in a text file.');
+            woAlert('Config copied to clipboard — save it as a text file.');
         };
         modal.querySelector('#__s_imp').onclick = function() {
             woPrompt('Paste exported config JSON:').then(function(raw) {
@@ -7393,9 +7440,12 @@
                     menu.querySelector('[data-del]').onclick = function(ev) {
                         ev.stopPropagation();
                         closeRuleMenu();
-                        vars.splice(idx, 1);
-                        saveVars(vars);
-                        varsTab();
+                        woConfirm('Delete variable "' + v.label + '"?').then(function(ok) {
+                            if (!ok) return;
+                            vars.splice(idx, 1);
+                            saveVars(vars);
+                            varsTab();
+                        });
                     };
                     openRuleMenu = menu;
                 };
@@ -7697,8 +7747,11 @@
                     menu.querySelector('[data-del]').onclick = function(ev) {
                         ev.stopPropagation();
                         closeRuleMenu();
-                        cfg.rules.splice(idx, 1);
-                        rulesTab();
+                        woConfirm('Delete rule "' + rule.label + '"?').then(function(ok) {
+                            if (!ok) return;
+                            cfg.rules.splice(idx, 1);
+                            rulesTab();
+                        });
                     };
                     openRuleMenu = menu;
                 };
@@ -7785,7 +7838,9 @@
                     return '<label style="display:block;"><input type="checkbox" data-fd="' + f.replace(/"/g, '&quot;') + '" ' + (group.fields.indexOf(f) >= 0 ? 'checked' : '') + '>' + f + '</label>';
                 }).join('');
                 var to = '<option value="">-- none --</option>' + opts.tables.map(function(t) {
-                    return '<option value="' + t.replace(/"/g, '&quot;') + '" ' + (group.table === t ? 'selected' : '') + '>' + t + '</option>';
+                    var friendly = friendlyTableName(cfg, t);
+                    var friendlyEsc = friendly.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    return '<option value="' + t.replace(/"/g, '&quot;') + '" ' + (group.table === t ? 'selected' : '') + '>' + friendlyEsc + (friendly !== t ? ' (' + t + ')' : '') + '</option>';
                 }).join('');
                 var rc = cfg.rules.map(function(r) {
                     return '<label style="display:block;"><input type="checkbox" data-rl="' + r.id + '" ' + ((group.ruleRefs || []).indexOf(r.id) >= 0 ? 'checked' : '') + '>' + r.label + '</label>';
@@ -8027,8 +8082,11 @@
                     menu.querySelector('[data-del]').onclick = function(ev) {
                         ev.stopPropagation();
                         closeRuleMenu();
-                        cfg.groups.splice(realIdx, 1);
-                        groupsTab();
+                        woConfirm('Delete group "' + group.title + '"?').then(function(ok) {
+                            if (!ok) return;
+                            cfg.groups.splice(realIdx, 1);
+                            groupsTab();
+                        });
                     };
                     openRuleMenu = menu;
                 };
@@ -8566,8 +8624,11 @@
                     menu.querySelector('[data-del]').onclick = function(ev) {
                         ev.stopPropagation();
                         closeRuleMenu();
-                        scan.scans.splice(idx, 1);
-                        scanTab();
+                        woConfirm('Delete scan step "' + s.title + '"?').then(function(ok) {
+                            if (!ok) return;
+                            scan.scans.splice(idx, 1);
+                            scanTab();
+                        });
                     };
                     openRuleMenu = menu;
                 };
@@ -8588,6 +8649,74 @@
                 scanTab();
             };
             content.appendChild(b);
+        }
+
+        // ── TABLES TAB ── Lists every table identifier referenced across
+        // Groups/Scan/Row-Detail-Fields — both human titles (e.g. "Related
+        // Work Orders", discovered live off the page) and raw internal
+        // Maximo prefixes (e.g. "m69f3c12d", used when a table has no
+        // discoverable header text, like a dialog grid) — and lets each be
+        // given a friendly display name via cfg.tableNames. Purely a display
+        // layer: renaming here never touches what's actually stored in
+        // group.table / waitTable / tablePrefix, so nothing about how a
+        // table is matched on the page changes — see friendlyTableName().
+        function tablesTab() {
+            content.innerHTML = '';
+            if (!cfg.tableNames) cfg.tableNames = {};
+
+            // id -> { groups: [title...], scans: [title...] }
+            var usage = {};
+            function noteUsage(id, kind, label) {
+                if (!id) return;
+                if (!usage[id]) usage[id] = {
+                    groups: [],
+                    scans: []
+                };
+                usage[id][kind].push(label);
+            }
+            cfg.groups.forEach(function(g) {
+                if (g.table) noteUsage(g.table, 'groups', g.title);
+            });
+            (scan.scans || []).forEach(function(s) {
+                if (s.waitTable) noteUsage(s.waitTable, 'scans', s.title);
+                (s.rowDetailFields || []).forEach(function(rdf) {
+                    if (rdf.tablePrefix) noteUsage(rdf.tablePrefix, 'scans', s.title + ' (row detail)');
+                });
+            });
+
+            var ids = Object.keys(usage).sort();
+            if (!ids.length) {
+                var emptyDiv = document.createElement('div');
+                emptyDiv.style.cssText = 'color:var(--wo-muted);font-size:11px;';
+                emptyDiv.textContent = 'No tables referenced yet — set one in a Group\'s Table field or a Scan target\'s Wait for table option.';
+                content.appendChild(emptyDiv);
+                return;
+            }
+
+            ids.forEach(function(id) {
+                var u = usage[id];
+                var box = document.createElement('div');
+                box.className = 'wo-card';
+                var usedInParts = [];
+                if (u.groups.length) usedInParts.push('Groups: ' + u.groups.join(', '));
+                if (u.scans.length) usedInParts.push('Scan: ' + u.scans.join(', '));
+                var isKnownDefault = !cfg.tableNames[id] && KNOWN_TABLE_NAMES[id];
+                box.innerHTML =
+                    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+                    '<code class="wo-mono" style="font-size:10.5px;color:var(--wo-muted);">' + String(id).replace(/</g, '&lt;') + '</code>' +
+                    '</div>' +
+                    '<div style="margin-top:6px;">' +
+                    '<label style="color:var(--wo-muted);font-size:11px;">Display name</label><br>' +
+                    '<input type="text" data-name value="' + String(cfg.tableNames[id] || '').replace(/"/g, '&quot;') + '" placeholder="' + String(isKnownDefault ? KNOWN_TABLE_NAMES[id] : id).replace(/"/g, '&quot;') + '" style="width:100%;margin-top:2px;">' +
+                    '</div>' +
+                    (usedInParts.length ? '<div style="margin-top:6px;color:var(--wo-muted);font-size:10px;">' + usedInParts.join(' · ') + '</div>' : '');
+                content.appendChild(box);
+                box.querySelector('[data-name]').oninput = function(e) {
+                    var v = e.target.value.trim();
+                    if (v) cfg.tableNames[id] = v;
+                    else delete cfg.tableNames[id];
+                };
+            });
         }
 
 
@@ -8649,18 +8778,18 @@
             var qrDiv = document.createElement('div');
             qrDiv.className = 'wo-card';
             qrDiv.innerHTML =
-                '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Quick Return Message</span></div>' +
+                '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Return Message</span></div>' +
                 '<div data-coll-body style="margin-top:7px;">' +
                 '<div style="margin-bottom:6px;"><label style="color:var(--wo-muted);font-size:11px;">Prefix (e.g. Hi {name},)</label><br>' +
                 '<input id="__st_prefix" type="text" value="' + (st.msgPrefix || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;margin-top:2px;"></div>' +
                 '<div style="margin-bottom:6px;"><label style="color:var(--wo-muted);font-size:11px;">Suffix / Signature (e.g. - wz)</label><br>' +
                 '<input id="__st_suffix" type="text" value="' + (st.msgSuffix || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;margin-top:2px;"></div>' +
-                '<div style="margin-bottom:6px;"><label style="color:var(--wo-muted);font-size:11px;">Delimiter between messages (default: space + period)</label><br>' +
+                '<div style="margin-bottom:6px;"><label style="color:var(--wo-muted);font-size:11px;">Delimiter (default: ". ")</label><br>' +
                 '<input id="__st_delim" type="text" value="' + (st.msgDelim !== undefined ? st.msgDelim : '. ').replace(/"/g, '&quot;') + '" style="width:80px;font-size:11px;margin-top:2px;"></div>' +
-                '<div style="margin-top:8px;color:var(--wo-muted);font-size:10px;">Per-rule "include in return message" settings have moved to each rule\'s Fail/Warn section in the Rules tab.</div>' +
+                '<div style="margin-top:8px;color:var(--wo-muted);font-size:10px;">Per-rule inclusion is set in each rule\'s Fail/Warn section.</div>' +
                 '</div>';
             content.appendChild(qrDiv);
-            makeCollapsible(qrDiv, 'Quick Return Message');
+            makeCollapsible(qrDiv, 'Return Message');
 
             // Hotkeys (Scan / Return / Approve / ...) — all registered
             // actions live under ONE collapsible card now (not one card
@@ -8733,9 +8862,9 @@
                 '<div data-coll-body style="margin-top:7px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_autoscan" ' + (st.autoScan ? 'checked' : '') + '>' +
-                '<span style="color:var(--wo-text);font-size:11px;">Auto-scan when a new Work Order is opened</span>' +
+                '<span style="color:var(--wo-text);font-size:11px;">Scan automatically when a new WO opens</span>' +
                 '</label>' +
-                '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;">Compares the current WO number on the page to the last scanned WO. If different, a scan starts automatically.</div>' +
+                '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;">Detects a WO number change from the last scan and starts a new one.</div>' +
                 '</div>';
             content.appendChild(autoScanDiv);
             makeCollapsible(autoScanDiv, 'Auto-Scan', false);
@@ -8752,9 +8881,9 @@
                 '<div data-coll-body style="margin-top:7px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_hide_summary" ' + (st.hideSummaryBar ? '' : 'checked') + '>' +
-                '<span style="color:var(--wo-text);font-size:11px;">Show pass/fail/warn/error counts under the status line</span>' +
+                '<span style="color:var(--wo-text);font-size:11px;">Show status summary bar</span>' +
                 '</label>' +
-                '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;">A quick at-a-glance summary across every rule, useful since scrolling can hide most groups from view at once.</div>' +
+                '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;">Pass/fail/warn/error counts under the status line.</div>' +
                 '</div>';
             content.appendChild(displayDiv);
             makeCollapsible(displayDiv, 'Display', false);
@@ -8812,28 +8941,28 @@
             var backupSettDiv = document.createElement('div');
             backupSettDiv.className = 'wo-card';
             var fsaSupported = typeof window.showSaveFilePicker !== 'undefined';
-            backupSettDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Auto-Backup</span></div>' +
+            backupSettDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Backups</span></div>' +
                 '<div data-coll-body style="margin-top:7px;">' +
                 '<div style="color:var(--wo-muted);font-size:10px;">' +
-                (fsaSupported ? 'File System Access supported (Chrome/Edge)' : '⚠ Not supported in this browser — use manual Export/Import instead') +
+                (fsaSupported ? 'Supported (Chrome/Edge)' : '⚠ Not supported here — use Export/Import instead') +
                 '</div>' +
                 '<div style="margin-top:8px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_autobackup" ' + (st.autoBackup ? 'checked' : '') + '>' +
-                '<span style="color:var(--wo-text);font-size:11px;">Auto-save config backup on changes</span>' +
+                '<span style="color:var(--wo-text);font-size:11px;">Auto-save backup on changes</span>' +
                 '</label></div>' +
                 '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">' +
-                '<button id="__st_set_new_backup" type="button" class="wo-btn" style="font-size:11px;">Set New Backup Location</button>' +
-                '<button id="__st_link_backup" type="button" class="wo-btn" style="font-size:11px;">Link Existing Backup</button>' +
+                '<button id="__st_set_new_backup" type="button" class="wo-btn" style="font-size:11px;">New Location</button>' +
+                '<button id="__st_link_backup" type="button" class="wo-btn" style="font-size:11px;">Link Existing</button>' +
                 '</div>' +
                 '<div style="margin-top:8px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_backup_prompt_reset" ' + (!st.backupPromptDismissed ? 'checked' : '') + '>' +
-                '<span style="color:var(--wo-text);font-size:11px;">Show backup setup prompt if not configured</span>' +
+                '<span style="color:var(--wo-text);font-size:11px;">Prompt if backup isn\'t set up</span>' +
                 '</label></div>' +
                 '</div>';
             content.appendChild(backupSettDiv);
-            makeCollapsible(backupSettDiv, 'Auto-Backup', false);
+            makeCollapsible(backupSettDiv, 'Backups', false);
 
             backupSettDiv.querySelector('#__st_autobackup').onchange = function(e) {
                 st.autoBackup = e.target.checked;
@@ -8887,20 +9016,20 @@
                 '<div style="margin-top:10px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_upd_disable" ' + (st.updateDisabled ? 'checked' : '') + '>' +
-                '<span style="color:var(--wo-text);font-size:11px;">Disable update check on launch</span>' +
+                '<span style="color:var(--wo-text);font-size:11px;">Disable update check</span>' +
                 '</label></div>' +
                 '<div style="margin-top:6px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_upd_auto_patch" ' + (st.autoUpdatePatch !== false ? 'checked' : '') + '>' +
-                '<span style="color:var(--wo-text);font-size:11px;">Auto-install patch fixes silently (same X.Y line — bug fixes only, on by default)</span>' +
+                '<span style="color:var(--wo-text);font-size:11px;">Auto-install patches (same line, on by default)</span>' +
                 '</label></div>' +
                 '<div style="margin-top:6px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_upd_auto" ' + (st.autoUpdate ? 'checked' : '') + '>' +
-                '<span style="color:var(--wo-text);font-size:11px;">Also auto-install minor/major updates silently (new features, behavior changes — off by default)</span>' +
+                '<span style="color:var(--wo-text);font-size:11px;">Also auto-install new features (off by default)</span>' +
                 '</label></div>' +
                 '<div style="margin-top:8px;">' +
-                '<button id="__st_check_now" type="button" class="wo-btn">Check for Updates Now</button>' +
+                '<button id="__st_check_now" type="button" class="wo-btn">Check Now</button>' +
                 '</div>' +
                 (devTier ?
                     '<div style="margin-top:8px;color:var(--wo-muted);font-size:10px;">window.__woLockDev() in the console re-hides beta/dev options and resets to stable.</div>' :
@@ -9080,19 +9209,19 @@
             dangerDiv.className = 'wo-card';
             dangerDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Reset / Uninstall</span></div>' +
                 '<div data-coll-body style="margin-top:7px;">' +
-                '<div style="color:var(--wo-muted);font-size:11px;margin-bottom:10px;">Neither option below is a permanent removal — clicking the bookmarklet again always reinstalls the tool. These just clear local state now.</div>' +
+                '<div style="color:var(--wo-muted);font-size:11px;margin-bottom:10px;">Neither is permanent — the bookmarklet always reinstalls the tool.</div>' +
                 '<div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start;">' +
-                '<div><button id="__st_reset_tool" type="button" class="wo-btn">Reset Tool (Keep My Config)</button>' +
-                '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;max-width:420px;">Clears the cached tool code and session data. Your rules, groups, variables, and scan config are saved first and restored automatically the next time you click the bookmarklet.</div></div>' +
-                '<div><button id="__st_reset_all" type="button" class="wo-btn wo-btn-danger">Full Reset (Erase Everything)</button>' +
-                '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;max-width:420px;">Erases all rules, groups, variables, scans, and settings, with no backup. Use this to start completely fresh.</div></div>' +
+                '<div><button id="__st_reset_tool" type="button" class="wo-btn">Reset Tool</button>' +
+                '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;max-width:420px;">Clears cached code and session data. Your config is kept and restored automatically next launch.</div></div>' +
+                '<div><button id="__st_reset_all" type="button" class="wo-btn wo-btn-danger">Full Reset</button>' +
+                '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;max-width:420px;">Erases everything, with no backup. Starts completely fresh.</div></div>' +
                 '</div>' +
                 '</div>';
             content.appendChild(dangerDiv);
             makeCollapsible(dangerDiv, 'Reset / Uninstall', true);
 
             dangerDiv.querySelector('#__st_reset_tool').onclick = function() {
-                woConfirm('Reset the tool but keep your config?\n\nThe cached tool code and session data will be cleared now. Your rules, groups, variables, and scan config are saved first and will be restored automatically the next time you click the bookmarklet.').then(function(ok) {
+                woConfirm('Reset the tool but keep your config?\n\nClears cached code and session data. Your config is restored automatically next launch.').then(function(ok) {
                     if (!ok) return;
                     var snapshot = {};
                     Object.keys(localStorage).forEach(function(k) {
@@ -9110,7 +9239,7 @@
                     }).forEach(function(k) {
                         localStorage.removeItem(k);
                     });
-                    woAlert('Tool reset. Click the bookmarklet again to reinstall — your config will come back automatically.').then(function() {
+                    woAlert('Tool reset. Click the bookmarklet again — your config comes back automatically.').then(function() {
                         modal._woCleanup();
                         modal.remove();
                         teardown();
@@ -9118,9 +9247,9 @@
                 });
             };
             dangerDiv.querySelector('#__st_reset_all').onclick = function() {
-                woConfirm('Erase EVERYTHING — all rules, groups, scans, and settings — plus the tool itself?\n\nThis cannot be undone. There is no backup for this option.').then(function(ok1) {
+                woConfirm('Erase everything — rules, groups, scans, settings, and the tool itself?\n\nCannot be undone. No backup.').then(function(ok1) {
                     if (!ok1) return;
-                    woConfirm('Really sure? This permanently deletes your entire configuration.').then(function(ok2) {
+                    woConfirm('Really sure? This can\'t be undone.').then(function(ok2) {
                         if (!ok2) return;
                         Object.keys(localStorage).filter(function(k) {
                             return k.indexOf('__wo_') === 0;
@@ -9144,11 +9273,11 @@
             var div = document.createElement('div');
             div.className = 'wo-card';
             div.style.cssText = 'display:flex;flex-direction:column;height:100%;gap:8px;padding:10px;';
-            div.innerHTML = '<div style="color:var(--wo-muted);font-size:11px;">Paste or load the full tool script, then click Install. This is a manual, offline install path — separate from the automatic channel/version updater in the Settings tab.</div>' +
+            div.innerHTML = '<div style="color:var(--wo-muted);font-size:11px;">Paste or load the tool script, then Install. A manual, offline path — separate from automatic updates.</div>' +
                 '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
-                '<button id="__upd_load" type="button" class="wo-btn wo-btn-primary">Load Saved Code</button>' +
+                '<button id="__upd_load" type="button" class="wo-btn wo-btn-primary">Load Saved</button>' +
                 '<label class="wo-btn" style="cursor:pointer;">Open File… <input type="file" id="__upd_file" accept=".js,.txt,text/javascript,text/plain" style="display:none;"></label>' +
-                '<button id="__upd_save_file" type="button" class="wo-btn">Save to File…</button>' +
+                '<button id="__upd_save_file" type="button" class="wo-btn">Save File…</button>' +
                 '</div>' +
                 '<textarea id="__upd_ta" class="wo-code" style="flex:1;width:100%;min-height:300px;" placeholder="Paste or open a .js file..."></textarea>' +
                 '<div><button id="__upd_go" type="button" class="wo-btn wo-btn-pass">Install</button> <span id="__upd_status" style="color:var(--wo-text);margin-left:10px;font-size:12px;"></span></div>';
@@ -9256,7 +9385,7 @@
             content.innerHTML = '';
             var div = document.createElement('div');
             div.className = 'wo-card';
-            div.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Report a Bug / Suggest an Improvement</span></div>' +
+            div.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Bug / Suggestion</span></div>' +
                 '<div data-coll-body style="margin-top:7px;">' +
                 '<div style="margin-bottom:6px;">Type: <select id="__fb_type">' +
                 '<option value="Bug">Bug</option>' +
@@ -9264,12 +9393,12 @@
                 '</select></div>' +
                 '<textarea id="__fb_body" placeholder="What happened, or what would help?" style="width:100%;height:140px;"></textarea>' +
                 '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;">' +
-                '<button id="__fb_send" type="button" class="wo-btn wo-btn-primary">Send Report</button>' +
+                '<button id="__fb_send" type="button" class="wo-btn wo-btn-primary">Send</button>' +
                 '<span id="__fb_status" style="color:var(--wo-muted);font-size:10px;"></span>' +
                 '</div>' +
                 '</div>';
             content.appendChild(div);
-            makeCollapsible(div, 'Report a Bug / Suggest an Improvement', false);
+            makeCollapsible(div, 'Bug / Suggestion', false);
 
             div.querySelector('#__fb_send').onclick = function() {
                 var type = div.querySelector('#__fb_type').value;
@@ -9336,7 +9465,7 @@
                 '<div data-coll-body style="margin-top:7px;">';
             var ids = Object.keys(profiles);
             if (!ids.length) {
-                localHtml += '<div style="color:var(--wo-muted);font-size:11px;">No saved profiles yet — save the current config as one below, or import a preset.</div>';
+                localHtml += '<div style="color:var(--wo-muted);font-size:11px;">No saved profiles yet — save one below, or import a preset.</div>';
             } else {
                 var onlyOne = ids.length === 1;
                 ids.forEach(function(id) {
@@ -9366,8 +9495,8 @@
             }
             localHtml += '</div>' +
                 '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">' +
-                '<button id="__pf_save_new" type="button" class="wo-btn wo-btn-primary" style="font-size:11px;">Save Current As New Profile</button>' +
-                '<button id="__pf_blank" type="button" class="wo-btn" style="font-size:11px;">Start Blank Profile</button>' +
+                '<button id="__pf_save_new" type="button" class="wo-btn wo-btn-primary" style="font-size:11px;">Save As New</button>' +
+                '<button id="__pf_blank" type="button" class="wo-btn" style="font-size:11px;">Start Blank</button>' +
                 '</div>' +
                 '</div>';
             localDiv.innerHTML = localHtml;
@@ -9377,7 +9506,7 @@
             localDiv.querySelectorAll('.__pf_switch').forEach(function(btn) {
                 btn.onclick = function() {
                     var id = btn.getAttribute('data-id');
-                    woConfirm('Switch to "' + (profiles[id].name || id) + '"? Your current config will be saved back to its own profile first.').then(function(ok) {
+                    woConfirm('Switch to "' + (profiles[id].name || id) + '"? Your current config is saved first.').then(function(ok) {
                         if (!ok) return;
                         flushLiveConfigToStorage();
                         switchProfile(id);
@@ -9449,7 +9578,7 @@
                             settings: {},
                             savedAt: new Date().toISOString()
                         };
-                        woConfirm('Switch to a blank "' + name.trim() + '" profile now? Your current live config will be saved back to its own profile first.').then(function(ok) {
+                        woConfirm('Switch to blank profile "' + name.trim() + '"? Your current config is saved first.').then(function(ok) {
                             if (!ok) return;
                             flushLiveConfigToStorage();
                             registerProfile(blank);
@@ -9555,6 +9684,7 @@
         bindTab('__s_scan', scanTab, function() {
             scanExpandState = {};
         });
+        bindTab('__s_tables', tablesTab);
         bindTab('__s_profiles', profilesTab);
         bindTab('__s_settings', settingsTab);
         bindTab('__s_beta', betaTab);

@@ -308,6 +308,42 @@ markup, call `wireEntryTipIcon(box, entry)` after the card is built, and add
 `editTooltipKebabHtml(entry)` + `wireEditTooltipKebabItem(...)` to its kebab
 menu alongside the other three items.
 
+### 4.5 Delete confirmations
+
+Every kebab-menu Delete action (Variables, Rules, Groups, Scan-steps, plus
+the pre-existing Profile delete) is gated behind a `woConfirm('Delete <kind>
+"<label>"?')` — the splice-and-rerender only runs in the `.then(ok => ...)`
+callback, never unconditionally. Added v0.24.0 after an audit found several
+delete paths had no confirmation at all (a single misclick removed a rule or
+group with no undo). **Any new deletable entry type must follow the same
+pattern** — wrap the existing removal logic in a `woConfirm()` gate rather
+than calling it straight from the kebab item's `onclick`.
+
+### 4.6 Table display names (`cfg.tableNames`)
+
+Maximo's scraped table identifiers are frequently opaque hashes (e.g.
+`m69f3c12d`) rather than human-readable names. `friendlyTableName(cfg, id)`
+is a pure **display-layer** lookup — `cfg.tableNames[id] || KNOWN_TABLE_NAMES[id]
+|| id` — it never rewrites what's actually stored in `group.table`,
+`waitTable`, or a Row Detail Field's `tablePrefix`; those keep referencing the
+raw id so scan logic never has to care about the friendly name at all.
+- `KNOWN_TABLE_NAMES` — a small hardcoded map of built-in friendly names
+  shipped with the tool (currently just `m69f3c12d → 'Downtime History'`).
+- `cfg.tableNames` — a per-profile user override registry (`{}` by default),
+  edited from the new **Tables** Setup tab (`tablesTab()`, between Scan and
+  Profiles) rather than the new-installs-only DEFAULT_CFG path (§ below) —
+  renaming a table is a live, per-profile edit any existing install can use
+  immediately, unlike the DEFAULT_CFG label shortening.
+- `tablesTab()` builds its list by walking `cfg.groups` (`.table`) and
+  `scan.scans` (`.waitTable`, each `.rowDetailFields[].tablePrefix`) to find
+  every id actually referenced, showing where each is used
+  (`Groups: ...` / `Scan: ...`) next to an editable "Display name" input.
+  A table with no override and no `KNOWN_TABLE_NAMES` entry shows its raw id
+  as the input's placeholder.
+- The Groups tab's Table `<select>` renders `friendlyTableName(cfg, t) + '
+  (' + t + ')'` when the friendly name differs from the raw id, so the raw
+  identifier stays visible/searchable even once renamed.
+
 ---
 
 ## 5. Rule / scan engine
@@ -409,7 +445,29 @@ tab's raw-source paste box, or message boxes' `[data-msg]`/`[data-short]`/
 `[data-ret-custom]` (those are plain string templates, not formulas — see
 §5.3).
 
-### 5.3 Unwrapped-helper warning in message boxes (v0.24.0)
+### 5.3 Redundant status text (v0.24.0)
+
+The main panel's rule rows lean on color/icon as the primary status signal
+now, not a repeated word — added as part of a broader text-reduction pass.
+Two independent changes in the same render block:
+- **`na` rows with no custom message** — if a rule's status is `'na'` AND its
+  `detail` is exactly the generic string `'Not applicable'` (i.e. the rule
+  author never set a custom N/A message), the whole `.wo-rule` row gets
+  `opacity:0.5` instead of rendering "— N/A" text. A formula that resolves to
+  `'na'` but supplies its own detail text still shows that text — only the
+  boilerplate default is suppressed.
+- **Pass/fail/warn bare labels** — `'✓ OK'` collapses to a bare `'✓'`,
+  and fail/warn similarly drop the generic `'Failed'`/`'Warning'` filler down
+  to just their icon (`'✗'`/`'⚠'`), **only** when there's no rule-specific
+  short message configured for that outcome. A rule with its own configured
+  short text for a given outcome still shows it next to the icon exactly as
+  before — this only removes the boilerplate default, it doesn't hide
+  anything the rule author actually wrote. **Verify this against a real scan
+  before trusting it** (pass=✓, fail=✗, warn=⚠, na=dimmed) — this logic was
+  checked by re-reading `runFormula`'s generic-string branches, not exercised
+  in a browser.
+
+### 5.4 Unwrapped-helper warning in message boxes (v0.24.0)
 
 Message boxes (`[data-short]`, a Long entry's `[data-msg]`,
 `[data-ret-custom]`) only evaluate text inside `{{expr}}` spans — anything
@@ -486,6 +544,31 @@ ignores keydowns while `document.activeElement` is an editable control
 (input/textarea/select/contenteditable) — added once Fix could silently
 overwrite fields with no confirmation, unlike Return/Approve which confirm.
 
+### 7.1 Action busy-lock (Return/Approve/Fix/Scan)
+
+`actionsBusy()` (true while `scanning` or the new `routing` flag is set) is
+checked at the top of every entry point into Return/Approve/Fix/Scan —
+button `onclick`, hotkey `run()`, and the header Scan trigger all share the
+same guard — so a double-click or a hotkey firing mid-route can't start a
+second overlapping action. `setActionsLocked(bool)` is the single place that
+flips the buttons'/hotkeys' disabled-looking state in sync with the flag.
+
+`routeWorkflow()` (Return/Approve/Fix's shared implementation) has roughly
+15 terminal branches (success, various poll-timeout/error paths); every one
+of them now calls `finishRoute()` on the way out rather than leaving the
+caller to remember to clear `routing` itself — a lock that only gets
+released on the *happy* path is worse than no lock, since a failed branch
+would leave every action permanently disabled until reload.
+`finishRoute()` is backstopped by a 180-second safety timer
+(`__woRouteSafetyTimer`, cancelled and re-armed at the top of every
+`routeWorkflow()` call) — 180s because the longest legitimate wait chain
+inside `routeWorkflow()` is a 90-second password-prompt poll reached only
+after other polls have already run; a shorter safety window would have
+false-positive-unlocked mid-route. Cancel-and-rearm matters because a stale
+timer left over from an earlier, already-finished route must not fire in
+the middle of a later one and release a lock that's legitimately still
+held.
+
 ---
 
 ## 8. UI structure
@@ -541,14 +624,21 @@ everyone.
 1. Bump `TOOL_VERSION` in `wo_tool.js`. **Do not** touch `version.json`
    (`latest`, `channels`, or add a `versions[]` entry) — that's what keeps
    stable/beta users unaffected.
-2. Commit + push `wo_tool.js` to the **public** repo's `main`.
-3. Same file to the **private** repo's `main` — `gh repo clone
-   WilliamZitzmann/WO-Review-Tool-Private` into a scratch/tmp dir (**no
-   persistent local checkout exists** — confirmed with the user, v0.22.0;
-   don't go looking for one), copy `wo_tool.js` in (leave its
-   `permissions.json` alone), set local `git config user.name`/`user.email`
-   (the fresh clone won't inherit global config), commit, push `main` — **no
-   tag yet** — then delete the scratch clone.
+2. Commit + push `wo_tool.js` to the **public** repo's `main`. The public
+   repo's `.git/hooks/pre-commit` auto-rewrites `BUILD_ID` (see §9.3) to the
+   current UTC timestamp whenever `wo_tool.js` is part of the commit — no
+   manual bump needed, it re-stages the file itself.
+3. Same file to the **private** repo's `main` — `scripts/push-private.sh
+   "<commit message>"` (v0.24.0) collapses the whole routine into one
+   command: clones fresh into a `mktemp -d` scratch dir (**still no
+   persistent local checkout** — confirmed with the user, v0.22.0; the
+   script deliberately preserves that, it doesn't change the pattern),
+   copies the SAME `pre-commit` hook into the fresh clone (hooks are
+   local-only, never come along with `git clone`, so this step can't be
+   skipped or `BUILD_ID` silently goes stale there), copies `wo_tool.js` in
+   (leaves `permissions.json` alone), commits, pushes `main` — **no tag
+   yet** — and cleans up the scratch dir automatically via `trap ... EXIT`.
+   Run it from the public repo's root.
 4. Tell the user it's live on dev and wait for them to test and explicitly
    say when to promote.
 
@@ -570,6 +660,43 @@ everyone.
 
 Skipping the private-repo tag (or tagging only one repo) is the single most
 likely release mistake at promotion time — check both tags exist before
+considering a promotion done. (See §9.3 below for the unrelated §9-adjacent
+`BUILD_ID` mechanism — it runs on every dev push in §9.1, not at promotion
+time.)
+
+### 9.3 `BUILD_ID`
+
+`TOOL_VERSION` only bumps on a tagged stable/beta release, but the dev
+channel always tracks the live tip of `main` (§9's whole premise) — so
+several different dev pushes in a row can share one `TOOL_VERSION` with no
+way to tell them apart. `BUILD_ID` (declared next to `TOOL_VERSION`) is a
+compact UTC timestamp in `YYDDD.HHMMz` format (2-digit year, zero-padded
+day-of-year, UTC hour+minute, literal lowercase `z` — e.g. `26195.1307z`),
+surfaced dev-grant-only via `grantsStatusLine()` (prepended ahead of the
+existing grant labels) and a standalone line in Settings > Updates (no
+explanatory subtext there, by request — just the value).
+
+**It is enforced by the `pre-commit` git hook, not by memory or discipline**:
+`.git/hooks/pre-commit` in the public repo greps staged files for
+`wo_tool.js`, and if present, `sed`-rewrites the `BUILD_ID` literal to
+`date -u +"%y%j.%H%M"z` and re-stages the file — so a stale/forgotten
+`BUILD_ID` is structurally impossible on every commit that touches the file,
+on either repo (§9.1 step 3 covers the private repo's copy of the same
+hook, installed fresh by `scripts/push-private.sh` every run since hooks
+aren't part of `git clone`). Since `.git/hooks/` is never tracked by git, a
+fresh clone anywhere else (a new machine, a CI runner) needs the hook file
+recreated manually before it'll take effect there — see the exact `sed`
+line in the hook file itself if it's ever missing.
+
+### 9.4 Auto-update banner: one-click re-enable
+
+`showUpdatePrompt(remote, target, isPatchOnly)` gained a third button
+(v0.24.0) alongside the existing install/dismiss actions:
+`'Enable Auto-Patch Updates'` (when `isPatchOnly`) or `'Enable Automatic
+Updates'` otherwise. Both just flip an existing Settings toggle
+(`s.autoUpdatePatch` or `s.autoUpdate`) the user had previously turned off,
+then immediately call `installUpdate(target.version)` — it's a reactivation
+shortcut for a setting that already existed, not a new settings surface.
 considering a promotion done.
 
 ---
