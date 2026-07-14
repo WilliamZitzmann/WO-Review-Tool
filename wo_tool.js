@@ -1840,21 +1840,6 @@
         return true;
     }
 
-    // Highest version.json entry this tier/grant-set can see at all — used
-    // for the version picker's "Latest" option, computed fresh from the
-    // manifest rather than trusted from a single flat `remote.latest` field,
-    // so a dev/beta holder's "Latest" reflects the newest gated build they
-    // can actually use, not just the plain-user latest.
-    function highestAllowedVersion(remoteVersions, tier) {
-        var allowed = (remoteVersions || []).filter(function(v) {
-            return isVersionEntryAllowed(v, tier);
-        });
-        if (!allowed.length) return '';
-        return allowed.reduce(function(best, v) {
-            return versionGt(v.version, best.version) ? v : best;
-        }).version;
-    }
-
     // Called when whatever version a pin/channel would naively resolve to
     // (`from`) isn't actually listed in the manifest anymore — e.g. an admin
     // trimmed its entry (or a whole channel's target) out of `versions[]`.
@@ -8910,12 +8895,50 @@
             // resolveUpdateTarget()'s early return for channel==='dev') —
             // grey the control out and say so the instant Channel changes,
             // instead of leaving a now-irrelevant dropdown looking live.
+            var lastRemoteV = null;
+            // What the "Latest" option means depends on the CHANNEL you're
+            // currently set to (that's what unpinned actually follows — see
+            // resolveUpdateTarget()), not on your dev/beta GRANT. A dev-grant
+            // holder sitting on the stable channel should see "Latest stable
+            // (X)" pointing at channels.stable, same as a plain user would —
+            // not the highest dev-gated build they merely have permission to
+            // pin to. Mirrors resolveUpdateTarget()'s own channel fallback
+            // (channels[channel] || channels.stable || remote.latest) rather
+            // than re-deriving it from the raw versions[] list, so this label
+            // can never disagree with what an actual unpinned update-check
+            // would resolve to.
+            function updateLatestLabel() {
+                if (!lastRemoteV) return;
+                var defaultOpt = pinSel.querySelector('option[value=""]');
+                if (!defaultOpt) return;
+                var effChannel = st.channel || 'stable';
+                if (effChannel === 'dev' && devTier !== 'dev') effChannel = 'stable';
+                if (effChannel === 'beta' && devTier !== 'beta' && devTier !== 'dev') effChannel = 'stable';
+                // The dev channel has no version.json pointer at all — it
+                // always installs whatever's live on main (see
+                // resolveUpdateTarget()'s early return for channel==='dev'),
+                // not a specific tagged version — so falling back to
+                // channels.stable here would show a stale/wrong number
+                // instead of just saying what dev actually does.
+                if (effChannel === 'dev') {
+                    defaultOpt.textContent = 'Latest (dev — always tracks main)';
+                    return;
+                }
+                var channels = lastRemoteV.channels || {};
+                var target = channels[effChannel] || channels.stable || lastRemoteV.latest;
+                if (target) {
+                    defaultOpt.textContent = (effChannel === 'beta') ?
+                        ('Latest (' + target + ')') :
+                        ('Latest stable (' + target + ')');
+                }
+            }
             function refreshVersionPicker() {
                 var isDev = st.channel === 'dev';
                 pinSel.disabled = isDev;
                 pinSel.style.opacity = isDev ? '0.5' : '';
                 var note = updSettDiv.querySelector('#__st_pin_note');
                 if (note) note.style.display = isDev ? '' : 'none';
+                updateLatestLabel();
             }
             refreshVersionPicker();
             var xhrV = new XMLHttpRequest();
@@ -8924,26 +8947,11 @@
                 if (xhrV.status !== 200) return;
                 try {
                     var remoteV = JSON.parse(xhrV.responseText);
+                    lastRemoteV = remoteV;
                     // The default option is a placeholder until this fetch
                     // resolves — once it does, say which version "Latest"
                     // actually means instead of leaving that unstated.
-                    // Computed as the highest version THIS tier can use, not
-                    // trusted from the flat remote.latest field — a plain
-                    // user gets "Latest stable", a dev/beta holder gets
-                    // whichever gated build is actually their ceiling, with
-                    // no indication a higher one exists otherwise (a plain
-                    // user's ceiling is invisibly just the stable line).
-                    var defaultOpt = pinSel.querySelector('option[value=""]');
-                    if (defaultOpt) {
-                        var highest = highestAllowedVersion(remoteV.versions, devTier);
-                        if (highest) {
-                            defaultOpt.textContent = (devTier === 'beta' || devTier === 'dev') ?
-                                ('Latest (' + highest + ')') :
-                                ('Latest stable (' + highest + ')');
-                        } else if (remoteV.latest) {
-                            defaultOpt.textContent = 'Latest (' + remoteV.latest + ')';
-                        }
-                    }
+                    updateLatestLabel();
                     // Group by major.minor, preserving remoteV.versions' existing
                     // newest-first order. Each line gets a floating "X.Y"
                     // option — always tracks that line's newest patch — plus

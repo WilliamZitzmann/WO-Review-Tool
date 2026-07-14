@@ -630,16 +630,26 @@ considering a promotion done.
     the picker's list-building AND by `resolveNearestAvailable()`'s rollback
     candidates — a gated version a user can't see is also never offered as a
     rollback target for them. The picker's "Latest" default option's LABEL is
-    computed via `highestAllowedVersion()` (highest entry this tier can see —
-    "Latest stable (vX)" for a plain user, "Latest (vX)" for dev/beta,
-    reflecting their own personal ceiling). **This only relabels the option —
-    it does NOT change what an unpinned selection actually resolves to**,
-    which is still `channels[channel]` in `resolveUpdateTarget()`. No live
-    versions are grant-gated yet, so this is latent: once one exists, confirm
-    whether unpinned resolution should also start pulling from
-    `highestAllowedVersion()` for a dev/beta channel, or whether the label is
-    meant to describe the picker's ceiling only, independent of what
-    "unpinned" resolves to on that person's current channel.
+    computed by `updateLatestLabel()`, which mirrors `resolveUpdateTarget()`'s
+    own channel fallback (`channels[effChannel] || channels.stable ||
+    remote.latest`) keyed off the CHANNEL currently selected in the Settings
+    form (`st.channel`, with the same dev/beta-without-grant-falls-back-to-
+    stable normalization `resolveUpdateTarget()` does) — NOT off the user's
+    dev/beta grant tier. A dev-grant holder sitting on the stable channel sees
+    "Latest stable (vX)", same as a plain user; switching their own Channel
+    dropdown to beta/dev updates the label live (`refreshVersionPicker()`
+    calls it on every channel change) without needing to Save first. The dev
+    channel has no `channels.dev` pointer at all (it always installs whatever
+    is live on `main`, ignoring `version.json` — see `resolveUpdateTarget()`'s
+    early return for `channel==='dev'`), so that case is special-cased to say
+    "Latest (dev — always tracks main)" instead of falling back to a stable
+    version number dev doesn't actually track. Earlier versions of this label
+    were computed via a since-removed `highestAllowedVersion()` helper (the
+    highest version.json entry the user's GRANT could see at all, independent
+    of channel) — that meant a dev/beta-grant holder saw their gated ceiling
+    as "Latest" even while sitting on the stable channel, which isn't what
+    unpinned selection actually resolves to. Fixed after being reported live
+    as real confusion, not just the latent mismatch this note used to flag.
 - Feedback issues get no labels — could auto-tag `type:bug`/`type:suggestion`
   in the private repo if labels are ever set up there.
 - `settingsTab()` adds a fresh `content.addEventListener('input', saveSettings)`
