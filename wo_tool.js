@@ -32,7 +32,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26195.1951z';
+    var BUILD_ID = '26195.2033z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -889,6 +889,79 @@
         return max;
     }
 
+    function ifBlankFn(val, fallback) {
+        return isEmptyFn(val) ? fallback : val;
+    }
+
+    function trimFn(s) {
+        return (s == null ? '' : String(s)).trim();
+    }
+
+    function upperFn(s) {
+        return (s == null ? '' : String(s)).toUpperCase();
+    }
+
+    function lowerFn(s) {
+        return (s == null ? '' : String(s)).toLowerCase();
+    }
+
+    function leftFn(s, n) {
+        return (s == null ? '' : String(s)).slice(0, n);
+    }
+
+    function rightFn(s, n) {
+        var str = s == null ? '' : String(s);
+        return str.slice(Math.max(0, str.length - n));
+    }
+
+    // 0-indexed (like JS's own substr), not Excel's 1-indexed MID - this
+    // formula language already mirrors JS elsewhere (regex helpers, real
+    // .indexOf semantics in has()), so staying 0-indexed is the less
+    // surprising choice here even though the name is Excel's.
+    function midFn(s, start, len) {
+        return (s == null ? '' : String(s)).substr(start, len);
+    }
+
+    function toNumOrNull(v) {
+        if (v === null || v === undefined || v === '') return null;
+        var n = parseFloat(String(v).replace(/,/g, ''));
+        return isNaN(n) ? null : n;
+    }
+
+    function sumFn(arr) {
+        var total = 0;
+        (arr || []).forEach(function(v) {
+            var n = toNumOrNull(v);
+            if (n !== null) total += n;
+        });
+        return total;
+    }
+
+    function avgFn(arr) {
+        var nums = (arr || []).map(toNumOrNull).filter(function(n) {
+            return n !== null;
+        });
+        if (!nums.length) return null;
+        return sumFn(nums) / nums.length;
+    }
+
+    function todayFn() {
+        var d = new Date();
+
+        function pad(n) {
+            return (n < 10 ? '0' : '') + n;
+        }
+        // Same DD/MM/YYYY HH:MM shape parseMaxDate() expects, so this drops
+        // straight into hoursBetween()/daysBetween() alongside a captured
+        // Maximo date field with no reformatting needed.
+        return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+
+    function daysBetweenFn(a, b) {
+        var h = hoursBetweenFn(a, b);
+        return h === null ? null : h / 24;
+    }
+
     function buildCtx(data) {
         function F(key) {
             if (data.fields.hasOwnProperty(key)) return data.fields[key];
@@ -933,15 +1006,41 @@
                 }
                 return '';
             },
+            count: function(t, c, v) {
+                return T(t).filter(function(r) {
+                    return (r[c] || '').indexOf(v) >= 0;
+                }).length;
+            },
             isEmpty: isEmptyFn,
             notEmpty: notEmptyFn,
+            ifBlank: ifBlankFn,
+            trim: trimFn,
+            upper: upperFn,
+            lower: lowerFn,
+            left: leftFn,
+            right: rightFn,
+            mid: midFn,
+            sum: sumFn,
+            avg: avgFn,
+            today: todayFn,
             hours: hoursFn,
             hoursBetween: hoursBetweenFn,
+            daysBetween: daysBetweenFn,
             oneOf: oneOfFn,
             contains: containsFn,
             matches: matchesFn,
             maxLaborHours: function(tableTitle, nameCol, hoursCol) {
                 return maxLaborHoursFn(T(tableTitle), nameCol, hoursCol);
+            },
+            whoami: function(field) {
+                var s;
+                try {
+                    s = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+                } catch (e) {
+                    s = {};
+                }
+                if (!s.whoamiInFormulas) return '';
+                return (whoamiCache && whoamiCache[field]) || '';
             },
             V: function(id) {
                 var vars = getVars();
@@ -956,11 +1055,11 @@
         };
     }
 
-    var ARGN = ['F', 'T', 'rowCount', 'col', 'has', 'lookup', 'isEmpty', 'notEmpty', 'hours', 'hoursBetween', 'oneOf', 'contains', 'matches', 'maxLaborHours', 'V'];
+    var ARGN = ['F', 'T', 'rowCount', 'col', 'has', 'lookup', 'count', 'isEmpty', 'notEmpty', 'ifBlank', 'trim', 'upper', 'lower', 'left', 'right', 'mid', 'sum', 'avg', 'today', 'hours', 'hoursBetween', 'daysBetween', 'oneOf', 'contains', 'matches', 'maxLaborHours', 'whoami', 'V'];
 
     function runVariable(formula, data) {
         var c = buildCtx(data);
-        var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.isEmpty, c.notEmpty, c.hours, c.hoursBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.V];
+        var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.V];
         var fn;
         try {
             fn = Function.apply(null, ARGN.concat(['return (' + formula + ');']));
@@ -990,7 +1089,7 @@
 
     function runFormula(formula, data) {
         var c = buildCtx(data);
-        var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.isEmpty, c.notEmpty, c.hours, c.hoursBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.V];
+        var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.V];
         var fn;
         try {
             fn = Function.apply(null, ARGN.concat(['return (' + formula + ');']));
@@ -1998,6 +2097,49 @@
         });
     }
 
+    // whoami() in formulas is opt-in (st.whoamiInFormulas, off by default) —
+    // unlike the Feedback checkbox, this data never leaves the laptop (it's
+    // read from Maximo's own same-origin endpoint), so the risk isn't
+    // network exposure, it's a rule/message pasting a name/email into a
+    // permanent WO record (Memo, etc.) without the user realizing a formula
+    // was pulling it in. Fetched at most once per session (cached), then
+    // refreshed defensively at the top of every scan in case the setting
+    // was only just turned on.
+    var whoamiCache = null;
+
+    function ensureWhoamiCache() {
+        var s;
+        try {
+            s = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+        } catch (e) {
+            s = {};
+        }
+        if (!s.whoamiInFormulas) return Promise.resolve();
+        if (whoamiCache) return Promise.resolve();
+        return readWhoamiCanonical().then(function(w) {
+            whoamiCache = w;
+        }).catch(function() {
+            whoamiCache = {};
+        });
+    }
+
+    // Called from the scan/startup hot paths, which run for everyone
+    // regardless of whether this opt-in feature is on. Checks the toggle
+    // BEFORE touching ensureWhoamiCache's promise chain at all, so the
+    // overwhelmingly common case (feature off) costs one localStorage read
+    // and nothing else — no extra full render() on every scan for a
+    // feature almost nobody enables.
+    function refreshWhoamiIfEnabled() {
+        var s;
+        try {
+            s = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+        } catch (e) {
+            s = {};
+        }
+        if (!s.whoamiInFormulas) return;
+        ensureWhoamiCache().then(render);
+    }
+
     // Clears the tool + its config on a confirmed revoke — deliberately
     // leaves IndexedDB (the linked backup-file handle) untouched, same
     // policy as loader.js, so a config file link survives a revoke.
@@ -2824,7 +2966,7 @@
                 var val = '';
                 try {
                     var c = buildCtx(cache);
-                    var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.isEmpty, c.notEmpty, c.hours, c.hoursBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.V];
+                    var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.V];
                     var fn = Function.apply(null, ARGN.concat(['return (' + action.value + ');']));
                     val = fn.apply(null, av);
                     if (val == null) val = '';
@@ -3042,7 +3184,7 @@
         return msg.replace(/\{\{([\s\S]+?)\}\}/g, function(_, expr) {
             try {
                 var c = buildCtx(data);
-                var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.isEmpty, c.notEmpty, c.hours, c.hoursBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.V];
+                var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.V];
 
                 var fn = Function.apply(null, ARGN.concat(['return (' + expr.trim() + ');']));
                 var r = fn.apply(null, av);
@@ -3216,6 +3358,10 @@
         };
         var sew = findSendEventWin();
         var scan = getScan();
+        // Fire-and-forget — a no-op unless the opt-in toggle is on; a rule
+        // that reads whoami() will just see '' until the next re-render
+        // either way, never blocks the scan itself.
+        refreshWhoamiIfEnabled();
         setStatus('Reading WO tab...');
         // Capture whatever's on the currently-open tab (normally the WO tab
         // itself, since that's where a scan starts) before evaluating any
@@ -7149,14 +7295,27 @@
             col: { sig: "col(table, colName)", args: ["table — captured table name", "colName — column header"], desc: "Array of values from one column across all rows." },
             has: { sig: "has(table, colName, value)", args: ["table — captured table name", "colName — column header", "value — value to look for"], desc: "true if any row has that value in that column." },
             lookup: { sig: "lookup(table, keyCol, keyVal, returnCol)", args: ["table — captured table name, or a custom table from the Tables tab", "keyCol — column to search for a match", "keyVal — value to match", "returnCol — column to return from the matching row"], desc: "VLOOKUP-style: finds the first row where keyCol equals keyVal, returns its returnCol value (or '' if no row matches)." },
+            count: { sig: "count(table, colName, value)", args: ["table — captured table name", "colName — column header", "value — value to look for"], desc: "Number of rows that have that value in that column." },
             hours: { sig: "hours(str)", args: ["str — \"HH:MM\" or decimal string"], desc: "Parses into a numeric hours value." },
             hoursBetween: { sig: "hoursBetween(a, b)", args: ["a — start datetime \"DD/MM/YYYY HH:MM\"", "b — end datetime, same format"], desc: "Hours between two datetime strings." },
+            daysBetween: { sig: "daysBetween(a, b)", args: ["a — start datetime \"DD/MM/YYYY HH:MM\"", "b — end datetime, same format"], desc: "Days (not hours) between two datetime strings." },
+            today: { sig: "today()", args: [], desc: "The current date/time as \"DD/MM/YYYY HH:MM\" - drops straight into hoursBetween()/daysBetween() alongside a captured Maximo date." },
             oneOf: { sig: "oneOf(val, arr)", args: ["val — value to check", "arr — array of allowed values"], desc: "true if val is in the array." },
             contains: { sig: "contains(text, pattern)", args: ["text — string to test", "pattern — regex pattern"], desc: "Regex test, returns a boolean." },
             matches: { sig: "matches(text, pattern)", args: ["text — string to search", "pattern — regex pattern"], desc: "Array of unique regex matches." },
             isEmpty: { sig: "isEmpty(v)", args: ["v — value to check"], desc: "true if v is null/undefined/empty string." },
             notEmpty: { sig: "notEmpty(v)", args: ["v — value to check"], desc: "true if v is NOT null/undefined/empty string." },
+            ifBlank: { sig: "ifBlank(val, fallback)", args: ["val — value to check", "fallback — used instead if val is empty"], desc: "val if it's non-empty, otherwise fallback." },
+            trim: { sig: "trim(str)", args: ["str — text to clean up"], desc: "Removes leading/trailing whitespace." },
+            upper: { sig: "upper(str)", args: ["str — text to convert"], desc: "Converts to UPPERCASE." },
+            lower: { sig: "lower(str)", args: ["str — text to convert"], desc: "Converts to lowercase." },
+            left: { sig: "left(str, n)", args: ["str — text to slice", "n — number of characters"], desc: "The first n characters of str." },
+            right: { sig: "right(str, n)", args: ["str — text to slice", "n — number of characters"], desc: "The last n characters of str." },
+            mid: { sig: "mid(str, start, len)", args: ["str — text to slice", "start — 0-based starting position", "len — number of characters"], desc: "len characters of str starting at position start." },
+            sum: { sig: "sum(arr)", args: ["arr — array of numbers/numeric strings, e.g. from col(...)"], desc: "Total of every numeric value in the array (non-numeric entries are skipped)." },
+            avg: { sig: "avg(arr)", args: ["arr — array of numbers/numeric strings, e.g. from col(...)"], desc: "Average of every numeric value in the array, or null if none are numeric." },
             maxLaborHours: { sig: "maxLaborHours(tableTitle, nameCol, hoursCol)", args: ["tableTitle — captured labor table name", "nameCol — column with each person's name", "hoursCol — column with hours"], desc: "The highest total hours attributed to any one person." },
+            whoami: { sig: "whoami(field)", args: ["field — one of username, email, displayName, insertSite, country, langcode"], desc: "The current user's Maximo profile field. Returns '' unless \"Allow whoami() in formulas\" is turned on in Settings > Display." },
             V: { sig: "V(id)", args: ["id — a variable's ID or label"], desc: "A variable's computed value." }
         };
 
@@ -7228,7 +7387,8 @@
 
             function completionSource(func) {
                 if (func === 'F') return opts.fields;
-                if (func === 'T' || func === 'lookup') return opts.tables;
+                if (func === 'T' || func === 'lookup' || func === 'count') return opts.tables;
+                if (func === 'whoami') return ['username', 'email', 'displayName', 'insertSite', 'country', 'langcode'];
                 if (func === 'V') return getVars().map(function(v) {
                     return v.label;
                 });
@@ -9093,6 +9253,11 @@
                 '<span style="color:var(--wo-text);font-size:11px;">Show status summary bar</span>' +
                 '</label>' +
                 '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;">Pass/fail/warn/error counts under the status line.</div>' +
+                '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:10px;">' +
+                '<input type="checkbox" id="__st_whoami_formulas" ' + (st.whoamiInFormulas ? 'checked' : '') + '>' +
+                '<span style="color:var(--wo-text);font-size:11px;">Allow whoami() in formulas</span>' +
+                '</label>' +
+                '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;">Off by default — a rule/message using your name, username, or email could end up pasted into a permanent WO record.</div>' +
                 '</div>';
             content.appendChild(displayDiv);
             makeCollapsible(displayDiv, 'Display', false);
@@ -9101,6 +9266,11 @@
                 st.hideSummaryBar = !e.target.checked;
                 saveSettingsCfg(st);
                 render();
+            };
+            displayDiv.querySelector('#__st_whoami_formulas').onchange = function(e) {
+                st.whoamiInFormulas = e.target.checked;
+                saveSettingsCfg(st);
+                refreshWhoamiIfEnabled();
             };
 
             var devTier = getDevTier();
@@ -10089,6 +10259,11 @@
         checkAutoScan();
         startWOWatcher();
         checkForUpdate();
+        // Fire-and-forget: a no-op unless the opt-in Settings toggle is on;
+        // re-renders once loaded so a whoami()-using rule that evaluated
+        // empty on the very first paint picks up the real value without
+        // needing a manual rescan.
+        refreshWhoamiIfEnabled();
     });
 
 })();

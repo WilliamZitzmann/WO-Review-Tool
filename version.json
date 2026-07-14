@@ -7,11 +7,13 @@
   "versions": [
     {
       "version": "0.25.0",
-      "name": "Table Lookups, Custom Tables, Feedback Opt-In Identity",
+      "name": "Table Lookups, Custom Tables, More Formula Helpers",
       "grant": "dev",
       "changes": [
-        "New: lookup(table, keyCol, keyVal, returnCol) formula helper - VLOOKUP-style, finds the first row where keyCol equals keyVal and returns its returnCol value. Works on any scanned table.",
+        "New: lookup(table, keyCol, keyVal, returnCol) formula helper - VLOOKUP-style, finds the first row where keyCol equals keyVal and returns its returnCol value. Works on any scanned table or a custom table.",
         "New: custom tables in the Tables tab - hand-entered lookup data (e.g. part numbers, cost centers) that doesn't come from a Maximo scan, readable by formulas with the exact same T()/col()/has()/lookup() functions as a scanned table.",
+        "New formula helpers: count(table, colName, value), ifBlank(val, fallback), trim/upper/lower(str), left/right(str, n), mid(str, start, len), sum(arr)/avg(arr), today(), and daysBetween(a, b).",
+        "New (opt-in): whoami(field) returns the current user's Maximo profile field (username/email/displayName/insertSite/country/langcode) in a formula - off by default (Settings > Display > \"Allow whoami() in formulas\"), since a rule using it could paste your name/email into a permanent WO record.",
         "Feedback tab: added an opt-in checkbox to include your Maximo name/username/email with a report - off by default, never fetched unless checked.",
         "Fixed: a group's linked table showing 0 rows because its owning scan step intentionally didn't run this pass (a false condition) no longer shows a red error - only a genuine capture failure does now, with a plain, friendly message instead of the raw table id/prefix string."
       ]

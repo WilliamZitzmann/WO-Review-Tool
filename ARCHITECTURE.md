@@ -563,6 +563,67 @@ complete solution for every possible scan config shape. **Not yet verified
 in a browser** — confirm with one real scan (both a skipped-condition run
 and a normal run) before trusting it fully.
 
+### 5.6 New formula helpers + opt-in `whoami()` (v0.25.0)
+
+Thirteen new helpers were added alongside `lookup()`: `count`, `ifBlank`,
+`trim`, `upper`, `lower`, `left`, `right`, `mid`, `sum`, `avg`, `today`,
+`daysBetween`, and `whoami`. All follow the existing §5.2 pattern — added to
+`buildCtx()`'s return object, `ARGN`, all **four** literal `av` arrays
+(`runVariable`, `runFormula`, `runActions()`'s condition evaluator, and the
+scan-step condition evaluator — there's no shared constant for these, they
+have to be kept in sync by hand), `HELPER_REF`, and index.html's Formula
+Reference. `mid()` is 0-indexed (JS `substr` convention), not Excel's
+1-indexed `MID` — deliberate, since this formula language already mirrors
+real JS elsewhere (regex helpers, `has()`'s real `.indexOf`).
+
+`whoami(field)` is architecturally different from the other twelve — it's
+the one helper backed by an **async, opt-in-gated** data source instead of
+already-captured synchronous `cache`/`cfg` data:
+- **Gate**: `st.whoamiInFormulas` (Settings > Display, off by default).
+  Unlike the Feedback tab's PII checkbox (§10), this isn't about data
+  leaving the laptop over the network — `whoami()` never makes a new
+  network call, it reads the same same-origin `/maximo/oslc/whoami`
+  endpoint `readWhoamiCanonical()` already uses for the access check. The
+  risk this gate exists for is **display exposure**: a rule/message using
+  `whoami('email')` could paste a name/email into a permanent WO record
+  (Memo, etc.) without whoever wrote the rule realizing it would.
+- **`whoamiCache`** (module-level var, `null` until populated) — formulas
+  are evaluated synchronously (`runFormula`/`runVariable` return
+  immediately), but `readWhoamiCanonical()` is an XHR promise, so `whoami()`
+  can only ever read a value that was already fetched by some earlier,
+  separate step — it can't fetch on demand mid-formula-eval. It reads
+  `whoamiCache[field]`, returning `''` whenever the cache is still cold
+  (gate off, or the fetch hasn't resolved yet) — **never throws**, so a
+  formula referencing `whoami()` before the cache warms just seems to say
+  "empty" rather than erroring.
+- **`ensureWhoamiCache()`** — checks the gate, returns instantly if it's off
+  or the cache is already warm, otherwise fetches once and populates
+  `whoamiCache` (swallowing a fetch failure into `{}` rather than leaving
+  `null`, so a broken fetch doesn't retry forever on every scan).
+- **`refreshWhoamiIfEnabled()`** — the actual call site wrapper used at the
+  three places this needs triggering (tool startup, top of `runScan()`, and
+  the Settings checkbox's own `onchange`): checks `st.whoamiInFormulas`
+  **before** touching `ensureWhoamiCache()`'s promise chain at all, so the
+  overwhelmingly common case (feature off, true for ~everyone) costs one
+  `localStorage` read and nothing else — no extra full `render()` fired on
+  every scan for a feature almost nobody has on. Each call site is
+  fire-and-forget (`.then(render)`, never awaited) since none of them can
+  block on a network round trip: startup's `render()` already happened
+  once synchronously (pre-scan formulas just see `''` until this resolves
+  and re-renders), and `runScan()` has its own long async step sequence
+  already running independently.
+- Its first argument (`field`) gets the same completion-dropdown treatment
+  as a table name in `T(`/`lookup(`/`count(` — `completionSource()` returns
+  the fixed six field names (`username`, `email`, `displayName`,
+  `insertSite`, `country`, `langcode`) matching `readWhoamiCanonical()`'s
+  shape exactly.
+
+**Known gap, not fixed**: a custom table (§4.7) with two columns renamed to
+the same string silently makes both share one `row[name]` key — `lookup()`/
+`col()` against that name become ambiguous. Left as a known limitation
+rather than guarded, since a per-keystroke duplicate check would fight the
+live-typing editing model the grid uses.
+
 ---
 
 ## 6. Beta feature framework
