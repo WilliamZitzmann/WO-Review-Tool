@@ -705,6 +705,27 @@ Current features:
     `positivedowntime` were tried against the same nested-select in console
     testing and never came back, so requesting them here would just be dead
     weight (see the data-sources doc §2.4 for the exact repro).
+  - Both caches are cleared at the top of every `runScan()`, alongside the
+    main `cache` reset — this tool's whole job is showing CURRENT state, and
+    asset WO/downtime history is exactly the kind of thing that changes
+    between scans (someone logs downtime, you rescan to verify a fix); a
+    session-sticky cache would silently serve first-fetch-of-the-session
+    data for the rest of the review.
+  - The actual fetch logic lives in two Promise-returning, cache-free,
+    gate-free functions — `fetchAssetWOHistoryRaw()`/
+    `fetchAssetDowntimeHistoryRaw()` — that both the gated/cached formula
+    helpers AND the `__woProbeAsset()` console tool call into, so probing
+    from the console always exercises the exact same request a formula
+    would make. Same split exists for the domain decode:
+    `domainDecodeRaw(key, code)` is the ungated logic, `domainFn()` just
+    adds the `isBetaFeatureOn` check in front of it — `__woTestDomain()`
+    calls the raw version directly. See `CONSOLE_COMMANDS.md`'s "beta_2
+    discovery tools" section for the full set
+    (`__woDebugDomains`/`__woTestDomain`/`__woProbeAsset`/`__woDumpWO`/
+    `__woDumpAsset`) — deliberately NOT gated behind beta_2 themselves,
+    same reasoning as the pre-existing `__woDebugTables`/`__woDebugCache`:
+    a debug tool gated behind the feature it's meant to help you verify
+    would be useless the one time you actually need it.
 
 **Adding a new feature**: add a `BETA_FEATURES` entry, gate every bit of its
 UI/behavior behind `isBetaFeatureOn(newId)`, and if it needs its own hotkey

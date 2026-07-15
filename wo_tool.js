@@ -32,7 +32,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26196.1507z';
+    var BUILD_ID = '26196.1547z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -2180,8 +2180,14 @@
     // one.
     var KNOWN_DOMAIN_KEYS = ['ABBCLAUSECODE', 'ABBWPRIORITY', 'WOCLASS', 'DOWNCODE', 'LOCASSETSTATUS', 'ABBASPRIORITY', 'HAZTYPE', 'POSTATUS', 'PRSTATUS', 'ASSETTYPE', 'ABVASSETCAT', 'SHIPVIA', 'ABBWOEXECMETHOD', 'CREWID', 'JOBPLANSTATUS'];
 
-    function domainFn(key, code) {
-        if (!isBetaFeatureOn('beta_2')) return '';
+    // Raw decode logic, split out from domainFn() so the __woDebugDomains()/
+    // __woTestDomain() console tools (below) can exercise the real decode
+    // attempt regardless of whether beta_2 happens to be toggled on right
+    // now — a debug tool that's itself gated behind the thing it's meant to
+    // help you verify would be useless the one time you actually need it
+    // (before you've confirmed the feature works, you probably haven't
+    // turned it on yet).
+    function domainDecodeRaw(key, code) {
         if (!key || code == null || code === '') return '';
         var raw;
         try {
@@ -2211,6 +2217,39 @@
         return '';
     }
 
+    function domainFn(key, code) {
+        if (!isBetaFeatureOn('beta_2')) return '';
+        return domainDecodeRaw(key, code);
+    }
+
+    // Raw fetchers (Promise-returning, no cache, no beta gate) — the actual
+    // network calls, shared by the gated/cached formula helpers below AND
+    // the __woProbeAsset() console tool, so probing from the console always
+    // exercises the exact same request the formula helper would make.
+    function fetchAssetWOHistoryRaw(assetnum, siteid, limit) {
+        limit = limit || 10;
+        var url = '/maximo/oslc/os/mxapiwo?oslc.where=' + encodeURIComponent('assetnum="' + assetnum + '" and siteid="' + siteid + '"') +
+            '&oslc.select=wonum,description,status,wopriority,reportdate,worktype' +
+            '&oslc.orderBy=-reportdate&oslc.pageSize=' + limit + '&lean=1&_format=json';
+        return xhrGetText(url).then(function(text) {
+            return JSON.parse(text).member || [];
+        });
+    }
+
+    // Only startdate/enddate requested — downtimecode/remarks/reportedby/
+    // positivedowntime were also tried against this same nested-select and
+    // never came back (see MAXIMO_DATA_SOURCES.md §2.4); requesting them
+    // here would just be dead weight until that's resolved.
+    function fetchAssetDowntimeHistoryRaw(assetnum, siteid) {
+        var url = '/maximo/oslc/os/mxapiasset?oslc.where=' + encodeURIComponent('assetnum="' + assetnum + '" and siteid="' + siteid + '"') +
+            '&oslc.select=' + encodeURIComponent('assetnum,moddowntimehist{startdate,enddate}') +
+            '&lean=1&_format=json';
+        return xhrGetText(url).then(function(text) {
+            var d = JSON.parse(text);
+            return (d.member && d.member[0] && d.member[0].moddowntimehist) || [];
+        });
+    }
+
     // Per-(assetnum+siteid[+limit]) cache — distinct from whoami's single
     // global cache, since the key here varies with the formula's own
     // arguments. Placeholder-then-replace pattern: the cache slot is set to
@@ -2229,12 +2268,8 @@
         var key = assetnum + '|' + siteid + '|' + limit;
         if (betaAssetWoCache.hasOwnProperty(key)) return betaAssetWoCache[key];
         betaAssetWoCache[key] = [];
-        var url = '/maximo/oslc/os/mxapiwo?oslc.where=' + encodeURIComponent('assetnum="' + assetnum + '" and siteid="' + siteid + '"') +
-            '&oslc.select=wonum,description,status,wopriority,reportdate,worktype' +
-            '&oslc.orderBy=-reportdate&oslc.pageSize=' + limit + '&lean=1&_format=json';
-        xhrGetText(url).then(function(text) {
-            var d = JSON.parse(text);
-            betaAssetWoCache[key] = d.member || [];
+        fetchAssetWOHistoryRaw(assetnum, siteid, limit).then(function(rows) {
+            betaAssetWoCache[key] = rows;
             render();
         }).catch(function() {
             // Leave the [] placeholder in place — swallow rather than retry
@@ -2249,16 +2284,8 @@
         var key = assetnum + '|' + siteid;
         if (betaAssetDowntimeCache.hasOwnProperty(key)) return betaAssetDowntimeCache[key];
         betaAssetDowntimeCache[key] = [];
-        // Only startdate/enddate requested — downtimecode/remarks/reportedby/
-        // positivedowntime were also tried against this same nested-select
-        // and never came back (see MAXIMO_DATA_SOURCES.md §2.4); requesting
-        // them here would just be dead weight until that's resolved.
-        var url = '/maximo/oslc/os/mxapiasset?oslc.where=' + encodeURIComponent('assetnum="' + assetnum + '" and siteid="' + siteid + '"') +
-            '&oslc.select=' + encodeURIComponent('assetnum,moddowntimehist{startdate,enddate}') +
-            '&lean=1&_format=json';
-        xhrGetText(url).then(function(text) {
-            var d = JSON.parse(text);
-            betaAssetDowntimeCache[key] = (d.member && d.member[0] && d.member[0].moddowntimehist) || [];
+        fetchAssetDowntimeHistoryRaw(assetnum, siteid).then(function(rows) {
+            betaAssetDowntimeCache[key] = rows;
             render();
         }).catch(function() {});
         return betaAssetDowntimeCache[key];
@@ -3706,6 +3733,176 @@
         if (Object.keys(cache.tableErrors).length) console.log('Table errors:', JSON.stringify(cache.tableErrors));
         console.log('Prefixes:', JSON.stringify(lastPrefixLog));
         return 'Done';
+    };
+
+    // ── beta_2 discovery tools ──
+    // Not gated behind isBetaFeatureOn — same reasoning as __woDebugTables/
+    // __woDebugCache above: these are console-only, and a debug tool that's
+    // itself gated behind the feature it's meant to help you verify would be
+    // useless the one time you actually need it (before turning beta_2 on,
+    // or to decide whether it's worth turning on at all).
+
+    // Splits a raw OSLC record into plain scalar fields vs. sub-resource
+    // collection refs/objects — the same by-hand technique used to explore
+    // mxapiwo/mxapiasset from the console (see MAXIMO_DATA_SOURCES.md §2.2),
+    // now reusable for any record shape instead of retyping it each time.
+    function splitScalarsAndCollections(d) {
+        var collections = {},
+            scalars = {};
+        Object.keys(d).forEach(function(k) {
+            var v = d[k];
+            if (k.indexOf('_collectionref') !== -1 || (typeof v === 'string' && v.indexOf('_collectionref') !== -1)) return;
+            if (Array.isArray(v)) collections[k] = '(inline array, length ' + v.length + ')';
+            else if (v !== null && typeof v === 'object') collections[k] = v;
+            else scalars[k] = v;
+        });
+        return {
+            scalars: scalars,
+            collections: collections
+        };
+    }
+
+    // Inspects what a Maximo domain-list localStorage key actually contains
+    // — confirms/refutes the "shape unconfirmed" caveat in
+    // MAXIMO_DATA_SOURCES.md §1 for a real key on this browser, instead of
+    // hand-typing JSON.parse(localStorage.getItem(...)) for each one.
+    // No args = every KNOWN_DOMAIN_KEYS entry; pass one key to inspect just
+    // that one, or your own array of keys to check something not on the
+    // known list.
+    window.__woDebugDomains = function(keys) {
+        keys = keys ? [].concat(keys) : KNOWN_DOMAIN_KEYS;
+        keys.forEach(function(key) {
+            var raw = localStorage.getItem(key);
+            console.group('Domain list: ' + key);
+            if (raw === null) {
+                console.log('Not present in localStorage on this page.');
+                console.groupEnd();
+                return;
+            }
+            var parsed;
+            try {
+                parsed = JSON.parse(raw);
+            } catch (e) {
+                console.log('Not valid JSON — raw value (first 200 chars):', raw.slice(0, 200));
+                console.groupEnd();
+                return;
+            }
+            if (Array.isArray(parsed)) {
+                console.log('Array of', parsed.length, 'entries. First entry\'s keys:', parsed[0] ? Object.keys(parsed[0]) : '(empty array)');
+                console.table(parsed.slice(0, 5));
+            } else if (parsed && typeof parsed === 'object') {
+                var objKeys = Object.keys(parsed);
+                console.log('Plain object with', objKeys.length, 'keys. First few:', objKeys.slice(0, 10));
+                console.log('Sample entry —', objKeys[0], ':', parsed[objKeys[0]]);
+            } else {
+                console.log('Parsed to a', typeof parsed, ':', parsed);
+            }
+            console.groupEnd();
+        });
+        return 'Done';
+    };
+
+    // Runs the real decode logic (domainDecodeRaw — same code domain() uses
+    // in a formula) against a specific key/code, regardless of whether
+    // beta_2 is toggled on, and logs which shape branch (if any) matched.
+    window.__woTestDomain = function(key, code) {
+        window.__woDebugDomains(key);
+        var result = domainDecodeRaw(key, code);
+        console.log(result ? ('MATCHED — "' + code + '" decodes to: ' + result) : ('NO MATCH for "' + code + '" in ' + key + ' (or the list\'s shape isn\'t one domainDecodeRaw() recognizes — check the group above).'));
+        return result;
+    };
+
+    // Runs the exact same REST requests assetWOHistory()/assetDowntimeHistory()
+    // use (via the shared raw fetchers) — but uncached and gate-free, so you
+    // can confirm the calls actually work for a given asset/site before
+    // ever touching beta_2 in a formula. Returns a Promise; either await it
+    // in the console or let it log on its own.
+    window.__woProbeAsset = function(assetnum, siteid, limit) {
+        if (!assetnum || !siteid) {
+            console.log('Usage: __woProbeAsset(assetnum, siteid, limit?)');
+            return Promise.resolve(null);
+        }
+        console.log('Probing asset', assetnum, 'at site', siteid, '...');
+        return Promise.all([
+            fetchAssetWOHistoryRaw(assetnum, siteid, limit).catch(function(e) {
+                return {
+                    error: e.message
+                };
+            }),
+            fetchAssetDowntimeHistoryRaw(assetnum, siteid).catch(function(e) {
+                return {
+                    error: e.message
+                };
+            })
+        ]).then(function(results) {
+            var woHistory = results[0],
+                downtimeHistory = results[1];
+            console.group('=== WO history (' + (Array.isArray(woHistory) ? woHistory.length : 'ERROR') + ') ===');
+            if (Array.isArray(woHistory)) console.table(woHistory);
+            else console.log(woHistory);
+            console.groupEnd();
+            console.group('=== Downtime history (' + (Array.isArray(downtimeHistory) ? downtimeHistory.length : 'ERROR') + ') ===');
+            if (Array.isArray(downtimeHistory)) console.table(downtimeHistory);
+            else console.log(downtimeHistory);
+            console.groupEnd();
+            return {
+                woHistory: woHistory,
+                downtimeHistory: downtimeHistory
+            };
+        });
+    };
+
+    // Full raw dump of the currently open WO — no oslc.select filter at all,
+    // so every scalar field and every sub-resource collection ref the
+    // record actually carries shows up. This is the "how do I find out what
+    // fields exist" discovery technique from MAXIMO_DATA_SOURCES.md §2.2,
+    // built in instead of retyped from scratch each time.
+    window.__woDumpWO = function() {
+        var woId = new URLSearchParams(window.location.search).get('uniqueid');
+        if (!woId) {
+            console.log('No "uniqueid" in the URL — open a WO tab first.');
+            return Promise.resolve(null);
+        }
+        return xhrGetText('/maximo/oslc/os/mxapiwo/' + woId + '?lean=1&_format=json').then(function(text) {
+            var d = JSON.parse(text);
+            if (d.Error) {
+                console.error('Error:', d.Error);
+                return d;
+            }
+            var split = splitScalarsAndCollections(d);
+            console.group('=== WO ' + (d.wonum || woId) + ' — scalar fields (' + Object.keys(split.scalars).length + ') ===');
+            console.table(split.scalars);
+            console.groupEnd();
+            console.group('=== WO — sub-resources / collection refs ===');
+            console.log(split.collections);
+            console.groupEnd();
+            return d;
+        });
+    };
+
+    // Same full raw dump, for an asset instead of a WO.
+    window.__woDumpAsset = function(assetnum, siteid) {
+        if (!assetnum || !siteid) {
+            console.log('Usage: __woDumpAsset(assetnum, siteid)');
+            return Promise.resolve(null);
+        }
+        var url = '/maximo/oslc/os/mxapiasset?oslc.where=' + encodeURIComponent('assetnum="' + assetnum + '" and siteid="' + siteid + '"') + '&lean=1&_format=json';
+        return xhrGetText(url).then(function(text) {
+            var d = JSON.parse(text);
+            var asset = d.member && d.member[0];
+            if (!asset) {
+                console.log('No matching asset — full response:', d);
+                return d;
+            }
+            var split = splitScalarsAndCollections(asset);
+            console.group('=== Asset ' + assetnum + ' — scalar fields (' + Object.keys(split.scalars).length + ') ===');
+            console.table(split.scalars);
+            console.groupEnd();
+            console.group('=== Asset — sub-resources / collection refs ===');
+            console.log(split.collections);
+            console.groupEnd();
+            return asset;
+        });
     };
 
     function getGroupHiddenCols(gid) {

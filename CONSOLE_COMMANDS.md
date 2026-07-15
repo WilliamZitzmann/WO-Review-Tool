@@ -77,6 +77,43 @@ in Setup > Settings (dev tier only).
 
 ---
 
+## beta_2 discovery tools
+
+For the "Maximo REST Data (experimental)" beta feature (`domain()`,
+`assetWOHistory()`, `assetDowntimeHistory()` in formulas — see Setup > Beta and
+the Formula Reference). Not gated behind the beta_2 toggle itself, since these
+exist to help you decide whether to turn it on / verify it's working — see
+`MAXIMO_DATA_SOURCES.md` (private repo) for the exploration these are built on.
+
+### `window.__woDebugDomains(keys?)`
+Inspects what a Maximo domain-list `localStorage` key actually contains — logs
+whether it's present, whether it parses as JSON, and its real shape (array
+length + first entry's keys, or object key count + a sample). No args checks
+every known key (`ABBCLAUSECODE`, `DOWNCODE`, `HAZTYPE`, `WOCLASS`, etc.); pass
+one key name (or your own array) to check just that one.
+
+### `window.__woTestDomain(key, code)`
+Runs the actual `domain()` decode logic against a specific key/code — regardless
+of whether beta_2 is toggled on — and reports whether it matched. Also prints
+the same shape inspection as `__woDebugDomains(key)` first, so a non-match is
+easy to diagnose.
+
+### `window.__woProbeAsset(assetnum, siteid, limit?)`
+Runs the exact same REST requests `assetWOHistory()`/`assetDowntimeHistory()`
+use in a formula — uncached, gate-free — and logs both result sets via
+`console.table`. Returns a Promise. Use this to confirm the calls actually work
+for a given asset/site before referencing them in a real rule.
+
+### `window.__woDumpWO()`
+Full raw dump of the currently-open WO (no field filter at all) — splits every
+scalar field from sub-resource collection refs and `console.table`s the
+scalars. The "what fields actually exist" discovery technique, built in.
+
+### `window.__woDumpAsset(assetnum, siteid)`
+Same full raw dump, for an asset instead of a WO.
+
+---
+
 ## Quick escape hatches
 
 If the tool ever gets stuck (e.g. pinned to a version and the UI seems
