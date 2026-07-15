@@ -669,10 +669,49 @@ Current features:
   under one flag since they're the same untested code path. See
   `HOTKEY_ACTIONS`'s `fix` entry and the `betaRouteOn` branch in the main
   panel's footer-building code.
+- `beta_2` — "Maximo REST Data (experimental)": three new formula helpers,
+  `domain()`, `assetWOHistory()`, `assetDowntimeHistory()` (v0.25.0-era,
+  added in response to console-tested REST/localStorage exploration — see
+  `MAXIMO_DATA_SOURCES.md`, private repo). Gated INSIDE each helper's own
+  function body (`if (!isBetaFeatureOn('beta_2')) return '' /* or [] */;`),
+  not just hidden from the UI — same convention as `runActions()`'s beta_1
+  gate — so a formula written against one of these on a non-beta_2 install
+  gets a harmless empty result instead of a `ReferenceError`, and turning
+  the feature off later doesn't retroactively break saved formulas, it just
+  makes them go quiet.
+  - `domainFn(key, code)` — the one **synchronous, local-only** helper: reads
+    one of Maximo's own domain/lookup lists straight out of `localStorage`
+    (`KNOWN_DOMAIN_KEYS` lists the 14 known keys — `DOWNCODE`, `HAZTYPE`,
+    `WOCLASS`, etc. — also offered as `domain(`'s first-arg completion, same
+    mechanism as `whoami('s field-name dropdown). The list's actual JSON
+    shape was never confirmed (see the data-sources doc), so it tries a few
+    plausible shapes defensively (array of `{value/code, description/desc}`,
+    or a plain `{code: description}` map) rather than assuming one — returns
+    `''` if none match, never throws.
+  - `assetWOHistoryFn(assetnum, siteid, limit)` / `assetDowntimeHistoryFn(assetnum, siteid)`
+    — both hit Maximo's own OSLC REST API (`/maximo/oslc/os/mxapiwo`,
+    `/maximo/oslc/os/mxapiasset`) directly via `xhrGetText()`, same-origin,
+    riding the browser's existing session — not a new auth surface. Each
+    uses a **per-argument-combination cache** (`betaAssetWoCache`/
+    `betaAssetDowntimeCache`, keyed by `assetnum+siteid[+limit]`) rather than
+    whoami's single global cache, since the result genuinely depends on the
+    formula's own arguments. The cache slot is set to the empty placeholder
+    (`[]`) the MOMENT the fetch is kicked off, not only once it resolves —
+    a formula gets re-evaluated multiple times per render (once for the
+    rule, again for its message), so without this a fetch already in flight
+    for the same key would get fired a second time on the very next
+    evaluation. `assetDowntimeHistoryFn` only requests `startdate`/`enddate`
+    from `moddowntimehist` — `downtimecode`/`remarks`/`reportedby`/
+    `positivedowntime` were tried against the same nested-select in console
+    testing and never came back, so requesting them here would just be dead
+    weight (see the data-sources doc §2.4 for the exact repro).
 
 **Adding a new feature**: add a `BETA_FEATURES` entry, gate every bit of its
 UI/behavior behind `isBetaFeatureOn(newId)`, and if it needs its own hotkey
 add a `HOTKEY_ACTIONS` entry with `betaFeature: newId` (see `hotkeyActionActive()`).
+For a formula helper specifically, gate INSIDE the helper function itself
+(not just in whatever UI exposes it) so a saved formula referencing it stays
+inert rather than erroring once the feature's disabled again.
 
 ---
 

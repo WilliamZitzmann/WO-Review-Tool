@@ -32,7 +32,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26196.1111z';
+    var BUILD_ID = '26196.1507z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -1042,6 +1042,9 @@
                 if (!s.whoamiInFormulas) return '';
                 return (whoamiCache && whoamiCache[field]) || '';
             },
+            domain: domainFn,
+            assetWOHistory: assetWOHistoryFn,
+            assetDowntimeHistory: assetDowntimeHistoryFn,
             V: function(id) {
                 var vars = getVars();
                 for (var vi = 0; vi < vars.length; vi++) {
@@ -1055,11 +1058,11 @@
         };
     }
 
-    var ARGN = ['F', 'T', 'rowCount', 'col', 'has', 'lookup', 'count', 'isEmpty', 'notEmpty', 'ifBlank', 'trim', 'upper', 'lower', 'left', 'right', 'mid', 'sum', 'avg', 'today', 'hours', 'hoursBetween', 'daysBetween', 'oneOf', 'contains', 'matches', 'maxLaborHours', 'whoami', 'V'];
+    var ARGN = ['F', 'T', 'rowCount', 'col', 'has', 'lookup', 'count', 'isEmpty', 'notEmpty', 'ifBlank', 'trim', 'upper', 'lower', 'left', 'right', 'mid', 'sum', 'avg', 'today', 'hours', 'hoursBetween', 'daysBetween', 'oneOf', 'contains', 'matches', 'maxLaborHours', 'whoami', 'domain', 'assetWOHistory', 'assetDowntimeHistory', 'V'];
 
     function runVariable(formula, data) {
         var c = buildCtx(data);
-        var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.V];
+        var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V];
         var fn;
         try {
             fn = Function.apply(null, ARGN.concat(['return (' + formula + ');']));
@@ -1089,7 +1092,7 @@
 
     function runFormula(formula, data) {
         var c = buildCtx(data);
-        var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.V];
+        var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V];
         var fn;
         try {
             fn = Function.apply(null, ARGN.concat(['return (' + formula + ');']));
@@ -2159,6 +2162,108 @@
         ensureWhoamiCache().then(render);
     }
 
+    // ── beta_2: Maximo REST Data (experimental) ──
+    // Everything below is gated behind isBetaFeatureOn('beta_2') INSIDE each
+    // function body (not just hidden in the UI) — same convention as
+    // runActions()'s beta_1 gate — so a formula referencing one of these
+    // helpers on a non-beta_2 install just gets an inert '' /[] back, never
+    // an error. See MAXIMO_DATA_SOURCES.md for what's actually been
+    // confirmed to work vs. still unverified; this code follows that
+    // document's findings directly (e.g. only startdate/enddate are
+    // requested from moddowntimehist since the other fields didn't come
+    // back in testing).
+
+    // Maximo's own cached domain/lookup value lists (populated by Maximo's
+    // UI into localStorage, one key per domain) — NOT written by this tool.
+    // Shape is unconfirmed (see MAXIMO_DATA_SOURCES.md §1), so domainFn()
+    // below tries several plausible shapes defensively rather than assuming
+    // one.
+    var KNOWN_DOMAIN_KEYS = ['ABBCLAUSECODE', 'ABBWPRIORITY', 'WOCLASS', 'DOWNCODE', 'LOCASSETSTATUS', 'ABBASPRIORITY', 'HAZTYPE', 'POSTATUS', 'PRSTATUS', 'ASSETTYPE', 'ABVASSETCAT', 'SHIPVIA', 'ABBWOEXECMETHOD', 'CREWID', 'JOBPLANSTATUS'];
+
+    function domainFn(key, code) {
+        if (!isBetaFeatureOn('beta_2')) return '';
+        if (!key || code == null || code === '') return '';
+        var raw;
+        try {
+            raw = JSON.parse(localStorage.getItem(key) || 'null');
+        } catch (e) {
+            return '';
+        }
+        if (!raw) return '';
+        var codeStr = String(code);
+        // Shape A: array of {value/code/domainvalue, description/desc/maxvalue}
+        if (Array.isArray(raw)) {
+            for (var i = 0; i < raw.length; i++) {
+                var row = raw[i];
+                if (!row || typeof row !== 'object') continue;
+                var v = row.value != null ? row.value : (row.code != null ? row.code : row.domainvalue);
+                if (v != null && String(v) === codeStr) {
+                    return row.description != null ? row.description : (row.desc != null ? row.desc : (row.maxvalue != null ? row.maxvalue : ''));
+                }
+            }
+            return '';
+        }
+        // Shape B: plain object map { code: description }
+        if (typeof raw === 'object' && raw.hasOwnProperty(codeStr)) {
+            var v2 = raw[codeStr];
+            return typeof v2 === 'object' ? (v2.description || v2.desc || '') : v2;
+        }
+        return '';
+    }
+
+    // Per-(assetnum+siteid[+limit]) cache — distinct from whoami's single
+    // global cache, since the key here varies with the formula's own
+    // arguments. Placeholder-then-replace pattern: the cache slot is set to
+    // the empty/default value THE MOMENT the fetch is kicked off (not only
+    // once it resolves), so a formula re-evaluated multiple times per
+    // render (e.g. once for the rule, once for its message) while the fetch
+    // is still in flight reads the placeholder instead of firing a second,
+    // redundant request for the same key.
+    var betaAssetWoCache = {};
+    var betaAssetDowntimeCache = {};
+
+    function assetWOHistoryFn(assetnum, siteid, limit) {
+        if (!isBetaFeatureOn('beta_2')) return [];
+        if (!assetnum || !siteid) return [];
+        limit = limit || 10;
+        var key = assetnum + '|' + siteid + '|' + limit;
+        if (betaAssetWoCache.hasOwnProperty(key)) return betaAssetWoCache[key];
+        betaAssetWoCache[key] = [];
+        var url = '/maximo/oslc/os/mxapiwo?oslc.where=' + encodeURIComponent('assetnum="' + assetnum + '" and siteid="' + siteid + '"') +
+            '&oslc.select=wonum,description,status,wopriority,reportdate,worktype' +
+            '&oslc.orderBy=-reportdate&oslc.pageSize=' + limit + '&lean=1&_format=json';
+        xhrGetText(url).then(function(text) {
+            var d = JSON.parse(text);
+            betaAssetWoCache[key] = d.member || [];
+            render();
+        }).catch(function() {
+            // Leave the [] placeholder in place — swallow rather than retry
+            // on every subsequent render, same reasoning as whoami's cache.
+        });
+        return betaAssetWoCache[key];
+    }
+
+    function assetDowntimeHistoryFn(assetnum, siteid) {
+        if (!isBetaFeatureOn('beta_2')) return [];
+        if (!assetnum || !siteid) return [];
+        var key = assetnum + '|' + siteid;
+        if (betaAssetDowntimeCache.hasOwnProperty(key)) return betaAssetDowntimeCache[key];
+        betaAssetDowntimeCache[key] = [];
+        // Only startdate/enddate requested — downtimecode/remarks/reportedby/
+        // positivedowntime were also tried against this same nested-select
+        // and never came back (see MAXIMO_DATA_SOURCES.md §2.4); requesting
+        // them here would just be dead weight until that's resolved.
+        var url = '/maximo/oslc/os/mxapiasset?oslc.where=' + encodeURIComponent('assetnum="' + assetnum + '" and siteid="' + siteid + '"') +
+            '&oslc.select=' + encodeURIComponent('assetnum,moddowntimehist{startdate,enddate}') +
+            '&lean=1&_format=json';
+        xhrGetText(url).then(function(text) {
+            var d = JSON.parse(text);
+            betaAssetDowntimeCache[key] = (d.member && d.member[0] && d.member[0].moddowntimehist) || [];
+            render();
+        }).catch(function() {});
+        return betaAssetDowntimeCache[key];
+    }
+
     // Clears the tool + its config on a confirmed revoke — deliberately
     // leaves IndexedDB (the linked backup-file handle) untouched, same
     // policy as loader.js, so a config file link survives a revoke.
@@ -2281,6 +2386,10 @@
         id: 'beta_1',
         label: 'Route / Return / Fix / Approve',
         description: 'Adds a neutral "Route" symbol and a "Fix" action (rescan + reapply fields) next to Return/Approve. Post-scan actions can be limited to run only on Scan, only on Fix, or both.'
+    }, {
+        id: 'beta_2',
+        label: 'Maximo REST Data (experimental)',
+        description: 'Formula helpers for asset WO/downtime history pulled live from Maximo\'s own REST API, plus decoding a coded field via one of Maximo\'s cached domain lists (DOWNCODE, HAZTYPE, etc.). Genuinely experimental — data shapes and field reliability are still being verified, see MAXIMO_DATA_SOURCES.md.'
     }];
 
     function isBetaFeatureOn(id) {
@@ -2985,7 +3094,7 @@
                 var val = '';
                 try {
                     var c = buildCtx(cache);
-                    var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.V];
+                    var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V];
                     var fn = Function.apply(null, ARGN.concat(['return (' + action.value + ');']));
                     val = fn.apply(null, av);
                     if (val == null) val = '';
@@ -3203,7 +3312,7 @@
         return msg.replace(/\{\{([\s\S]+?)\}\}/g, function(_, expr) {
             try {
                 var c = buildCtx(data);
-                var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.V];
+                var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V];
 
                 var fn = Function.apply(null, ARGN.concat(['return (' + expr.trim() + ');']));
                 var r = fn.apply(null, av);
@@ -3375,6 +3484,16 @@
             tables: {},
             tableErrors: {}
         };
+        // beta_2's REST-backed helpers cache per-argument results (see their
+        // definitions) so a formula re-evaluated several times per render
+        // doesn't refire the same request — but this tool's whole job is
+        // showing CURRENT state, and asset WO/downtime history is exactly
+        // the kind of thing that changes between scans (someone logs
+        // downtime, you rescan to verify a fix). Clearing both here means a
+        // fresh scan always re-fetches once per referenced asset, instead
+        // of quietly serving first-fetch-of-the-session data all day.
+        betaAssetWoCache = {};
+        betaAssetDowntimeCache = {};
         var sew = findSendEventWin();
         var scan = getScan();
         setStatus('Reading WO tab...');
@@ -7331,6 +7450,9 @@
             avg: { sig: "avg(arr)", args: ["arr — array of numbers/numeric strings, e.g. from col(...)"], desc: "Average of every numeric value in the array, or null if none are numeric." },
             maxLaborHours: { sig: "maxLaborHours(tableTitle, nameCol, hoursCol)", args: ["tableTitle — captured labor table name", "nameCol — column with each person's name", "hoursCol — column with hours"], desc: "The highest total hours attributed to any one person." },
             whoami: { sig: "whoami(field)", args: ["field — username, email, displayName, insertSite, country, langcode, or any other field name Maximo's whoami endpoint returns (e.g. loginID, personid)"], desc: "The current user's Maximo profile field. Returns '' unless \"Allow whoami() in formulas\" is turned on in Settings > Display." },
+            domain: { sig: "domain(key, code)", args: ["key — a Maximo domain list name, e.g. DOWNCODE, HAZTYPE, WOCLASS", "code — the coded value to decode"], desc: "Decodes a code via one of Maximo's own cached domain lists. beta_2 only — returns '' if that beta feature is off. Experimental: list shape isn't fully confirmed for every domain, see MAXIMO_DATA_SOURCES.md." },
+            assetWOHistory: { sig: "assetWOHistory(assetnum, siteid, limit)", args: ["assetnum — asset number", "siteid — Maximo site ID", "limit — max rows, default 10"], desc: "Recent work orders for an asset, newest first, fetched live from Maximo's REST API (array of {wonum, description, status, wopriority, reportdate, worktype, ...}). beta_2 only — returns [] if that beta feature is off, or [] until the (async) fetch resolves." },
+            assetDowntimeHistory: { sig: "assetDowntimeHistory(assetnum, siteid)", args: ["assetnum — asset number", "siteid — Maximo site ID"], desc: "The asset's full downtime history (not just what's linked to the current WO) as an array of {startdate, enddate}, fetched live from Maximo's REST API. beta_2 only — returns [] if that beta feature is off, or [] until the (async) fetch resolves." },
             V: { sig: "V(id)", args: ["id — a variable's ID or label"], desc: "A variable's computed value." }
         };
 
@@ -7411,6 +7533,7 @@
                 // back to the fixed curated list so the dropdown isn't just
                 // empty for the common case.
                 if (func === 'whoami') return whoamiCache ? Object.keys(whoamiCache) : ['username', 'email', 'displayName', 'insertSite', 'country', 'langcode'];
+                if (func === 'domain') return KNOWN_DOMAIN_KEYS;
                 if (func === 'V') return getVars().map(function(v) {
                     return v.label;
                 });

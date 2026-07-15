@@ -1278,7 +1278,11 @@ rows.forEach(<span class="kw">function</span>(r) {
 
   <p>Beta features are optional and off by default even if you're granted access to them — you choose whether to turn each one on in the Beta tab. They may change, or be removed, as they're refined, so don't build critical workflows around one without expecting it to move.</p>
 
-  <p>Currently available: <strong>Route / Fix</strong> — adds a Route symbol and a yellow <strong>Fix</strong> button next to Return/Approve, plus Post-Scan Actions (see <a href="#s9">Scan System</a>). Fix re-runs a scan and reapplies any actions marked for it — a quick way to correct a field without a full Return/Approve round trip.</p>
+  <p>Currently available:</p>
+  <div class="prop-block">
+    <div class="prop-row"><div class="prop-key">Route / Fix</div><div class="prop-val">Adds a Route symbol and a yellow <strong>Fix</strong> button next to Return/Approve, plus Post-Scan Actions (see <a href="#s9">Scan System</a>). Fix re-runs a scan and reapplies any actions marked for it — a quick way to correct a field without a full Return/Approve round trip.</div></div>
+    <div class="prop-row"><div class="prop-key">Maximo REST Data (experimental)</div><div class="prop-val">Three formula helpers - <code>domain(key, code)</code>, <code>assetWOHistory(assetnum, siteid, limit)</code>, and <code>assetDowntimeHistory(assetnum, siteid)</code> (see <a href="#s17">Formula Reference</a>). The asset ones pull live from Maximo's own REST API rather than anything scanned/scraped, and are genuinely experimental - data shapes and field reliability are still being verified. Don't build a rule you depend on around these yet.</div></div>
+  </div>
 </section>
 
 <!-- ══════════════════════════════════════════════════ -->
@@ -1338,6 +1342,9 @@ rows.forEach(<span class="kw">function</span>(r) {
       <tr><td><code>sum(arr)</code> / <code>avg(arr)</code></td><td>Total / average of the numeric values in an array (e.g. a <code>col(...)</code> result) - non-numeric entries are skipped</td></tr>
       <tr><td><code>maxLaborHours(tableTitle, nameCol, hoursCol)</code></td><td>The highest total hours attributed to any one person in a labor table</td></tr>
       <tr><td><code>whoami(field)</code></td><td>The current user's Maximo profile field - <code>username</code>, <code>email</code>, <code>displayName</code>, <code>insertSite</code>, <code>country</code>, <code>langcode</code>, or any other field name Maximo's whoami endpoint returns. Returns <code>''</code> unless "Allow whoami() in formulas" is turned on in Settings &gt; Display - off by default, since a rule using it could paste your name/email into a permanent WO record</td></tr>
+      <tr><td><code>domain(key, code)</code></td><td><strong>[beta_2]</strong> Decodes a code via one of Maximo's own cached domain lists (e.g. <code>DOWNCODE</code>, <code>HAZTYPE</code>, <code>WOCLASS</code>). Experimental - returns <code>''</code> if beta_2 is off, and list shape isn't confirmed for every domain</td></tr>
+      <tr><td><code>assetWOHistory(assetnum, siteid, limit)</code></td><td><strong>[beta_2]</strong> Recent work orders for an asset, newest first, fetched live from Maximo's REST API - not from anything scanned. Returns <code>[]</code> if beta_2 is off, or until the fetch resolves</td></tr>
+      <tr><td><code>assetDowntimeHistory(assetnum, siteid)</code></td><td><strong>[beta_2]</strong> The asset's full downtime history (not just what's linked to the current WO) as an array of <code>{startdate, enddate}</code>, fetched live from Maximo's REST API. Returns <code>[]</code> if beta_2 is off, or until the fetch resolves</td></tr>
       <tr><td><code>V(id)</code></td><td>A variable's computed value, by ID or label</td></tr>
     </tbody>
   </table>
