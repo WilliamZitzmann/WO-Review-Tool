@@ -618,10 +618,21 @@ already-captured synchronous `cache`/`cfg` data:
   formulas just see `''` until this resolves and re-renders), and toggling
   the checkbox doesn't block anything either.
 - Its first argument (`field`) gets the same completion-dropdown treatment
-  as a table name in `T(`/`lookup(`/`count(` — `completionSource()` returns
-  the fixed six field names (`username`, `email`, `displayName`,
-  `insertSite`, `country`, `langcode`) matching `readWhoamiCanonical()`'s
-  shape exactly.
+  as a table name in `T(`/`lookup(`/`count(`. `readWhoamiCanonical()`
+  returns more than the six curated names, though — it merges every scalar
+  field the raw `/maximo/oslc/whoami` response actually contains (its real
+  Maximo name, e.g. `loginID`/`personid`) alongside the six canonical ones,
+  so `whoami()` can reach any whoami field without this file needing to
+  know about it ahead of time (canonical names win on a collision).
+  `completionSource()` mirrors that: once `whoamiCache` is actually warm,
+  it offers `Object.keys(whoamiCache)` — the real discovered field list —
+  falling back to the fixed six-name list only while the cache is still
+  cold (feature off, or not fetched yet this session), so the dropdown
+  isn't just empty for the common case. `getWorkerAccessToken()` is
+  unaffected by the richer return shape — it only ever reads
+  `whoamiData[f]` for `f` in `boot.requiredFields` (today just `username`/
+  `insertSite`), which the canonical mapping still covers exactly as
+  before.
 
 **Known gap, not fixed**: a custom table (§4.7) with two columns renamed to
 the same string silently makes both share one `row[name]` key — `lookup()`/

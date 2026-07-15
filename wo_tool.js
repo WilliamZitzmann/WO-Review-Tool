@@ -32,7 +32,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26195.2040z';
+    var BUILD_ID = '26196.1111z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -2086,7 +2086,7 @@
     function readWhoamiCanonical() {
         return xhrGetText('/maximo/oslc/whoami').then(function(text) {
             var d = JSON.parse(text);
-            return {
+            var canonical = {
                 username: d.loginID || d.userName || d.personId || d.personid || '',
                 email: d.email || d.primaryemail || '',
                 country: d.country || '',
@@ -2094,6 +2094,21 @@
                 langcode: d.langcode || '',
                 displayName: d.displayName || d.displayname || ''
             };
+            // Pass through every scalar field the endpoint actually
+            // returned too (its real Maximo name, e.g. loginID/personid),
+            // not just the six curated above — so a formula can reach any
+            // whoami field without this mapping needing to know about it
+            // ahead of time. Canonical names win on a collision. Nested
+            // objects/arrays are skipped: this only ever feeds a plain
+            // scalar formula helper (whoami(field)), not a table.
+            var merged = {};
+            Object.keys(d).forEach(function(k) {
+                if (d[k] === null || typeof d[k] !== 'object') merged[k] = d[k];
+            });
+            Object.keys(canonical).forEach(function(k) {
+                merged[k] = canonical[k];
+            });
+            return merged;
         });
     }
 
@@ -7315,7 +7330,7 @@
             sum: { sig: "sum(arr)", args: ["arr — array of numbers/numeric strings, e.g. from col(...)"], desc: "Total of every numeric value in the array (non-numeric entries are skipped)." },
             avg: { sig: "avg(arr)", args: ["arr — array of numbers/numeric strings, e.g. from col(...)"], desc: "Average of every numeric value in the array, or null if none are numeric." },
             maxLaborHours: { sig: "maxLaborHours(tableTitle, nameCol, hoursCol)", args: ["tableTitle — captured labor table name", "nameCol — column with each person's name", "hoursCol — column with hours"], desc: "The highest total hours attributed to any one person." },
-            whoami: { sig: "whoami(field)", args: ["field — one of username, email, displayName, insertSite, country, langcode"], desc: "The current user's Maximo profile field. Returns '' unless \"Allow whoami() in formulas\" is turned on in Settings > Display." },
+            whoami: { sig: "whoami(field)", args: ["field — username, email, displayName, insertSite, country, langcode, or any other field name Maximo's whoami endpoint returns (e.g. loginID, personid)"], desc: "The current user's Maximo profile field. Returns '' unless \"Allow whoami() in formulas\" is turned on in Settings > Display." },
             V: { sig: "V(id)", args: ["id — a variable's ID or label"], desc: "A variable's computed value." }
         };
 
@@ -7388,7 +7403,14 @@
             function completionSource(func) {
                 if (func === 'F') return opts.fields;
                 if (func === 'T' || func === 'lookup' || func === 'count') return opts.tables;
-                if (func === 'whoami') return ['username', 'email', 'displayName', 'insertSite', 'country', 'langcode'];
+                // Once whoamiCache is actually warm (the toggle's been on and
+                // a fetch has completed), offer every real field the endpoint
+                // returned — not just the six curated names — so a formula
+                // can discover/use a field this file never hand-mapped. Cold
+                // cache (feature off, or not fetched yet this session) falls
+                // back to the fixed curated list so the dropdown isn't just
+                // empty for the common case.
+                if (func === 'whoami') return whoamiCache ? Object.keys(whoamiCache) : ['username', 'email', 'displayName', 'insertSite', 'country', 'langcode'];
                 if (func === 'V') return getVars().map(function(v) {
                     return v.label;
                 });
