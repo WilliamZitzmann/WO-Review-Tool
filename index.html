@@ -1336,6 +1336,8 @@ rows.forEach(<span class="kw">function</span>(r) {
       <tr><td><code>matches(text, pattern)</code></td><td>Array of unique regex matches</td></tr>
       <tr><td><code>isEmpty(v)</code> / <code>notEmpty(v)</code></td><td>Empty/not-empty check (handles null, undefined, empty string)</td></tr>
       <tr><td><code>ifBlank(val, fallback)</code></td><td><code>val</code> if it's non-empty, otherwise <code>fallback</code></td></tr>
+      <tr><td><code>toNumber(val)</code></td><td>Converts to a number (commas stripped first, e.g. "1,234"). Returns <code>null</code> if it doesn't look like a number</td></tr>
+      <tr><td><code>toString(val)</code></td><td>Converts to a string. Returns <code>''</code> for null/undefined</td></tr>
       <tr><td><code>trim(str)</code></td><td>Removes leading/trailing whitespace</td></tr>
       <tr><td><code>upper(str)</code> / <code>lower(str)</code></td><td>Converts to UPPERCASE / lowercase</td></tr>
       <tr><td><code>left(str, n)</code> / <code>right(str, n)</code></td><td>The first / last <code>n</code> characters of <code>str</code></td></tr>
@@ -1343,7 +1345,7 @@ rows.forEach(<span class="kw">function</span>(r) {
       <tr><td><code>sum(arr)</code> / <code>avg(arr)</code></td><td>Total / average of the numeric values in an array (e.g. a <code>col(...)</code> result) - non-numeric entries are skipped</td></tr>
       <tr><td><code>maxLaborHours(tableTitle, nameCol, hoursCol)</code></td><td>The highest total hours attributed to any one person in a labor table</td></tr>
       <tr><td><code>whoami(field)</code></td><td>The current user's Maximo profile field - <code>username</code>, <code>email</code>, <code>displayName</code>, <code>insertSite</code>, <code>country</code>, <code>langcode</code>, or any other field name Maximo's whoami endpoint returns. Requires "Allow whoami() in formulas" in Settings &gt; Display</td></tr>
-      <tr><td><code>domain(key, code)</code></td><td><strong>[beta_2]</strong> Decodes a code via one of Maximo's own cached domain lists (e.g. <code>DOWNCODE</code>, <code>HAZTYPE</code>, <code>WOCLASS</code>). Experimental - returns <code>''</code> if beta_2 is off, and list shape isn't confirmed for every domain</td></tr>
+      <tr><td><code>domain(key, code)</code></td><td><strong>[beta_2]</strong> Decodes a code via one of Maximo's own cached domain lists (e.g. <code>DOWNCODE</code>, <code>HAZTYPE</code>, <code>WOCLASS</code>). Returns <code>''</code> if beta_2 is off</td></tr>
       <tr><td><code>assetWOHistory(assetnum, siteid, limit)</code></td><td><strong>[beta_2]</strong> Recent work orders for an asset, newest first, fetched live from Maximo's REST API - not from anything scanned. Returns <code>[]</code> if beta_2 is off, or until the fetch resolves</td></tr>
       <tr><td><code>assetDowntimeHistory(assetnum, siteid)</code></td><td><strong>[beta_2]</strong> The asset's full downtime history (not just what's linked to the current WO) as an array of <code>{startdate, enddate}</code>, fetched live from Maximo's REST API. Returns <code>[]</code> if beta_2 is off, or until the fetch resolves</td></tr>
       <tr><td><code>V(id)</code></td><td>A variable's computed value, by ID or label</td></tr>

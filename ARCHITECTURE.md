@@ -636,14 +636,20 @@ and a normal run) before trusting it fully.
 
 Thirteen new helpers were added alongside `lookup()`: `count`, `ifBlank`,
 `trim`, `upper`, `lower`, `left`, `right`, `mid`, `sum`, `avg`, `today`,
-`daysBetween`, and `whoami`. All follow the existing §5.2 pattern — added to
-`buildCtx()`'s return object, `ARGN`, all **four** literal `av` arrays
-(`runVariable`, `runFormula`, `runActions()`'s condition evaluator, and the
-scan-step condition evaluator — there's no shared constant for these, they
-have to be kept in sync by hand), `HELPER_REF`, and index.html's Formula
-Reference. `mid()` is 0-indexed (JS `substr` convention), not Excel's
-1-indexed `MID` — deliberate, since this formula language already mirrors
-real JS elsewhere (regex helpers, `has()`'s real `.indexOf`).
+`daysBetween`, and `whoami`. Two more, `toNumber`/`toString` (v0.25.1),
+followed the same pattern — explicit type conversion for a formula, since a
+captured Maximo field is always a string even when it looks numeric.
+`toNumber()` reuses `toNumOrNull()` (the same comma-stripping numeric
+parse `sum()`/`avg()` already used internally), returning `null` rather
+than `NaN` on a non-numeric value so `isEmpty()`/`ifBlank()` compose with it
+naturally. All follow the existing §5.2 pattern — added to `buildCtx()`'s
+return object, `ARGN`, all **four** literal `av` arrays (`runVariable`,
+`runFormula`, `runActions()`'s condition evaluator, and the scan-step
+condition evaluator — there's no shared constant for these, they have to be
+kept in sync by hand), `HELPER_REF`, and index.html's Formula Reference.
+`mid()` is 0-indexed (JS `substr` convention), not Excel's 1-indexed `MID`
+— deliberate, since this formula language already mirrors real JS elsewhere
+(regex helpers, `has()`'s real `.indexOf`).
 
 `whoami(field)` is architecturally different from the other twelve — it's
 the one helper backed by an **async, opt-in-gated** data source instead of
@@ -744,6 +750,27 @@ its arguments once you'd already typed `funcName(`.
   both could theoretically apply), falls through to the name-dropdown path
   only when that returns nothing usable, and closes the signature tooltip
   whenever either dropdown is showing — the two can never render at once.
+  The dropdown item itself shows just the bare name (e.g. `daysBetween`),
+  not `daysBetween(` — the trailing paren was dropped (v0.25.1) since the
+  description text right next to it already makes clear it's a function.
+
+**Excel-style keyboard nav (v0.25.1)**: both dropdown flavors (arg
+completion and function-name completion) share one set of closure state in
+`attachFormulaAssist(el)` — `ddItems` (the open dropdown's `{el, value}`
+list), `ddIndex` (which one is highlighted), `ddAccept(value)` (the
+insertion function for whichever flavor is open). The top match is
+highlighted by default (`setDdIndex(0)` at the end of both `showDropdown()`/
+`showFunctionNameDropdown()`), `ArrowUp`/`ArrowDown` move the highlight
+(`e.preventDefault()`'d so the caret doesn't also move), and `Tab`/`Enter`
+accept the highlighted item instead of their normal effect (leaving the
+field / inserting a newline) — this is deliberately closer to Excel's own
+function-name IntelliSense (highlighted top match, Tab/Enter to accept)
+than to a Google-style inline "ghost text" suggestion, which would need a
+mirror-`<div>` overlay matching the textarea's exact font metrics/wrapping
+to implement reliably — a much larger, higher-risk undertaking than this
+keyboard-nav layer for a feature that's still this new. Hovering an item
+with the mouse calls the same `setDdIndex()`, so mouse and keyboard share
+one notion of "current selection" rather than fighting each other.
 
 ---
 
@@ -788,15 +815,41 @@ Current features:
     one of Maximo's own domain/lookup lists straight out of `localStorage`
     (`KNOWN_DOMAIN_KEYS` lists the 14 known keys — `DOWNCODE`, `HAZTYPE`,
     `WOCLASS`, etc. — also offered as `domain(`'s first-arg completion, same
-    mechanism as `whoami('s field-name dropdown). The list's actual JSON
-    shape was never confirmed (see the data-sources doc), so it tries a few
-    plausible shapes defensively (array of `{value/code, description/desc}`,
-    or a plain `{code: description}` map) rather than assuming one — returns
-    `''` if none match, never throws.
+    mechanism as `whoami('s field-name dropdown). **Shape confirmed
+    (v0.25.1)** via `__woBeta2Report()` across 15 real domains: `{ data:
+    [[...], ...], attributes: {value: idx, description: idx, ...} }` —
+    `attributes` maps each column NAME to its index in every `data` row,
+    and that mapping genuinely varies by domain (`description` is index 1
+    for `ABBWPRIORITY` but index 2 for `WOCLASS`, which also has a
+    `maxvalue` column — `description` is preferred when both exist, since
+    `maxvalue` is usually just an uppercase echo of `value`). `domainDecodeRaw()`
+    reads `attrs.value`/`attrs.description` (falling back to `attrs.maxvalue`)
+    rather than hardcoding index 0/1, since the whole point of this shape is
+    that it's self-describing. The old array-of-objects/plain-map guesses
+    are kept as further fallbacks but were never actually confirmed against
+    a real domain and probably never will match one.
   - `assetWOHistoryFn(assetnum, siteid, limit)` / `assetDowntimeHistoryFn(assetnum, siteid)`
     — both hit Maximo's own OSLC REST API (`/maximo/oslc/os/mxapiwo`,
     `/maximo/oslc/os/mxapiasset`) directly via `xhrGetText()`, same-origin,
-    riding the browser's existing session — not a new auth surface. Each
+    riding the browser's existing session — not a new auth surface.
+    **Every mxapi\* call now sends `Accept: application/json` (v0.25.1,
+    via the shared `MXAPI_HEADERS` constant and `xhrGetText()`'s new
+    optional `headers` param)** — every `/oslc/os/mxapi*` call 406'd
+    without it (confirmed via `__woBeta2Report()`: same URL, same session,
+    406 without the header vs. 200 with it), which meant these two helpers
+    — and any API table built on them — had never actually returned data
+    before this fix, on any install. `whoami` worked fine either way, so
+    this had nothing to do with auth; it's pure content negotiation on
+    Maximo's `os/` endpoints specifically. Deliberately NOT baked into
+    `xhrGetText()` unconditionally — that function is also the self-update
+    path's fetch primitive (`getWorkerAccessToken()`'s `/bootstrap` call,
+    `fetchToolSourceViaWorker()`'s `/tool` call, which returns raw JS
+    source, not JSON), and forcing a JSON `Accept` header onto a
+    load-critical, never-tested-against-this-change path wasn't worth the
+    risk for a header only ever confirmed necessary on Maximo's own mxapi
+    endpoints. `MXAPI_HEADERS` is passed explicitly at every mxapi\* call
+    site instead (`fetchAssetWOHistoryRaw`, `fetchAssetDowntimeHistoryRaw`,
+    `__woDumpWO`, `__woDumpAsset`). Each
     uses a **per-argument-combination cache** (`betaAssetWoCache`/
     `betaAssetDowntimeCache`, keyed by `assetnum+siteid[+limit]`) rather than
     whoami's single global cache, since the result genuinely depends on the
@@ -827,10 +880,19 @@ Current features:
     calls the raw version directly. See `CONSOLE_COMMANDS.md`'s "beta_2
     discovery tools" section for the full set
     (`__woDebugDomains`/`__woTestDomain`/`__woProbeAsset`/`__woDumpWO`/
-    `__woDumpAsset`) — deliberately NOT gated behind beta_2 themselves,
-    same reasoning as the pre-existing `__woDebugTables`/`__woDebugCache`:
-    a debug tool gated behind the feature it's meant to help you verify
-    would be useless the one time you actually need it.
+    `__woDumpAsset`/`__woBeta2Report`) — deliberately NOT gated behind
+    beta_2 themselves, same reasoning as the pre-existing
+    `__woDebugTables`/`__woDebugCache`: a debug tool gated behind the
+    feature it's meant to help you verify would be useless the one time you
+    actually need it. `__woBeta2Report(assetnum?, siteid?)` /
+    `buildBeta2DiagnosticReport()` is the one that actually found the 406
+    and domain-shape fixes above — bundles both checks into one plain-text
+    report, also available as a **"Run beta_2 Diagnostics"** button in
+    Setup > Settings > Debug (dev tier only) that prompts once for
+    asset/site and copies the report straight to the clipboard via the new
+    generic `copyTextToClipboard(text)` helper — built so confirming a fix
+    like this never again requires hand-typing `fetch()`/`JSON.parse()`
+    snippets into DevTools.
   - **API tables** (`cfg.apiTables`, see §4.8) generalize
     `assetWOHistoryFn`/`assetDowntimeHistoryFn` from standalone formula
     calls into a proper named table — resolved through the same

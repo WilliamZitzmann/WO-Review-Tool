@@ -20,7 +20,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.25.0';
+    var TOOL_VERSION = '0.25.1';
     // Format YYDDD.HHMMz (2-digit year, day-of-year, UTC hour+minute) —
     // computed via `date -u +"%y%j.%H%M"z` and substituted in right before
     // every commit that touches this file, on ANY channel/repo (unlike
@@ -32,7 +32,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26197.1328z';
+    var BUILD_ID = '26197.1858z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -929,6 +929,15 @@
         return isNaN(n) ? null : n;
     }
 
+    // toNumber()/toString() — explicit type conversion for a formula, e.g.
+    // a captured Maximo field is always a string even when it looks
+    // numeric, so oneOf()/sum()/avg() or a numeric comparison can need this
+    // first. Reuses the same comma-stripping toNumOrNull() sum()/avg()
+    // already rely on, so "1,234" converts the same way everywhere.
+    function toStringFn(v) {
+        return v == null ? '' : String(v);
+    }
+
     function sumFn(arr) {
         var total = 0;
         (arr || []).forEach(function(v) {
@@ -1021,6 +1030,8 @@
             isEmpty: isEmptyFn,
             notEmpty: notEmptyFn,
             ifBlank: ifBlankFn,
+            toNumber: toNumOrNull,
+            toString: toStringFn,
             trim: trimFn,
             upper: upperFn,
             lower: lowerFn,
@@ -1065,11 +1076,11 @@
         };
     }
 
-    var ARGN = ['F', 'T', 'rowCount', 'col', 'has', 'lookup', 'count', 'isEmpty', 'notEmpty', 'ifBlank', 'trim', 'upper', 'lower', 'left', 'right', 'mid', 'sum', 'avg', 'today', 'hours', 'hoursBetween', 'daysBetween', 'oneOf', 'contains', 'matches', 'maxLaborHours', 'whoami', 'domain', 'assetWOHistory', 'assetDowntimeHistory', 'V'];
+    var ARGN = ['F', 'T', 'rowCount', 'col', 'has', 'lookup', 'count', 'isEmpty', 'notEmpty', 'ifBlank', 'toNumber', 'toString', 'trim', 'upper', 'lower', 'left', 'right', 'mid', 'sum', 'avg', 'today', 'hours', 'hoursBetween', 'daysBetween', 'oneOf', 'contains', 'matches', 'maxLaborHours', 'whoami', 'domain', 'assetWOHistory', 'assetDowntimeHistory', 'V'];
 
     function runVariable(formula, data) {
         var c = buildCtx(data);
-        var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V];
+        var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.toNumber, c.toString, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V];
         var fn;
         try {
             fn = Function.apply(null, ARGN.concat(['return (' + formula + ');']));
@@ -1099,7 +1110,7 @@
 
     function runFormula(formula, data) {
         var c = buildCtx(data);
-        var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V];
+        var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.toNumber, c.toString, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V];
         var fn;
         try {
             fn = Function.apply(null, ARGN.concat(['return (' + formula + ');']));
@@ -2052,10 +2063,24 @@
     // ever have covered the very first install.
     var WORKER_BASE_URL = 'https://wo-review-tool-access.williamzitzmann.workers.dev';
 
-    function xhrGetText(url) {
+    // `headers` is optional ({name: value}) — deliberately NOT applied by
+    // default. This is also the self-update path's own fetch primitive
+    // (getWorkerAccessToken()'s /bootstrap call, fetchToolSourceViaWorker()'s
+    // /tool call, which returns raw JS source, not JSON) — forcing
+    // `Accept: application/json` on every call here would risk that
+    // load-critical path on the strength of a header only ever confirmed
+    // necessary for Maximo's own /oslc/os/mxapi* endpoints. Callers that
+    // need it (see fetchAssetWOHistoryRaw/fetchAssetDowntimeHistoryRaw/
+    // __woDumpWO/__woDumpAsset) pass it explicitly instead.
+    function xhrGetText(url, headers) {
         return new Promise(function(resolve, reject) {
             var xhr = new XMLHttpRequest();
             xhr.open('GET', url, true);
+            if (headers) {
+                Object.keys(headers).forEach(function(h) {
+                    xhr.setRequestHeader(h, headers[h]);
+                });
+            }
             xhr.onload = function() {
                 if (xhr.status === 200) resolve(xhr.responseText);
                 else reject(new Error('HTTP ' + xhr.status));
@@ -2182,9 +2207,11 @@
 
     // Maximo's own cached domain/lookup value lists (populated by Maximo's
     // UI into localStorage, one key per domain) — NOT written by this tool.
-    // Shape is unconfirmed (see MAXIMO_DATA_SOURCES.md §1), so domainFn()
-    // below tries several plausible shapes defensively rather than assuming
-    // one.
+    // Shape confirmed via __woBeta2Report() across 15 real domains (see
+    // domainDecodeRaw() below) — an attributes-indexed {data, attributes}
+    // object. The Shape A/B fallbacks below it were speculative guesses
+    // from before that confirmation and have never actually matched a real
+    // domain list, but are kept in case some other Maximo version differs.
     var KNOWN_DOMAIN_KEYS = ['ABBCLAUSECODE', 'ABBWPRIORITY', 'WOCLASS', 'DOWNCODE', 'LOCASSETSTATUS', 'ABBASPRIORITY', 'HAZTYPE', 'POSTATUS', 'PRSTATUS', 'ASSETTYPE', 'ABVASSETCAT', 'SHIPVIA', 'ABBWOEXECMETHOD', 'CREWID', 'JOBPLANSTATUS'];
 
     // Raw decode logic, split out from domainFn() so the __woDebugDomains()/
@@ -2204,7 +2231,34 @@
         }
         if (!raw) return '';
         var codeStr = String(code);
+        // Real shape, confirmed via __woBeta2Report() across 15 domains on
+        // a live install: { data: [[...], ...], attributes: {value: idx,
+        // description: idx, ...} } — attributes maps column NAME to its
+        // index in each data row, and that mapping varies by domain (e.g.
+        // description is index 1 for ABBWPRIORITY but index 2 for WOCLASS,
+        // which also has a maxvalue column). value was index 0 in every
+        // domain checked, but read it from attributes too rather than
+        // hardcoding — the whole point of this shape is that it's
+        // self-describing. Prefer "description" over "maxvalue" when a
+        // domain has both (maxvalue is usually just an uppercase echo of
+        // value, e.g. WOCLASS's ACTIVITY vs. description's nicer "Activity").
+        if (Array.isArray(raw.data) && raw.attributes && typeof raw.attributes === 'object') {
+            var attrs = raw.attributes;
+            var valueIdx = attrs.value;
+            var descIdx = attrs.hasOwnProperty('description') ? attrs.description : (attrs.hasOwnProperty('maxvalue') ? attrs.maxvalue : null);
+            if (valueIdx == null) return '';
+            for (var di = 0; di < raw.data.length; di++) {
+                var drow = raw.data[di];
+                if (drow && String(drow[valueIdx]) === codeStr) {
+                    return descIdx != null && drow[descIdx] != null ? drow[descIdx] : '';
+                }
+            }
+            return '';
+        }
         // Shape A: array of {value/code/domainvalue, description/desc/maxvalue}
+        // — never actually confirmed on a real domain list, kept as a
+        // fallback in case some other Maximo version/config caches these
+        // differently.
         if (Array.isArray(raw)) {
             for (var i = 0; i < raw.length; i++) {
                 var row = raw[i];
@@ -2216,7 +2270,8 @@
             }
             return '';
         }
-        // Shape B: plain object map { code: description }
+        // Shape B: plain object map { code: description } — also unconfirmed,
+        // same fallback reasoning as Shape A above.
         if (typeof raw === 'object' && raw.hasOwnProperty(codeStr)) {
             var v2 = raw[codeStr];
             return typeof v2 === 'object' ? (v2.description || v2.desc || '') : v2;
@@ -2233,12 +2288,20 @@
     // network calls, shared by the gated/cached formula helpers below AND
     // the __woProbeAsset() console tool, so probing from the console always
     // exercises the exact same request the formula helper would make.
+    // Maximo's /oslc/os/mxapi* endpoints 406 (content negotiation) without
+    // this — confirmed via __woBeta2Report(): same URL, same session, 406
+    // without it vs. 200 with it. Passed explicitly at each mxapi* call
+    // site rather than baked into xhrGetText() itself, since that function
+    // is also the self-update path's fetch primitive (bootstrap/tool-source
+    // endpoints, which aren't JSON) — see xhrGetText()'s own comment.
+    var MXAPI_HEADERS = { Accept: 'application/json' };
+
     function fetchAssetWOHistoryRaw(assetnum, siteid, limit) {
         limit = limit || 10;
         var url = '/maximo/oslc/os/mxapiwo?oslc.where=' + encodeURIComponent('assetnum="' + assetnum + '" and siteid="' + siteid + '"') +
             '&oslc.select=wonum,description,status,wopriority,reportdate,worktype' +
             '&oslc.orderBy=-reportdate&oslc.pageSize=' + limit + '&lean=1&_format=json';
-        return xhrGetText(url).then(function(text) {
+        return xhrGetText(url, MXAPI_HEADERS).then(function(text) {
             return JSON.parse(text).member || [];
         });
     }
@@ -2251,7 +2314,7 @@
         var url = '/maximo/oslc/os/mxapiasset?oslc.where=' + encodeURIComponent('assetnum="' + assetnum + '" and siteid="' + siteid + '"') +
             '&oslc.select=' + encodeURIComponent('assetnum,moddowntimehist{startdate,enddate}') +
             '&lean=1&_format=json';
-        return xhrGetText(url).then(function(text) {
+        return xhrGetText(url, MXAPI_HEADERS).then(function(text) {
             var d = JSON.parse(text);
             return (d.member && d.member[0] && d.member[0].moddowntimehist) || [];
         });
@@ -3182,7 +3245,7 @@
                 var val = '';
                 try {
                     var c = buildCtx(cache);
-                    var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V];
+                    var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.toNumber, c.toString, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V];
                     var fn = Function.apply(null, ARGN.concat(['return (' + action.value + ');']));
                     val = fn.apply(null, av);
                     if (val == null) val = '';
@@ -3400,7 +3463,7 @@
         return msg.replace(/\{\{([\s\S]+?)\}\}/g, function(_, expr) {
             try {
                 var c = buildCtx(data);
-                var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V];
+                var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.toNumber, c.toString, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V];
 
                 var fn = Function.apply(null, ARGN.concat(['return (' + expr.trim() + ');']));
                 var r = fn.apply(null, av);
@@ -3925,7 +3988,7 @@
             console.log('No "uniqueid" in the URL — open a WO tab first.');
             return Promise.resolve(null);
         }
-        return xhrGetText('/maximo/oslc/os/mxapiwo/' + woId + '?lean=1&_format=json').then(function(text) {
+        return xhrGetText('/maximo/oslc/os/mxapiwo/' + woId + '?lean=1&_format=json', MXAPI_HEADERS).then(function(text) {
             var d = JSON.parse(text);
             if (d.Error) {
                 console.error('Error:', d.Error);
@@ -3949,7 +4012,7 @@
             return Promise.resolve(null);
         }
         var url = '/maximo/oslc/os/mxapiasset?oslc.where=' + encodeURIComponent('assetnum="' + assetnum + '" and siteid="' + siteid + '"') + '&lean=1&_format=json';
-        return xhrGetText(url).then(function(text) {
+        return xhrGetText(url, MXAPI_HEADERS).then(function(text) {
             var d = JSON.parse(text);
             var asset = d.member && d.member[0];
             if (!asset) {
@@ -7824,6 +7887,8 @@
             isEmpty: { sig: "isEmpty(v)", args: ["v — value to check"], desc: "true if v is null/undefined/empty string." },
             notEmpty: { sig: "notEmpty(v)", args: ["v — value to check"], desc: "true if v is NOT null/undefined/empty string." },
             ifBlank: { sig: "ifBlank(val, fallback)", args: ["val — value to check", "fallback — used instead if val is empty"], desc: "val if it's non-empty, otherwise fallback." },
+            toNumber: { sig: "toNumber(val)", args: ["val — value to convert, e.g. a captured field (always a string)"], desc: "Converts to a number (commas stripped first, e.g. \"1,234\"). Returns null if it doesn't look like a number." },
+            toString: { sig: "toString(val)", args: ["val — value to convert"], desc: "Converts to a string. Returns '' for null/undefined." },
             trim: { sig: "trim(str)", args: ["str — text to clean up"], desc: "Removes leading/trailing whitespace." },
             upper: { sig: "upper(str)", args: ["str — text to convert"], desc: "Converts to UPPERCASE." },
             lower: { sig: "lower(str)", args: ["str — text to convert"], desc: "Converts to lowercase." },
@@ -7834,7 +7899,7 @@
             avg: { sig: "avg(arr)", args: ["arr — array of numbers/numeric strings, e.g. from col(...)"], desc: "Average of every numeric value in the array, or null if none are numeric." },
             maxLaborHours: { sig: "maxLaborHours(tableTitle, nameCol, hoursCol)", args: ["tableTitle — captured labor table name", "nameCol — column with each person's name", "hoursCol — column with hours"], desc: "The highest total hours attributed to any one person." },
             whoami: { sig: "whoami(field)", args: ["field — username, email, displayName, insertSite, country, langcode, or any other field name Maximo's whoami endpoint returns (e.g. loginID, personid)"], desc: "The current user's Maximo profile field. Requires \"Allow whoami() in formulas\" in Settings > Display." },
-            domain: { sig: "domain(key, code)", args: ["key — a Maximo domain list name, e.g. DOWNCODE, HAZTYPE, WOCLASS", "code — the coded value to decode"], desc: "Decodes a code via one of Maximo's own cached domain lists. beta_2 only — returns '' if that beta feature is off. Experimental: list shape isn't fully confirmed for every domain, see MAXIMO_DATA_SOURCES.md." },
+            domain: { sig: "domain(key, code)", args: ["key — a Maximo domain list name, e.g. DOWNCODE, HAZTYPE, WOCLASS", "code — the coded value to decode"], desc: "Decodes a code via one of Maximo's own cached domain lists. beta_2 only — returns '' if that beta feature is off." },
             assetWOHistory: { sig: "assetWOHistory(assetnum, siteid, limit)", args: ["assetnum — asset number", "siteid — Maximo site ID", "limit — max rows, default 10"], desc: "Recent work orders for an asset, newest first, fetched live from Maximo's REST API (array of {wonum, description, status, wopriority, reportdate, worktype, ...}). beta_2 only — returns [] if that beta feature is off, or [] until the (async) fetch resolves." },
             assetDowntimeHistory: { sig: "assetDowntimeHistory(assetnum, siteid)", args: ["assetnum — asset number", "siteid — Maximo site ID"], desc: "The asset's full downtime history (not just what's linked to the current WO) as an array of {startdate, enddate}, fetched live from Maximo's REST API. beta_2 only — returns [] if that beta feature is off, or [] until the (async) fetch resolves." },
             V: { sig: "V(id)", args: ["id — a variable's ID or label"], desc: "A variable's computed value." }
@@ -7941,12 +8006,34 @@
         function attachFormulaAssist(el) {
             var dropdown = null,
                 sigTip = null;
+            // Excel-style keyboard nav shared by both dropdown flavors (arg
+            // completion and function-name completion): ddItems is the
+            // currently open dropdown's {el, value} list, ddIndex is which
+            // one is highlighted (0 = top match, highlighted by default —
+            // matching Excel's own function-name IntelliSense), ddAccept(value)
+            // performs whichever insertion that dropdown flavor needs.
+            var ddItems = [],
+                ddIndex = -1,
+                ddAccept = null;
 
             function closeDropdown() {
                 if (dropdown) {
                     dropdown.remove();
                     dropdown = null;
                 }
+                ddItems = [];
+                ddIndex = -1;
+                ddAccept = null;
+            }
+
+            function setDdIndex(i) {
+                if (!ddItems.length) return;
+                i = Math.max(0, Math.min(ddItems.length - 1, i));
+                ddItems.forEach(function(it, idx) {
+                    it.el.style.background = idx === i ? 'rgba(255,255,255,.1)' : 'none';
+                });
+                ddIndex = i;
+                ddItems[i].el.scrollIntoView({ block: 'nearest' });
             }
 
             function closeSigTip() {
@@ -8018,21 +8105,22 @@
                 // --wo-* custom properties wouldn't cascade here — hardcoded
                 // to match those token values instead.
                 dropdown.style.cssText = 'position:fixed;z-index:9999999;background:#1f2630;border:1px solid #30363d;border-radius:6px;max-height:170px;overflow:auto;box-shadow:0 6px 20px rgba(0,0,0,.5);font-size:11px;font-family:"Segoe UI",Arial,sans-serif;';
-                matches.forEach(function(m) {
+                ddAccept = function(value) {
+                    insertCompletion(ctx, value);
+                };
+                matches.forEach(function(m, mi) {
                     var item = document.createElement('div');
                     item.textContent = m;
                     item.style.cssText = 'padding:5px 9px;cursor:pointer;color:#f0f3f6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
                     item.onmouseenter = function() {
-                        item.style.background = 'rgba(255,255,255,.08)';
-                    };
-                    item.onmouseleave = function() {
-                        item.style.background = 'none';
+                        setDdIndex(mi);
                     };
                     item.onmousedown = function(e) {
                         e.preventDefault();
                         insertCompletion(ctx, m);
                     };
                     dropdown.appendChild(item);
+                    ddItems.push({ el: item, value: m });
                 });
                 document.body.appendChild(dropdown);
                 var r = el.getBoundingClientRect();
@@ -8047,6 +8135,7 @@
                 } else {
                     dropdown.style.top = (r.bottom + 2) + 'px';
                 }
+                setDdIndex(0);
                 return true;
             }
 
@@ -8121,22 +8210,23 @@
                 dropdown = document.createElement('div');
                 dropdown.className = 'wo-fa-dropdown';
                 dropdown.style.cssText = 'position:fixed;z-index:9999999;background:#1f2630;border:1px solid #30363d;border-radius:6px;max-height:220px;overflow:auto;box-shadow:0 6px 20px rgba(0,0,0,.5);font-size:11px;font-family:"Segoe UI",Arial,sans-serif;';
-                matches.slice(0, 8).forEach(function(name) {
+                ddAccept = function(name) {
+                    insertFunctionName(idCtx, name);
+                };
+                matches.slice(0, 8).forEach(function(name, mi) {
                     var ref = HELPER_REF[name];
                     var item = document.createElement('div');
                     item.style.cssText = 'padding:5px 9px;cursor:pointer;color:#f0f3f6;';
-                    item.innerHTML = '<b>' + name + '(</b><span style="color:#8b98a5;"> — ' + String(ref.desc).replace(/</g, '&lt;') + '</span>';
+                    item.innerHTML = '<b>' + name + '</b><span style="color:#8b98a5;"> — ' + String(ref.desc).replace(/</g, '&lt;') + '</span>';
                     item.onmouseenter = function() {
-                        item.style.background = 'rgba(255,255,255,.08)';
-                    };
-                    item.onmouseleave = function() {
-                        item.style.background = 'none';
+                        setDdIndex(mi);
                     };
                     item.onmousedown = function(e) {
                         e.preventDefault();
                         insertFunctionName(idCtx, name);
                     };
                     dropdown.appendChild(item);
+                    ddItems.push({ el: item, value: name });
                 });
                 document.body.appendChild(dropdown);
                 var r = el.getBoundingClientRect();
@@ -8148,6 +8238,7 @@
                 } else {
                     dropdown.style.top = (r.bottom + 2) + 'px';
                 }
+                setDdIndex(0);
             }
 
             function showSigTip(ctx) {
@@ -8214,6 +8305,24 @@
                 if (e.key === 'Escape') {
                     closeDropdown();
                     closeSigTip();
+                    return;
+                }
+                // Excel-style dropdown navigation: while either dropdown is
+                // open, arrow keys move the highlight instead of the
+                // caret, and Tab/Enter accept the highlighted match instead
+                // of leaving the field/inserting a newline — so a match can
+                // be picked without ever touching the mouse, same as
+                // Excel's own function-name IntelliSense.
+                if (!dropdown || !ddItems.length) return;
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setDdIndex(ddIndex + 1);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setDdIndex(ddIndex - 1);
+                } else if (e.key === 'Tab' || e.key === 'Enter') {
+                    e.preventDefault();
+                    if (ddAccept && ddIndex >= 0) ddAccept(ddItems[ddIndex].value);
                 }
             });
             el.addEventListener('blur', function() {
