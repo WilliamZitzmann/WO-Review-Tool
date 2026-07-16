@@ -32,7 +32,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26197.1129z';
+    var BUILD_ID = '26197.1217z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -7716,7 +7716,7 @@
             sum: { sig: "sum(arr)", args: ["arr — array of numbers/numeric strings, e.g. from col(...)"], desc: "Total of every numeric value in the array (non-numeric entries are skipped)." },
             avg: { sig: "avg(arr)", args: ["arr — array of numbers/numeric strings, e.g. from col(...)"], desc: "Average of every numeric value in the array, or null if none are numeric." },
             maxLaborHours: { sig: "maxLaborHours(tableTitle, nameCol, hoursCol)", args: ["tableTitle — captured labor table name", "nameCol — column with each person's name", "hoursCol — column with hours"], desc: "The highest total hours attributed to any one person." },
-            whoami: { sig: "whoami(field)", args: ["field — username, email, displayName, insertSite, country, langcode, or any other field name Maximo's whoami endpoint returns (e.g. loginID, personid)"], desc: "The current user's Maximo profile field. Returns '' unless \"Allow whoami() in formulas\" is turned on in Settings > Display." },
+            whoami: { sig: "whoami(field)", args: ["field — username, email, displayName, insertSite, country, langcode, or any other field name Maximo's whoami endpoint returns (e.g. loginID, personid)"], desc: "The current user's Maximo profile field. Requires \"Allow whoami() in formulas\" in Settings > Display." },
             domain: { sig: "domain(key, code)", args: ["key — a Maximo domain list name, e.g. DOWNCODE, HAZTYPE, WOCLASS", "code — the coded value to decode"], desc: "Decodes a code via one of Maximo's own cached domain lists. beta_2 only — returns '' if that beta feature is off. Experimental: list shape isn't fully confirmed for every domain, see MAXIMO_DATA_SOURCES.md." },
             assetWOHistory: { sig: "assetWOHistory(assetnum, siteid, limit)", args: ["assetnum — asset number", "siteid — Maximo site ID", "limit — max rows, default 10"], desc: "Recent work orders for an asset, newest first, fetched live from Maximo's REST API (array of {wonum, description, status, wopriority, reportdate, worktype, ...}). beta_2 only — returns [] if that beta feature is off, or [] until the (async) fetch resolves." },
             assetDowntimeHistory: { sig: "assetDowntimeHistory(assetnum, siteid)", args: ["assetnum — asset number", "siteid — Maximo site ID"], desc: "The asset's full downtime history (not just what's linked to the current WO) as an array of {startdate, enddate}, fetched live from Maximo's REST API. beta_2 only — returns [] if that beta feature is off, or [] until the (async) fetch resolves." },
@@ -7874,11 +7874,16 @@
                 el.focus();
             }
 
+            // Returns true if it actually rendered a dropdown, false if there
+            // was nothing to show (e.g. no known tables yet) — update() uses
+            // this to decide whether to fall through to the signature
+            // tooltip instead, so argIndex 0 with zero matches still shows
+            // SOMETHING rather than going silent until the next comma.
             function showDropdown(ctx) {
                 var source = completionSource(ctx.func);
                 if (!source || ctx.argIndex !== 0) {
                     closeDropdown();
-                    return;
+                    return false;
                 }
                 var q = ctx.prefix.replace(/['"]/g, '').toLowerCase();
                 var matches = source.filter(function(s) {
@@ -7886,7 +7891,7 @@
                 }).slice(0, 8);
                 if (!matches.length) {
                     closeDropdown();
-                    return;
+                    return false;
                 }
                 closeDropdown();
                 dropdown = document.createElement('div');
@@ -7925,6 +7930,7 @@
                 } else {
                     dropdown.style.top = (r.bottom + 2) + 'px';
                 }
+                return true;
             }
 
             // Finds the plain identifier (if any) immediately touching the
@@ -8059,9 +8065,8 @@
                 var ctx = parseFormulaContext(el.value, el.selectionStart);
                 if (ctx) {
                     var source = completionSource(ctx.func);
-                    if (source && ctx.argIndex === 0) {
+                    if (source && ctx.argIndex === 0 && showDropdown(ctx)) {
                         closeSigTip();
-                        showDropdown(ctx);
                         return;
                     }
                 }
@@ -9942,7 +9947,7 @@
                 '<input type="checkbox" id="__st_whoami_formulas" ' + (st.whoamiInFormulas ? 'checked' : '') + '>' +
                 '<span style="color:var(--wo-text);font-size:11px;">Allow whoami() in formulas</span>' +
                 '</label>' +
-                '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;">Off by default — a rule/message using your name, username, or email could end up pasted into a permanent WO record.</div>' +
+                '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;">Allows rules/messages using your name, username, or email via whoami().</div>' +
                 '</div>';
             content.appendChild(displayDiv);
             makeCollapsible(displayDiv, 'Display', false);
@@ -10456,7 +10461,7 @@
                 '<option value="Suggestion">Suggestion</option>' +
                 '</select></div>' +
                 '<textarea id="__fb_body" placeholder="What happened, or what would help?" style="width:100%;height:140px;"></textarea>' +
-                '<label style="display:block;margin-top:6px;font-size:11px;color:var(--wo-muted);"><input type="checkbox" id="__fb_pii"> Include my Maximo name/username/email</label>' +
+                '<label style="display:block;margin-top:6px;font-size:11px;color:var(--wo-muted);"><input type="checkbox" id="__fb_pii"> Include name and personal identifying details</label>' +
                 '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;">' +
                 '<button id="__fb_send" type="button" class="wo-btn wo-btn-primary">Send</button>' +
                 '<span id="__fb_status" style="color:var(--wo-muted);font-size:10px;"></span>' +
@@ -10504,7 +10509,9 @@
                     if (who) {
                         fullContext += '\nReporter: ' + (who.displayName || who.username || '') +
                             (who.username ? ' (' + who.username + ')' : '') +
-                            (who.email ? ' <' + who.email + '>' : '');
+                            (who.email ? ' <' + who.email + '>' : '') +
+                            (who.insertSite ? ' — site ' + who.insertSite : '') +
+                            (who.country ? ', ' + who.country : '');
                     }
                     getWorkerAccessToken().then(function(token) {
                         return xhrPostJSON(WORKER_BASE_URL + '/feedback', {
