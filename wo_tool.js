@@ -32,7 +32,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26197.1217z';
+    var BUILD_ID = '26197.1246z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -6281,6 +6281,20 @@
             "#__wo_setup_modal .wo-edit-table tr:not(:last-child) td{border-bottom:1px solid var(--wo-border);}" +
             "#__wo_setup_modal .wo-edit-table input,#__wo_setup_modal .wo-edit-table textarea{width:100%;font-size:11px;}" +
             "#__wo_setup_modal .wo-edit-table .wo-edit-table-del{width:26px;text-align:center;padding-left:2px;padding-right:2px;}" +
+            // Custom-table editor (Tables tab) — a real bordered grid rather
+            // than floating inputs with their own delete buttons, so it
+            // reads as a spreadsheet. Every structural edit (add/delete row,
+            // add/delete column, clear cell) lives in a right-click context
+            // menu (see ctGridContextMenu()) instead of visible per-cell
+            // buttons, same reasoning as any other decluttered control here.
+            "#__wo_setup_modal .wo-ct-grid-wrap{overflow-x:auto;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);margin-top:6px;}" +
+            "#__wo_setup_modal table.wo-ct-grid{width:100%;border-collapse:collapse;table-layout:fixed;}" +
+            "#__wo_setup_modal table.wo-ct-grid th,#__wo_setup_modal table.wo-ct-grid td{border:1px solid var(--wo-border);padding:0;}" +
+            "#__wo_setup_modal table.wo-ct-grid th{background:var(--wo-surface-2);}" +
+            "#__wo_setup_modal table.wo-ct-grid td:hover{background:var(--wo-surface-2);}" +
+            "#__wo_setup_modal table.wo-ct-grid th input,#__wo_setup_modal table.wo-ct-grid td input{display:block;width:100%;box-sizing:border-box;border:none;background:none;padding:5px 7px;font-size:11px;color:var(--wo-text);}" +
+            "#__wo_setup_modal table.wo-ct-grid th input{font-weight:600;color:var(--wo-muted);font-size:10.5px;}" +
+            "#__wo_setup_modal table.wo-ct-grid th input:focus,#__wo_setup_modal table.wo-ct-grid td input:focus{outline:1px solid var(--wo-accent);outline-offset:-1px;background:var(--wo-field);}" +
             "#__wo_setup_modal .wo-th-tip{display:inline-flex;vertical-align:middle;margin-left:5px;color:var(--wo-muted);cursor:default;}" +
             "#__wo_setup_modal .wo-th-tip:hover{color:var(--wo-text);}" +
             // Same show-on-card-hover treatment as .wo-drag-handle/.wo-move-wrap
@@ -9539,6 +9553,64 @@
                 content.appendChild(emptyCustom);
             }
 
+            // Right-click context menu for a custom table's grid — the ONLY
+            // way to add/delete a row/column or clear a cell now (see the
+            // CSS comment above .wo-ct-grid-wrap for why the old per-cell
+            // buttons were removed). `hit` is {ci} for a header th, or
+            // {ci, ri} for a data td. Mirrors the shared openRuleMenu/
+            // closeRuleMenu single-open-menu pattern used by every other
+            // kebab/context menu in this modal.
+            function ctGridContextMenu(e, t, hit) {
+                e.preventDefault();
+                closeRuleMenu();
+                var isHeader = hit.ri == null;
+                var items = [];
+                items.push(['addrow', 'Add Row']);
+                items.push(['addcol', 'Add Column']);
+                if (!isHeader) items.push(['delcell', 'Delete Cell']);
+                if (!isHeader) items.push(['delrow', 'Delete Row']);
+                if (t.columns.length > 1) items.push(['delcol', 'Delete Column']);
+                var menu = document.createElement('div');
+                menu.className = 'wo-kebab-menu';
+                menu.style.position = 'fixed';
+                menu.style.left = e.clientX + 'px';
+                menu.style.top = e.clientY + 'px';
+                menu.innerHTML = items.map(function(it) {
+                    var danger = it[0].indexOf('del') === 0;
+                    return '<button type="button" class="wo-kebab-item' + (danger ? ' wo-kebab-item-danger' : '') + '" data-ct-act="' + it[0] + '">' + it[1] + '</button>';
+                }).join('');
+                modal.appendChild(menu);
+                var r = menu.getBoundingClientRect();
+                if (r.right > window.innerWidth) menu.style.left = Math.max(4, window.innerWidth - r.width - 4) + 'px';
+                if (r.bottom > window.innerHeight) menu.style.top = Math.max(4, window.innerHeight - r.height - 4) + 'px';
+                menu.querySelectorAll('[data-ct-act]').forEach(function(item) {
+                    item.onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        var act = item.getAttribute('data-ct-act');
+                        if (act === 'addrow') {
+                            t.rows.push({});
+                        } else if (act === 'addcol') {
+                            var n = 1;
+                            while (t.columns.indexOf('Column ' + n) >= 0) n++;
+                            t.columns.push('Column ' + n);
+                        } else if (act === 'delcell') {
+                            delete t.rows[hit.ri][t.columns[hit.ci]];
+                        } else if (act === 'delrow') {
+                            t.rows.splice(hit.ri, 1);
+                        } else if (act === 'delcol') {
+                            var name = t.columns[hit.ci];
+                            t.columns.splice(hit.ci, 1);
+                            t.rows.forEach(function(row) {
+                                delete row[name];
+                            });
+                        }
+                        tablesTab();
+                    };
+                });
+                openRuleMenu = menu;
+            }
+
             customIds.forEach(function(id) {
                 var t = cfg.customTables[id];
                 if (!t.columns || !t.columns.length) t.columns = ['Column 1'];
@@ -9551,26 +9623,20 @@
                     '<button type="button" class="__ct_del wo-btn-ghost wo-kebab-item-danger" aria-label="Delete table">' + TRASH_SVG + '</button>' +
                     '</div>';
 
-                var tableHtml = '<div class="wo-table-wrap" style="margin-top:6px;"><table class="wo-table"><tr>';
+                var tableHtml = '<div class="wo-ct-grid-wrap"><table class="wo-ct-grid"><thead><tr>';
                 t.columns.forEach(function(col, ci) {
-                    tableHtml += '<th style="padding:2px;"><div style="display:flex;align-items:center;gap:3px;">' +
-                        '<input type="text" data-ct-col="' + ci + '" value="' + String(col).replace(/"/g, '&quot;') + '" style="width:100%;font-size:10.5px;">' +
-                        (t.columns.length > 1 ? '<button type="button" class="__ct_delcol" data-col="' + ci + '" aria-label="Remove column" style="flex:0 0 auto;">✕</button>' : '') +
-                        '</div></th>';
+                    tableHtml += '<th data-ct-col="' + ci + '"><input type="text" value="' + String(col).replace(/"/g, '&quot;') + '"></th>';
                 });
-                tableHtml += '<th style="width:1%;"></th></tr>';
+                tableHtml += '</tr></thead><tbody>';
                 t.rows.forEach(function(row, ri) {
                     tableHtml += '<tr>';
                     t.columns.forEach(function(col, ci) {
-                        tableHtml += '<td style="padding:2px;"><input type="text" data-ct-cell data-row="' + ri + '" data-col-idx="' + ci + '" value="' + String(row[col] || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;"></td>';
+                        tableHtml += '<td data-ct-cell data-row="' + ri + '" data-col-idx="' + ci + '"><input type="text" value="' + String(row[col] || '').replace(/"/g, '&quot;') + '"></td>';
                     });
-                    tableHtml += '<td><button type="button" class="__ct_delrow" data-row="' + ri + '" aria-label="Remove row" style="flex:0 0 auto;">' + TRASH_SVG + '</button></td></tr>';
+                    tableHtml += '</tr>';
                 });
-                tableHtml += '</table></div>' +
-                    '<div style="margin-top:6px;display:flex;gap:6px;">' +
-                    '<button type="button" class="__ct_addcol wo-btn" style="font-size:11px;">+ Column</button>' +
-                    '<button type="button" class="__ct_addrow wo-btn" style="font-size:11px;">+ Row</button>' +
-                    '</div>';
+                tableHtml += '</tbody></table></div>' +
+                    '<div style="color:var(--wo-muted);font-size:10px;margin-top:5px;">Right-click a cell to add/delete rows, columns, or a cell.</div>';
 
                 box.innerHTML = head + tableHtml;
                 content.appendChild(box);
@@ -9582,9 +9648,9 @@
                         tablesTab();
                     });
                 };
-                box.querySelectorAll('[data-ct-col]').forEach(function(input) {
+                box.querySelectorAll('th[data-ct-col] input').forEach(function(input) {
                     input.oninput = function(e) {
-                        var ci = +e.target.getAttribute('data-ct-col');
+                        var ci = +input.closest('th').getAttribute('data-ct-col');
                         var oldName = t.columns[ci];
                         var newName = e.target.value;
                         t.columns[ci] = newName;
@@ -9601,48 +9667,32 @@
                         }
                     };
                 });
-                box.querySelectorAll('.__ct_delcol').forEach(function(btn) {
-                    btn.onclick = function() {
-                        var ci = +btn.getAttribute('data-col');
-                        var name = t.columns[ci];
-                        t.columns.splice(ci, 1);
-                        t.rows.forEach(function(row) {
-                            delete row[name];
-                        });
-                        tablesTab();
-                    };
-                });
-                box.querySelectorAll('[data-ct-cell]').forEach(function(input) {
+                box.querySelectorAll('td[data-ct-cell] input').forEach(function(input) {
                     input.oninput = function(e) {
-                        var ri = +e.target.getAttribute('data-row');
+                        var td = input.closest('td');
+                        var ri = +td.getAttribute('data-row');
                         // Resolved by column INDEX, not a name baked into the
                         // markup at render time - a column rename mutates
                         // t.columns in place without a full re-render (so
                         // typing isn't interrupted), so a name captured at
                         // render time would go stale the moment the header
                         // was renamed and this cell was edited afterward.
-                        var ci = +e.target.getAttribute('data-col-idx');
+                        var ci = +td.getAttribute('data-col-idx');
                         var col = t.columns[ci];
                         t.rows[ri][col] = e.target.value;
                     };
                 });
-                box.querySelectorAll('.__ct_delrow').forEach(function(btn) {
-                    btn.onclick = function() {
-                        var ri = +btn.getAttribute('data-row');
-                        t.rows.splice(ri, 1);
-                        tablesTab();
-                    };
+                box.querySelector('.wo-ct-grid').addEventListener('contextmenu', function(e) {
+                    var th = e.target.closest('th[data-ct-col]');
+                    if (th) {
+                        ctGridContextMenu(e, t, { ci: +th.getAttribute('data-ct-col') });
+                        return;
+                    }
+                    var td = e.target.closest('td[data-ct-cell]');
+                    if (td) {
+                        ctGridContextMenu(e, t, { ci: +td.getAttribute('data-col-idx'), ri: +td.getAttribute('data-row') });
+                    }
                 });
-                box.querySelector('.__ct_addcol').onclick = function() {
-                    var n = 1;
-                    while (t.columns.indexOf('Column ' + n) >= 0) n++;
-                    t.columns.push('Column ' + n);
-                    tablesTab();
-                };
-                box.querySelector('.__ct_addrow').onclick = function() {
-                    t.rows.push({});
-                    tablesTab();
-                };
             });
 
             customHeader.querySelector('#__ct_add').onclick = function() {

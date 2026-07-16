@@ -387,6 +387,28 @@ formulas can read exactly like a scanned one.
   (§4.5) — its wording explicitly warns that a formula referencing it will
   start returning empty results, since unlike a Rule/Group there's no
   natural "nothing references this anymore" signal to check first.
+- **Grid editing (v0.25.1)**: the table itself renders as a real bordered
+  grid (`.wo-ct-grid`, a genuine `<table>` with per-cell borders and a
+  shaded header row) rather than floating inputs each carrying their own
+  delete button — meant to read as a spreadsheet, not a stack of controls.
+  Every structural edit (add/delete row, add/delete column, clear a cell)
+  moved off visible buttons entirely and into a right-click context menu,
+  `ctGridContextMenu(e, t, hit)` — `hit` is `{ci}` for a header `<th>` or
+  `{ci, ri}` for a data `<td>`, found via `e.target.closest()` on a single
+  `contextmenu` listener on the table (not one listener per cell). Reuses
+  the same shared `openRuleMenu`/`closeRuleMenu` single-open-menu variable
+  and `.wo-kebab-menu`/`.wo-kebab-item` styling every other kebab/context
+  menu in Setup already uses, positioned at the cursor (`e.clientX/clientY`)
+  the same way the tab-bar's right-click mode menu does. "Delete Column" is
+  omitted from the menu entirely (not just disabled) when only one column
+  remains, same guard the old visible-button version had. "Delete Cell"
+  clears that cell's value only (`delete row[colName]`) — there's no
+  structural "shift cells" concept in this row-of-plain-objects model, so
+  it behaves like pressing Delete on a spreadsheet cell, not Excel's
+  shift-up/shift-left variant. Column rename and cell-value `oninput`
+  handlers now resolve their row/column index via `input.closest('th'|'td')`
+  instead of an index baked onto the `<input>` itself — no behavior change,
+  just following the markup restructure.
 
 ### 4.8 API tables (`cfg.apiTables`, beta_2, v0.25.0)
 

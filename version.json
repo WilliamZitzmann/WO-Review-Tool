@@ -19,7 +19,10 @@
         "New beta feature (beta_2, experimental): domain(key, code) decodes a code via one of Maximo's cached domain lists; assetWOHistory(assetnum, siteid, limit) and assetDowntimeHistory(assetnum, siteid) pull an asset's work order / downtime history live from Maximo's own REST API. Data shapes and field reliability are still being verified - don't build a rule you depend on around these yet.",
         "New (beta_2): API Tables in the Tables tab - a named table backed by a live REST lookup (asset work order or downtime history) instead of a scan or hand-typed rows, whose asset/site come from their own formulas so the same table definition follows whichever WO you're reviewing. Readable by T()/lookup()/col() exactly like any scanned or custom table.",
         "New: a Formula Reference button (book icon, next to Save in Setup) opens a searchable in-app list of every formula function, so you don't need to open the Guide in a separate tab.",
-        "New: typing a bare function name anywhere in a formula box now suggests matching functions to insert - previously autocomplete only helped once you'd already typed a function's opening parenthesis."
+        "New: typing a bare function name anywhere in a formula box now suggests matching functions to insert - previously autocomplete only helped once you'd already typed a function's opening parenthesis.",
+        "Custom tables (Tables tab) now edit as a real bordered grid instead of floating inputs with their own delete buttons - right-click any cell to add/delete a row, column, or clear a cell.",
+        "Fixed: formula autocomplete could go silent right after opening a function's parenthesis (e.g. typing lookup() showed nothing until the first comma) - it now always shows either the argument list or the signature tooltip immediately.",
+        "Simplified the whoami() opt-in and Feedback report checkbox wording; the Feedback checkbox now also includes site/country when checked."
       ]
     },
     {
