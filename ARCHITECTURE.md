@@ -772,6 +772,85 @@ keyboard-nav layer for a feature that's still this new. Hovering an item
 with the mouse calls the same `setDdIndex()`, so mouse and keyboard share
 one notion of "current selection" rather than fighting each other.
 
+### 5.8 Case-insensitive function names (v0.25.1)
+
+Reported bug: typing `daysbetween(` (or any wrong-case helper name) showed
+neither the arg dropdown nor the signature tooltip at all — `ctx.func` was
+whatever case was actually typed, and both `completionSource(ctx.func)` and
+`HELPER_REF[ctx.func]` are exact-match object lookups, so a case mismatch
+against the real `daysBetween` key just silently found nothing. Two
+independent fixes, one editor-side and one execution-side, both keyed off
+the same `ARGN_LOWER` map (`{lowercased name: canonical ARGN casing}`,
+built once from `ARGN`):
+
+- **Editor recognition** — `attachFormulaAssist(el)`'s `update()`
+  canonicalizes `ctx.func` via `ARGN_LOWER` immediately after
+  `parseFormulaContext()` returns it, before any dropdown/tooltip lookup
+  runs. So `daysbetween(`, `DaysBetween(`, `DAYSBETWEEN(` all resolve to
+  the same `HELPER_REF['daysBetween']` entry and show its signature tooltip
+  immediately — the underlying complaint was never really about dropdowns
+  vs. tooltips, it was that a case-mismatched name matched nothing at all.
+- **Execution correctness** — `normalizeFormulaFunctionCase(formula)` is a
+  small hand-rolled scanner (string-literal-aware via the same naive
+  quote-parity approach as `insideStringLiteral()`) that rewrites every
+  bare identifier immediately followed by `(` to its canonical `ARGN_LOWER`
+  casing, leaving everything else (string contents, non-call identifiers,
+  already-correct casing) untouched. Without this, a formula saved with
+  wrong casing would still fail at actual evaluation — the generated
+  `Function` only binds the exact-case `ARGN` names as parameters, so a
+  mistyped case is a `ReferenceError` at eval time regardless of what the
+  editor showed while typing. Called once at the top of the same four
+  formula-evaluation entry points that share the `av`/`ARGN` arrays
+  (`runVariable`, `runFormula`, `runActions()`'s `action.value` evaluator,
+  `resolveMsg()`'s `{{...}}` interpolation) — so a rule/message/action
+  formula that used the wrong case for a helper name now just works,
+  silently corrected, rather than erroring or (worse) evaluating to
+  nothing without explanation.
+- This is deliberately a **normalize-at-use** design, not a live rewrite of
+  what's in the textarea as the user types — the field always shows
+  exactly what was typed; only the version actually evaluated (and, for the
+  editor's dropdown/tooltip purposes, the version looked up against
+  `HELPER_REF`) gets case-corrected. Rewriting the live textarea value
+  in-place would risk fighting the user's cursor position mid-keystroke for
+  a cosmetic win that isn't needed — the "auto-correct" only matters for
+  whether the formula *works*, which this already guarantees.
+
+### 5.9 Signature tooltip + value dropdown shown together (v0.25.1)
+
+Follow-up to the same bug report: the case fix above only explains half of
+"typing `domain(`/`daysbetween(` doesn't instantly tell me what belongs
+between the parens." `domain` was never miscased — the real gap was that
+`domain(`, `lookup(`, `count(`, `whoami(`, `F(`, `T(`, and `V(` all have a
+`completionSource()` entry (a value list for their first argument), and
+`update()` treated that dropdown and the signature tooltip as mutually
+exclusive: whichever showed, the other was explicitly closed. So typing
+`domain(` got a raw list of domain-key strings with no indication a second
+argument (`code`) even exists. Excel shows both together for its own
+functions (a value/range suggestion list alongside the persistent argument
+tooltip), so this tool now does too:
+
+- `showDropdown(ctx, pinBelow)` and `showSigTip(ctx, pinAbove)` each gained
+  an optional flag. Both dropdown/tooltip already had independent
+  "flip above the field if there's no room below" logic tied to the same
+  `el.getBoundingClientRect()` anchor — left alone, showing both at once
+  would just stack them in the same spot. When `update()` shows both, it
+  passes `true` to force the dropdown below the field and the tooltip
+  above it unconditionally, instead of each independently guessing.
+  `showSigTip`'s pinned-above position still clamps to `Math.max(4, ...)`
+  so it can't go fully off-screen near the top of the viewport; the
+  dropdown's pinned-below position isn't similarly clamped against the
+  bottom, so a field very close to the viewport's bottom edge can still
+  render a dropdown that's partly cut off — a narrow, pre-existing-style
+  edge case, not new to this change.
+- `update()` no longer `return`s immediately after a successful
+  `showDropdown()` — it now falls through to `showSigTip(ctx, dropdownShown)`
+  regardless, so a signature tooltip renders whenever `ctx` resolves,
+  independent of whether a value dropdown also happened to apply. The one
+  case that's still mutually exclusive with the signature tooltip is the
+  bare function-**name** dropdown (`showFunctionNameDropdown`, §5.7) — that
+  one fires when there's no complete enclosing call yet at all, so there's
+  no signature to show alongside it.
+
 ---
 
 ## 6. Beta feature framework

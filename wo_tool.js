@@ -32,7 +32,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26197.1858z';
+    var BUILD_ID = '26197.2031z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -1078,7 +1078,70 @@
 
     var ARGN = ['F', 'T', 'rowCount', 'col', 'has', 'lookup', 'count', 'isEmpty', 'notEmpty', 'ifBlank', 'toNumber', 'toString', 'trim', 'upper', 'lower', 'left', 'right', 'mid', 'sum', 'avg', 'today', 'hours', 'hoursBetween', 'daysBetween', 'oneOf', 'contains', 'matches', 'maxLaborHours', 'whoami', 'domain', 'assetWOHistory', 'assetDowntimeHistory', 'V'];
 
+    // ARGN in lowercase -> canonical casing, e.g. 'daysbetween' -> 'daysBetween'.
+    // Built once (ARGN never changes at runtime) rather than per-call.
+    var ARGN_LOWER = {};
+    ARGN.forEach(function(name) {
+        ARGN_LOWER[name.toLowerCase()] = name;
+    });
+
+    // A formula author typing a helper name is easy to get wrong on
+    // capitalization (daysbetween vs daysBetween) — since the generated
+    // Function only binds the exact-case ARGN names as parameters, a
+    // mistyped case is a silent ReferenceError at eval time otherwise.
+    // Rewrites every bare identifier immediately followed by '(' (i.e. a
+    // function call, not some unrelated bare word) to its canonical ARGN
+    // casing, case-insensitively matched — this is the one place that
+    // actually runs, so every formula entry point (runVariable/runFormula/
+    // runActions' action.value/resolveMsg's {{}} interpolation) normalizes
+    // through this same function rather than four separate ad hoc fixes.
+    // Skips string-literal contents (naive quote-parity scan, same
+    // approach as attachFormulaAssist's insideStringLiteral) so a table/
+    // column name that happens to collide with a helper name in a quoted
+    // arg is never touched.
+    function normalizeFormulaFunctionCase(formula) {
+        if (!formula) return formula;
+        var out = '',
+            i = 0,
+            len = formula.length,
+            inStr = null;
+        while (i < len) {
+            var c = formula[i];
+            if (inStr) {
+                out += c;
+                if (c === '\\' && i + 1 < len) {
+                    out += formula[i + 1];
+                    i += 2;
+                    continue;
+                }
+                if (c === inStr) inStr = null;
+                i++;
+                continue;
+            }
+            if (c === "'" || c === '"') {
+                inStr = c;
+                out += c;
+                i++;
+                continue;
+            }
+            if (/[A-Za-z_$]/.test(c)) {
+                var j = i;
+                while (j < len && /[A-Za-z0-9_$]/.test(formula[j])) j++;
+                var word = formula.slice(i, j);
+                var k = j;
+                while (k < len && /\s/.test(formula[k])) k++;
+                out += (formula[k] === '(' && ARGN_LOWER.hasOwnProperty(word.toLowerCase())) ? ARGN_LOWER[word.toLowerCase()] : word;
+                i = j;
+                continue;
+            }
+            out += c;
+            i++;
+        }
+        return out;
+    }
+
     function runVariable(formula, data) {
+        formula = normalizeFormulaFunctionCase(formula);
         var c = buildCtx(data);
         var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.toNumber, c.toString, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V];
         var fn;
@@ -1109,6 +1172,7 @@
     }
 
     function runFormula(formula, data) {
+        formula = normalizeFormulaFunctionCase(formula);
         var c = buildCtx(data);
         var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.toNumber, c.toString, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V];
         var fn;
@@ -3246,7 +3310,7 @@
                 try {
                     var c = buildCtx(cache);
                     var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.toNumber, c.toString, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V];
-                    var fn = Function.apply(null, ARGN.concat(['return (' + action.value + ');']));
+                    var fn = Function.apply(null, ARGN.concat(['return (' + normalizeFormulaFunctionCase(action.value) + ');']));
                     val = fn.apply(null, av);
                     if (val == null) val = '';
                     val = String(val);
@@ -3465,7 +3529,7 @@
                 var c = buildCtx(data);
                 var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.toNumber, c.toString, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V];
 
-                var fn = Function.apply(null, ARGN.concat(['return (' + expr.trim() + ');']));
+                var fn = Function.apply(null, ARGN.concat(['return (' + normalizeFormulaFunctionCase(expr.trim()) + ');']));
                 var r = fn.apply(null, av);
                 return r != null ? r : '';
             } catch (e) {
@@ -8083,7 +8147,13 @@
             // this to decide whether to fall through to the signature
             // tooltip instead, so argIndex 0 with zero matches still shows
             // SOMETHING rather than going silent until the next comma.
-            function showDropdown(ctx) {
+            // `pinBelow` — when the signature tooltip is ALSO being shown
+            // for this same call (see update()), both float relative to the
+            // same field's bounding rect, so left to their own flip logic
+            // they'd land in the same spot. Pins this one below
+            // unconditionally so the tooltip (pinned above, see
+            // showSigTip()) never overlaps it.
+            function showDropdown(ctx, pinBelow) {
                 var source = completionSource(ctx.func);
                 if (!source || ctx.argIndex !== 0) {
                     closeDropdown();
@@ -8126,14 +8196,18 @@
                 var r = el.getBoundingClientRect();
                 dropdown.style.left = Math.max(4, r.left) + 'px';
                 dropdown.style.width = Math.min(320, Math.max(180, r.width)) + 'px';
-                // Flip above the field instead of running off the bottom of
-                // the viewport — the Scan tab's tables put some of these
-                // fields near the bottom of a long scrolled list.
-                var belowSpace = window.innerHeight - r.bottom;
-                if (belowSpace < dropdown.offsetHeight + 8 && r.top > dropdown.offsetHeight + 8) {
-                    dropdown.style.top = (r.top - dropdown.offsetHeight - 2) + 'px';
-                } else {
+                if (pinBelow) {
                     dropdown.style.top = (r.bottom + 2) + 'px';
+                } else {
+                    // Flip above the field instead of running off the bottom
+                    // of the viewport — the Scan tab's tables put some of
+                    // these fields near the bottom of a long scrolled list.
+                    var belowSpace = window.innerHeight - r.bottom;
+                    if (belowSpace < dropdown.offsetHeight + 8 && r.top > dropdown.offsetHeight + 8) {
+                        dropdown.style.top = (r.top - dropdown.offsetHeight - 2) + 'px';
+                    } else {
+                        dropdown.style.top = (r.bottom + 2) + 'px';
+                    }
                 }
                 setDdIndex(0);
                 return true;
@@ -8241,7 +8315,14 @@
                 setDdIndex(0);
             }
 
-            function showSigTip(ctx) {
+            // `pinAbove` — set when a value-completion dropdown is ALSO
+            // being shown for this same call (e.g. domain(/lookup(/F(),
+            // see update()); forces this above the field unconditionally so
+            // it never lands in the same spot as the dropdown (pinned below
+            // in that case — see showDropdown()). Excel shows both the
+            // signature and a value list together for these functions;
+            // previously this tool showed only one or the other.
+            function showSigTip(ctx, pinAbove) {
                 var ref = HELPER_REF[ctx.func];
                 if (!ref) {
                     closeSigTip();
@@ -8261,39 +8342,63 @@
                 document.body.appendChild(sigTip);
                 var r = el.getBoundingClientRect();
                 sigTip.style.left = Math.max(4, r.left) + 'px';
-                var belowSpace = window.innerHeight - r.bottom;
-                if (belowSpace < sigTip.offsetHeight + 8 && r.top > sigTip.offsetHeight + 8) {
-                    sigTip.style.top = (r.top - sigTip.offsetHeight - 2) + 'px';
+                if (pinAbove) {
+                    sigTip.style.top = Math.max(4, r.top - sigTip.offsetHeight - 2) + 'px';
                 } else {
-                    sigTip.style.top = (r.bottom + 2) + 'px';
+                    var belowSpace = window.innerHeight - r.bottom;
+                    if (belowSpace < sigTip.offsetHeight + 8 && r.top > sigTip.offsetHeight + 8) {
+                        sigTip.style.top = (r.top - sigTip.offsetHeight - 2) + 'px';
+                    } else {
+                        sigTip.style.top = (r.bottom + 2) + 'px';
+                    }
                 }
             }
 
             function update() {
                 var ctx = parseFormulaContext(el.value, el.selectionStart);
+                // A formula author's typed casing (daysbetween vs daysBetween)
+                // shouldn't decide whether the dropdown/tooltip recognizes
+                // the call at all — canonicalize to the real ARGN/HELPER_REF
+                // casing here, once, so every lookup below just works.
+                // normalizeFormulaFunctionCase() does the matching rewrite
+                // at actual eval time, so the two stay in sync.
+                if (ctx && ARGN_LOWER.hasOwnProperty(ctx.func.toLowerCase())) {
+                    ctx.func = ARGN_LOWER[ctx.func.toLowerCase()];
+                }
+                // Value-completion dropdown (F(/T(/V(/lookup(/count(/whoami(/
+                // domain( at their first arg) and the signature tooltip are
+                // no longer mutually exclusive — Excel shows both a value
+                // list AND the signature for these, so when the dropdown
+                // renders, the tooltip still shows too (pinned above it,
+                // see showSigTip()/showDropdown()'s pinAbove/pinBelow).
+                var dropdownShown = false;
                 if (ctx) {
                     var source = completionSource(ctx.func);
-                    if (source && ctx.argIndex === 0 && showDropdown(ctx)) {
-                        closeSigTip();
-                        return;
+                    if (source && ctx.argIndex === 0) {
+                        dropdownShown = showDropdown(ctx, true);
                     }
                 }
-                // Bare function-NAME typing — either nothing enclosing at all
-                // (top of the formula) or a fresh identifier being typed as
-                // an argument to an outer call. Checked before falling back
-                // to the outer call's own signature tooltip, since actively
-                // typing a name is the more useful thing to show right now.
-                var idCtx = parseBareIdentifierPrefix(el.value, el.selectionStart);
-                if (idCtx && idCtx.prefix) {
-                    var nameMatches = matchingFunctionNames(idCtx.prefix);
-                    if (nameMatches.length) {
-                        closeSigTip();
-                        showFunctionNameDropdown(idCtx, nameMatches);
-                        return;
+                if (!dropdownShown) {
+                    // Bare function-NAME typing — either nothing enclosing at
+                    // all (top of the formula) or a fresh identifier being
+                    // typed as an argument to an outer call. Checked before
+                    // falling back to the outer call's own signature tooltip,
+                    // since actively typing a name is more useful right now —
+                    // this one genuinely can't show alongside a signature
+                    // tooltip, since there's no complete outer call yet to
+                    // have one.
+                    var idCtx = parseBareIdentifierPrefix(el.value, el.selectionStart);
+                    if (idCtx && idCtx.prefix) {
+                        var nameMatches = matchingFunctionNames(idCtx.prefix);
+                        if (nameMatches.length) {
+                            closeSigTip();
+                            showFunctionNameDropdown(idCtx, nameMatches);
+                            return;
+                        }
                     }
+                    closeDropdown();
                 }
-                closeDropdown();
-                if (ctx) showSigTip(ctx);
+                if (ctx) showSigTip(ctx, dropdownShown);
                 else closeSigTip();
             }
             el.addEventListener('input', update);

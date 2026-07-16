@@ -27,7 +27,9 @@
         "Fixed (beta_2): domain(), assetWOHistory(), assetDowntimeHistory(), and API tables never actually returned data on any install - Maximo's REST API was rejecting every request (HTTP 406) for lack of an Accept header, now fixed.",
         "Fixed: domain() now correctly decodes every known Maximo domain list, using each list's own self-describing column layout instead of a guessed shape.",
         "New formula helpers: toNumber(val) and toString(val), for explicit type conversion.",
-        "Function-name autocomplete now shows just the function name (e.g. daysBetween), not daysBetween( - and both formula dropdowns support arrow keys plus Tab/Enter to accept the highlighted match, closer to Excel's own function autocomplete."
+        "Function-name autocomplete now shows just the function name (e.g. daysBetween), not daysBetween( - and both formula dropdowns support arrow keys plus Tab/Enter to accept the highlighted match, closer to Excel's own function autocomplete.",
+        "Fixed: formula helper names are now case-insensitive - typing daysbetween( (any capitalization) now shows the signature tooltip immediately instead of nothing, and a saved formula using the wrong case is auto-corrected when it runs instead of erroring.",
+        "Fixed: domain(/lookup(/count(/whoami(/F(/T(/V( now show their signature tooltip AND their value-completion dropdown together (previously showing the dropdown hid the tooltip, so e.g. domain( only showed a bare list of domain names with no hint a second argument even exists)."
       ]
     },
     {
