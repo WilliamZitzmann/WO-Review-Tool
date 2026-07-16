@@ -388,6 +388,53 @@ formulas can read exactly like a scanned one.
   start returning empty results, since unlike a Rule/Group there's no
   natural "nothing references this anymore" signal to check first.
 
+### 4.8 API tables (`cfg.apiTables`, beta_2, v0.25.0)
+
+A third table source alongside scanned and custom tables (§4.6/4.7): a named
+config entry that resolves live via Maximo's own OSLC REST API instead of a
+DOM scan or hand-typed rows, but reads through `T()`/`lookup()`/`col()`/
+`has()`/`count()`/`rowCount()` exactly like either of those — no helper has
+any special-casing for where a table actually came from.
+- Shape: `cfg.apiTables[id] = { source: 'assetWO'|'assetDowntime',
+  assetFormula, siteFormula, limit }`. `assetFormula`/`siteFormula` are
+  themselves formula strings (evaluated via `runVariable()`, not stored as
+  static values), so the same API table definition can resolve to a
+  different asset/site per WO reviewed — e.g. `assetFormula: "F('ASSETNUM')"`
+  picks up whatever asset the currently-open WO is on.
+- `buildCtx()`'s `T(t)` gained a third fallback: scanned → custom →
+  `resolveApiTable(t, cfg.apiTables[t], data)`. Checked last since it's the
+  only one of the three that can be genuinely slow/async-backed.
+- `resolveApiTable(id, def, data)` — gated by `isBetaFeatureOn('beta_2')`
+  same as every other beta_2 capability (returns `[]` immediately if off).
+  Evaluates `assetFormula`/`siteFormula` via `evalApiTableExpr()` (a thin
+  `runVariable()` wrapper returning `''` on error/blank rather than
+  throwing); if either resolves empty, returns `[]` without ever touching
+  the network — so an API table on a WO with no asset just reads empty, not
+  broken.
+- **`betaApiTableCache`** — same per-argument-combination, placeholder-on-
+  kickoff pattern as `betaAssetWoCache`/`betaAssetDowntimeCache` (§6), keyed
+  by `id + assetnum + siteid + limit` so two different API table configs
+  pointed at the same asset don't collide, and a formula re-evaluated
+  mid-render doesn't fire a duplicate fetch for a request already in flight.
+  Delegates the actual request to the same ungated `fetchAssetWOHistoryRaw()`/
+  `fetchAssetDowntimeHistoryRaw()` used by the standalone `assetWOHistory()`/
+  `assetDowntimeHistory()` helpers and by `__woProbeAsset()` — one fetch
+  implementation, three call sites. Cleared at the top of every `runScan()`
+  alongside the other two beta_2 caches, same reasoning (§6): without this,
+  a rescan would keep serving first-fetch-of-the-session REST data forever.
+- Editable from the Tables tab's new "API Tables" section (own BETA pill,
+  same `data-beta-pill-tip` convention as Post-Scan Actions/Run-on column) —
+  a card per entry with a Source `<select>`, the two formula boxes (wired
+  through `attachFormulaAssist`, so they get the same autocomplete/signature
+  tooltip as any other formula field), and a Limit input (assetWO source
+  only). `id` creation follows the same collision/format rule as custom
+  tables (§4.7) — checked against `cfg.apiTables`, `cfg.customTables`, and
+  every scanned id currently in use.
+- `fieldKeyOptions()` merges `Object.keys(cfg.apiTables)` into the shared
+  table-name list, same as the existing customTables merge (§4.7), so an API
+  table id shows up in `T(`/`lookup(`/`count(` completion and the Groups
+  Table `<select>` without either UI needing to know it's API-backed.
+
 ---
 
 ## 5. Rule / scan engine
@@ -640,6 +687,42 @@ the same string silently makes both share one `row[name]` key — `lookup()`/
 rather than guarded, since a per-keystroke duplicate check would fight the
 live-typing editing model the grid uses.
 
+### 5.7 Formula Reference popup + function-name autocomplete (v0.25.0)
+
+Two independent discoverability additions on top of §5.2's existing
+arg-completion/signature-tooltip pair — added because the only prior
+reference (index.html's Formula Reference table) lived outside Setup
+entirely, and there was no way to discover a function's *name* at all, only
+its arguments once you'd already typed `funcName(`.
+
+- **`openFormulaReferencePopup()`** — a standalone modal (`#__wo_formula_ref`,
+  appended to `document.body`, not the Setup modal — same reasoning as
+  §5.2's dropdown/tooltip needing hardcoded colors) listing every
+  `HELPER_REF` entry (signature, description, args), with a live search
+  input filtering by name or description substring. Opened via a new 📖
+  titlebar button (`#__s_formulas`) next to Save in the Setup modal.
+  `doCloseSetup()` explicitly removes `#__wo_formula_ref` if present — since
+  it's a `document.body` child rather than a descendant of `modal`, it
+  wouldn't otherwise get cleaned up by `modal.remove()` and would linger
+  after Setup closes.
+- **Function-name autocomplete** — `attachFormulaAssist(el)`'s `update()`
+  gained a second parse path. `parseFormulaContext()` (§5.2) only finds
+  context *inside* an unclosed call; it returns `null` for a blank formula
+  box or a fresh, not-yet-typed argument. The new
+  **`parseBareIdentifierPrefix(text, pos)`** scans backward from the cursor
+  for a bare identifier touching it, regardless of enclosing structure —
+  guarded by **`insideStringLiteral(text, pos)`** (a naive quote-parity
+  scanner) so it never fires while typing inside a string-literal argument
+  (e.g. the `'col…'` in `lookup('table', 'col…`).
+  `matchingFunctionNames(prefix)` filters `HELPER_REF` keys by prefix (case-
+  insensitive substring, capped at 8 matches); selecting one via
+  `insertFunctionName()` inserts `name(` and re-triggers `update()`, so the
+  existing arg-completion/signature-tooltip flow picks up immediately after.
+  `update()` tries the §5.2 context first (arg dropdown takes priority when
+  both could theoretically apply), falls through to the name-dropdown path
+  only when that returns nothing usable, and closes the signature tooltip
+  whenever either dropdown is showing — the two can never render at once.
+
 ---
 
 ## 6. Beta feature framework
@@ -726,6 +809,12 @@ Current features:
     same reasoning as the pre-existing `__woDebugTables`/`__woDebugCache`:
     a debug tool gated behind the feature it's meant to help you verify
     would be useless the one time you actually need it.
+  - **API tables** (`cfg.apiTables`, see §4.8) generalize
+    `assetWOHistoryFn`/`assetDowntimeHistoryFn` from standalone formula
+    calls into a proper named table — resolved through the same
+    `fetchAssetWOHistoryRaw()`/`fetchAssetDowntimeHistoryRaw()` and gated/
+    cached the same way, but reachable via `T()`/`lookup()`/`col()` by name
+    like any scanned or custom table, and editable from the Tables tab.
 
 **Adding a new feature**: add a `BETA_FEATURES` entry, gate every bit of its
 UI/behavior behind `isBetaFeatureOn(newId)`, and if it needs its own hotkey

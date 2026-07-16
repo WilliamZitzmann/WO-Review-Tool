@@ -1136,6 +1136,7 @@ rows.forEach(<span class="kw">function</span>(r) {
   <h3>Table &amp; Dialog Capture</h3>
   <p>When a scan target's Wait Table (or a group's Linked Table) names a table, the tool reads its rows directly off the page, available in formulas via <code>T('Table Name')</code>, <code>rowCount(...)</code>, <code>col(...)</code>, <code>has(...)</code>, and <code>lookup(...)</code> (see the <a href="#s17">Formula Reference</a>). A Dialog-type target opens a Maximo popup instead of switching tabs, captures data the same way, then dismisses it automatically — you won't see it stay open.</p>
   <p>Setup's <b>Tables</b> tab lists every table your Groups/Scan config references and lets you give it a friendlier display name. It also lets you build a <b>custom table</b> — small hand-entered lookup data that didn't come from a Maximo scan (e.g. part numbers, cost centers) — which formulas can read with the exact same <code>T()</code>/<code>col()</code>/<code>has()</code>/<code>lookup()</code> functions as a scanned table.</p>
+  <p>The Tables tab also has an <b>API Tables</b> section <span class="tag-teal">requires the Maximo REST Data beta feature</span> — a table backed by a live REST lookup instead of a scan or hand-typed rows: recent work orders or downtime history for an asset. You give it a Source, and formulas for which asset/site to pull (so the same table definition can follow whichever WO you're currently reviewing). Once set up, it reads through <code>T()</code>/<code>lookup()</code>/<code>col()</code> exactly like any other table — see <a href="#s15">Beta Features</a>.</p>
 </section>
 
 <!-- ══════════════════════════════════════════════════ -->
@@ -1281,7 +1282,7 @@ rows.forEach(<span class="kw">function</span>(r) {
   <p>Currently available:</p>
   <div class="prop-block">
     <div class="prop-row"><div class="prop-key">Route / Fix</div><div class="prop-val">Adds a Route symbol and a yellow <strong>Fix</strong> button next to Return/Approve, plus Post-Scan Actions (see <a href="#s9">Scan System</a>). Fix re-runs a scan and reapplies any actions marked for it — a quick way to correct a field without a full Return/Approve round trip.</div></div>
-    <div class="prop-row"><div class="prop-key">Maximo REST Data (experimental)</div><div class="prop-val">Three formula helpers - <code>domain(key, code)</code>, <code>assetWOHistory(assetnum, siteid, limit)</code>, and <code>assetDowntimeHistory(assetnum, siteid)</code> (see <a href="#s17">Formula Reference</a>). The asset ones pull live from Maximo's own REST API rather than anything scanned/scraped, and are genuinely experimental - data shapes and field reliability are still being verified. Don't build a rule you depend on around these yet.</div></div>
+    <div class="prop-row"><div class="prop-key">Maximo REST Data (experimental)</div><div class="prop-val">Three formula helpers - <code>domain(key, code)</code>, <code>assetWOHistory(assetnum, siteid, limit)</code>, and <code>assetDowntimeHistory(assetnum, siteid)</code> (see <a href="#s17">Formula Reference</a>) - plus <b>API Tables</b> in the Tables tab (see <a href="#s9">Scan System</a>), which wraps the same asset work order / downtime history lookups into a named table you can reference with <code>T()</code>/<code>lookup()</code>/<code>col()</code>. The asset ones pull live from Maximo's own REST API rather than anything scanned/scraped, and are genuinely experimental - data shapes and field reliability are still being verified. Don't build a rule you depend on around these yet.</div></div>
   </div>
 </section>
 
@@ -1314,7 +1315,7 @@ rows.forEach(<span class="kw">function</span>(r) {
     <span class="sec-badge">§17</span>
   </div>
 
-  <p>These helper functions are available inside every rule, variable, scan condition, and post-scan action expression.</p>
+  <p>These helper functions are available inside every rule, variable, scan condition, and post-scan action expression. This same list is searchable inside the tool itself — click the 📖 button next to Save in Setup — so you don't need to keep this page open in another tab while you write a formula. Typing a function's name into any formula box also suggests matching functions as you type, even before you've opened its parenthesis.</p>
 
   <table class="helper-table">
     <thead><tr><th>Function</th><th>Description</th></tr></thead>

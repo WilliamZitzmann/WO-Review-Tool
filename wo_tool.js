@@ -32,7 +32,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26196.1547z';
+    var BUILD_ID = '26197.1129z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -360,7 +360,8 @@
             warn: { short: '', long: [], returnMode: 'none', returnCustom: '' }
         }],
         tableNames: {},
-        customTables: {}
+        customTables: {},
+        apiTables: {}
     };
     var DEFAULT_SCAN = {
         woTabId: 'mbf28cd64-tab',
@@ -974,14 +975,20 @@
 
         // Scanned tables (data.tables, captured from the live Maximo DOM)
         // take priority; a custom table (cfg.customTables, hand-entered in
-        // the Tables Setup tab) only fills in when no scanned table exists
+        // the Tables Setup tab) fills in next when no scanned table exists
         // under that same id — this is what makes a custom lookup table
         // resolve even pre-scan (data.tables is empty before the first
-        // scan), since customTables comes from config, not the cache.
+        // scan), since customTables comes from config, not the cache. An
+        // API table (cfg.apiTables, beta_2-only) is the last fallback —
+        // live REST data resolved through resolveApiTable().
         function T(t) {
             if (data.tables && data.tables.hasOwnProperty(t)) return data.tables[t];
-            var custom = getCfg().customTables || {};
-            return (custom[t] && custom[t].rows) || [];
+            var cfgNow = getCfg();
+            var custom = cfgNow.customTables || {};
+            if (custom[t]) return custom[t].rows || [];
+            var apiDef = (cfgNow.apiTables || {})[t];
+            if (apiDef) return resolveApiTable(t, apiDef, data);
+            return [];
         }
         return {
             F: F,
@@ -2291,6 +2298,54 @@
         return betaAssetDowntimeCache[key];
     }
 
+    // ── API tables (cfg.apiTables, beta_2 only) ──
+    // A named table entry (Tables tab, "API Tables" section) that behaves
+    // exactly like a scanned or custom table to T()/col()/has()/lookup()/
+    // count()/rowCount() — but its rows come from a live REST fetch instead
+    // of the DOM or hand-typed data. Definition shape:
+    // { source: 'assetWO'|'assetDowntime', assetFormula, siteFormula, limit }
+    // — assetFormula/siteFormula are themselves formula strings (e.g.
+    // F('Work Order :: Asset')), evaluated fresh against the current scan
+    // data every time the table is read, since the asset/site a rule needs
+    // varies per WO.
+    var betaApiTableCache = {};
+
+    // Evaluates one of an API table's own config formulas (assetFormula/
+    // siteFormula) — reuses runVariable() exactly like V() does elsewhere
+    // in buildCtx (runVariable rebuilds its own fresh buildCtx(data)
+    // internally, so this is NOT a re-entrant call into the SAME T()/buildCtx
+    // call that's asking for it, just a sibling evaluation of a different
+    // formula string against the same underlying data).
+    function evalApiTableExpr(formula, data) {
+        if (!formula) return '';
+        var vr = runVariable(formula, data);
+        return vr.error ? '' : (vr.value != null ? vr.value : '');
+    }
+
+    function resolveApiTable(id, def, data) {
+        if (!isBetaFeatureOn('beta_2')) return [];
+        var assetnum = evalApiTableExpr(def.assetFormula, data);
+        var siteid = evalApiTableExpr(def.siteFormula, data);
+        if (!assetnum || !siteid) return [];
+        var limit = def.limit || 10;
+        // Keyed by the RESOLVED assetnum/siteid, not the id alone — the
+        // same API table definition can (and normally will) resolve to a
+        // different asset/site on every different WO reviewed this session,
+        // so caching by id alone would silently keep serving the first WO's
+        // data on every WO after it.
+        var key = id + '|' + assetnum + '|' + siteid + '|' + limit;
+        if (betaApiTableCache.hasOwnProperty(key)) return betaApiTableCache[key];
+        betaApiTableCache[key] = [];
+        var fetchPromise = def.source === 'assetDowntime' ?
+            fetchAssetDowntimeHistoryRaw(assetnum, siteid) :
+            fetchAssetWOHistoryRaw(assetnum, siteid, limit);
+        fetchPromise.then(function(rows) {
+            betaApiTableCache[key] = rows;
+            render();
+        }).catch(function() {});
+        return betaApiTableCache[key];
+    }
+
     // Clears the tool + its config on a confirmed revoke — deliberately
     // leaves IndexedDB (the linked backup-file handle) untouched, same
     // policy as loader.js, so a config file link survives a revoke.
@@ -3516,11 +3571,12 @@
         // doesn't refire the same request — but this tool's whole job is
         // showing CURRENT state, and asset WO/downtime history is exactly
         // the kind of thing that changes between scans (someone logs
-        // downtime, you rescan to verify a fix). Clearing both here means a
-        // fresh scan always re-fetches once per referenced asset, instead
-        // of quietly serving first-fetch-of-the-session data all day.
+        // downtime, you rescan to verify a fix). Clearing all three here
+        // means a fresh scan always re-fetches once per referenced asset,
+        // instead of quietly serving first-fetch-of-the-session data all day.
         betaAssetWoCache = {};
         betaAssetDowntimeCache = {};
+        betaApiTableCache = {};
         var sew = findSendEventWin();
         var scan = getScan();
         setStatus('Reading WO tab...');
@@ -5710,6 +5766,12 @@
         Object.keys(getCfg().customTables || {}).forEach(function(id) {
             t[id] = 1;
         });
+        // API tables (Tables tab, cfg.apiTables, beta_2) — same reasoning:
+        // they resolve through the exact same T() fallback chain, so they
+        // belong in the same shared list.
+        Object.keys(getCfg().apiTables || {}).forEach(function(id) {
+            t[id] = 1;
+        });
         return {
             fields: f.sort(),
             tables: Object.keys(t).sort()
@@ -6367,6 +6429,7 @@
             '<div class="wo-modal-titlebar" id="__s_titlebar">' +
             '<span class="wo-modal-title">Setup</span>' +
             '<span class="wo-modal-title-actions">' +
+            '<button id="__s_formulas" type="button" class="wo-btn-ghost" aria-label="Formula reference">📖</button>' +
             '<button id="__s_save" class="wo-btn wo-btn-primary">Save</button>' +
             '<button id="__s_close" class="wo-btn-ghost" aria-label="Close">✕</button>' +
             '</span>' +
@@ -6416,6 +6479,7 @@
         document.body.appendChild(modal);
         attachTooltip(modal.querySelector('#__s_resize'), 'Drag to resize');
         attachTooltip(modal.querySelector('#__s_close'), 'Close');
+        attachTooltip(modal.querySelector('#__s_formulas'), 'Formula reference');
         modal.querySelectorAll('.wo-tab-btn[data-tab-key]').forEach(function(b) {
             var isGuideTab = b.getAttribute('data-tab-key') === 'guide';
             attachTooltip(b, function() {
@@ -6899,6 +6963,7 @@
             if (JSON.stringify(cfg.groups) !== JSON.stringify(before.cfg.groups)) areas.push('Groups');
             if (JSON.stringify(cfg.tableNames || {}) !== JSON.stringify(before.cfg.tableNames || {})) areas.push('Table names');
             if (JSON.stringify(cfg.customTables || {}) !== JSON.stringify(before.cfg.customTables || {})) areas.push('Custom tables');
+            if (JSON.stringify(cfg.apiTables || {}) !== JSON.stringify(before.cfg.apiTables || {})) areas.push('API tables');
             if (JSON.stringify(scan) !== JSON.stringify(before.scan)) areas.push('Scan targets & actions');
             if (JSON.stringify(deferredSettingsSlice(st)) !== JSON.stringify(before.st)) areas.push('Update channel/version pin');
             if (!areas.length) return 'No changes to save.';
@@ -7538,7 +7603,12 @@
         function doCloseSetup() {
             modal._woCleanup();
             modal.remove();
+            var fr = document.getElementById('__wo_formula_ref');
+            if (fr) fr.remove();
         }
+        modal.querySelector('#__s_formulas').onclick = function() {
+            openFormulaReferencePopup();
+        };
         modal.querySelector('#__s_close').onclick = function() {
             closeTabCtxMenu();
             closeRuleMenu();
@@ -7652,6 +7722,56 @@
             assetDowntimeHistory: { sig: "assetDowntimeHistory(assetnum, siteid)", args: ["assetnum — asset number", "siteid — Maximo site ID"], desc: "The asset's full downtime history (not just what's linked to the current WO) as an array of {startdate, enddate}, fetched live from Maximo's REST API. beta_2 only — returns [] if that beta feature is off, or [] until the (async) fetch resolves." },
             V: { sig: "V(id)", args: ["id — a variable's ID or label"], desc: "A variable's computed value." }
         };
+
+        // A searchable list of every HELPER_REF entry, reachable from the
+        // Setup titlebar (📖) on any tab — added because the only formula
+        // reference that existed before this was the external Guide page
+        // (williamzitzmann.github.io/.../#s17), which meant leaving Setup
+        // entirely and cross-referencing in a separate tab mid-edit.
+        function openFormulaReferencePopup() {
+            var old = document.getElementById('__wo_formula_ref');
+            if (old) old.remove();
+            var pop = document.createElement('div');
+            pop.id = '__wo_formula_ref';
+            pop.style.cssText = 'position:fixed;top:6%;left:50%;transform:translateX(-50%);width:min(560px,88%);height:82%;z-index:10000000;background:var(--wo-bg,#0d1117);color:var(--wo-text,#f0f3f6);border:1px solid var(--wo-border,#30363d);border-radius:10px;box-shadow:0 6px 30px rgba(0,0,0,.8);display:flex;flex-direction:column;font-family:"Segoe UI",system-ui,sans-serif;font-size:12px;padding:10px;';
+            pop.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex:0 0 auto;">' +
+                '<b style="font-size:13px;">Formula Reference</b>' +
+                '<button id="__fr_close" type="button" class="wo-btn-ghost">✕ Close</button>' +
+                '</div>' +
+                '<input id="__fr_search" type="text" placeholder="Filter functions..." style="flex:0 0 auto;margin-bottom:8px;">' +
+                '<div id="__fr_list" style="flex:1;overflow:auto;"></div>';
+            document.body.appendChild(pop);
+
+            var listEl = pop.querySelector('#__fr_list');
+
+            function renderList(query) {
+                var q = (query || '').trim().toLowerCase();
+                var names = Object.keys(HELPER_REF).sort();
+                var matches = names.filter(function(name) {
+                    if (!q) return true;
+                    var ref = HELPER_REF[name];
+                    return name.toLowerCase().indexOf(q) >= 0 || ref.desc.toLowerCase().indexOf(q) >= 0;
+                });
+                listEl.innerHTML = matches.length ? matches.map(function(name) {
+                    var ref = HELPER_REF[name];
+                    return '<div style="border:1px solid var(--wo-border,#30363d);border-radius:6px;padding:8px 10px;margin-bottom:6px;">' +
+                        '<code class="wo-mono" style="font-size:12px;color:var(--wo-accent,#58a6ff);">' + String(ref.sig).replace(/</g, '&lt;') + '</code>' +
+                        '<div style="margin-top:4px;">' + String(ref.desc).replace(/</g, '&lt;') + '</div>' +
+                        (ref.args && ref.args.length ? '<ul style="margin:5px 0 0 16px;padding:0;color:var(--wo-muted,#9aa4af);">' + ref.args.map(function(a) {
+                            return '<li>' + String(a).replace(/</g, '&lt;') + '</li>';
+                        }).join('') + '</ul>' : '') +
+                        '</div>';
+                }).join('') : '<div style="color:var(--wo-muted,#9aa4af);">No functions match.</div>';
+            }
+            renderList('');
+            pop.querySelector('#__fr_search').oninput = function(e) {
+                renderList(e.target.value);
+            };
+            pop.querySelector('#__fr_close').onclick = function() {
+                pop.remove();
+            };
+            pop.querySelector('#__fr_search').focus();
+        }
 
         // Scans backward from the cursor to find the nearest unclosed "("
         // and the identifier immediately before it, plus which comma-
@@ -7807,6 +7927,106 @@
                 }
             }
 
+            // Finds the plain identifier (if any) immediately touching the
+            // cursor, regardless of enclosing structure — this is what lets
+            // function-NAME completion work both at the very top of a
+            // formula (nothing typed yet at all) and as a fresh argument to
+            // an outer call (e.g. hoursBetween(loo -> lookup(...)), unlike
+            // parseFormulaContext which only knows about an ENCLOSING call's
+            // argument list, not what's actually being typed as its value.
+            // A naive quote-parity scan (no escape/comment awareness beyond
+            // backslash-escaping) — good enough to tell "cursor is inside an
+            // open '...'/"..." string" from "cursor is in bare code", which
+            // is all that's needed to stop e.g. lookup('table', 'colu| from
+            // suggesting function names while typing a plain column-name
+            // string argument.
+            function insideStringLiteral(text, pos) {
+                var q = null;
+                for (var i = 0; i < pos; i++) {
+                    var c = text[i];
+                    if (q) {
+                        if (c === '\\') {
+                            i++;
+                            continue;
+                        }
+                        if (c === q) q = null;
+                    } else if (c === "'" || c === '"') {
+                        q = c;
+                    }
+                }
+                return q !== null;
+            }
+
+            function parseBareIdentifierPrefix(text, pos) {
+                if (insideStringLiteral(text, pos)) return null;
+                var j = pos - 1;
+                while (j >= 0 && /[A-Za-z0-9_$]/.test(text[j])) j--;
+                var start = j + 1;
+                if (start === pos) return null;
+                if (text[pos] === '(') return null;
+                return {
+                    start: start,
+                    prefix: text.slice(start, pos)
+                };
+            }
+
+            function matchingFunctionNames(prefix) {
+                var p = prefix.toLowerCase();
+                return Object.keys(HELPER_REF).filter(function(name) {
+                    return name.toLowerCase().indexOf(p) === 0;
+                }).sort();
+            }
+
+            function insertFunctionName(idCtx, name) {
+                var pos = el.selectionStart;
+                var before = el.value.slice(0, idCtx.start);
+                var after = el.value.slice(pos);
+                var insertText = name + '(';
+                el.value = before + insertText + after;
+                var newPos = (before + insertText).length;
+                el.selectionStart = el.selectionEnd = newPos;
+                // Dispatched 'input' re-runs update() via the listener below
+                // (same as insertCompletion) — the freshly-opened call's own
+                // arg-completion/signature tooltip shows immediately.
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                closeDropdown();
+                el.focus();
+            }
+
+            function showFunctionNameDropdown(idCtx, matches) {
+                closeDropdown();
+                dropdown = document.createElement('div');
+                dropdown.className = 'wo-fa-dropdown';
+                dropdown.style.cssText = 'position:fixed;z-index:9999999;background:#1f2630;border:1px solid #30363d;border-radius:6px;max-height:220px;overflow:auto;box-shadow:0 6px 20px rgba(0,0,0,.5);font-size:11px;font-family:"Segoe UI",Arial,sans-serif;';
+                matches.slice(0, 8).forEach(function(name) {
+                    var ref = HELPER_REF[name];
+                    var item = document.createElement('div');
+                    item.style.cssText = 'padding:5px 9px;cursor:pointer;color:#f0f3f6;';
+                    item.innerHTML = '<b>' + name + '(</b><span style="color:#8b98a5;"> — ' + String(ref.desc).replace(/</g, '&lt;') + '</span>';
+                    item.onmouseenter = function() {
+                        item.style.background = 'rgba(255,255,255,.08)';
+                    };
+                    item.onmouseleave = function() {
+                        item.style.background = 'none';
+                    };
+                    item.onmousedown = function(e) {
+                        e.preventDefault();
+                        insertFunctionName(idCtx, name);
+                    };
+                    dropdown.appendChild(item);
+                });
+                document.body.appendChild(dropdown);
+                var r = el.getBoundingClientRect();
+                dropdown.style.left = Math.max(4, r.left) + 'px';
+                dropdown.style.width = Math.min(360, Math.max(220, r.width)) + 'px';
+                var belowSpace = window.innerHeight - r.bottom;
+                if (belowSpace < dropdown.offsetHeight + 8 && r.top > dropdown.offsetHeight + 8) {
+                    dropdown.style.top = (r.top - dropdown.offsetHeight - 2) + 'px';
+                } else {
+                    dropdown.style.top = (r.bottom + 2) + 'px';
+                }
+            }
+
             function showSigTip(ctx) {
                 var ref = HELPER_REF[ctx.func];
                 if (!ref) {
@@ -7837,19 +8057,31 @@
 
             function update() {
                 var ctx = parseFormulaContext(el.value, el.selectionStart);
-                if (!ctx) {
-                    closeDropdown();
-                    closeSigTip();
-                    return;
+                if (ctx) {
+                    var source = completionSource(ctx.func);
+                    if (source && ctx.argIndex === 0) {
+                        closeSigTip();
+                        showDropdown(ctx);
+                        return;
+                    }
                 }
-                var source = completionSource(ctx.func);
-                if (source && ctx.argIndex === 0) {
-                    closeSigTip();
-                    showDropdown(ctx);
-                } else {
-                    closeDropdown();
-                    showSigTip(ctx);
+                // Bare function-NAME typing — either nothing enclosing at all
+                // (top of the formula) or a fresh identifier being typed as
+                // an argument to an outer call. Checked before falling back
+                // to the outer call's own signature tooltip, since actively
+                // typing a name is the more useful thing to show right now.
+                var idCtx = parseBareIdentifierPrefix(el.value, el.selectionStart);
+                if (idCtx && idCtx.prefix) {
+                    var nameMatches = matchingFunctionNames(idCtx.prefix);
+                    if (nameMatches.length) {
+                        closeSigTip();
+                        showFunctionNameDropdown(idCtx, nameMatches);
+                        return;
+                    }
                 }
+                closeDropdown();
+                if (ctx) showSigTip(ctx);
+                else closeSigTip();
             }
             el.addEventListener('input', update);
             el.addEventListener('click', update);
@@ -9417,13 +9649,124 @@
                         woAlert('Table ID can only contain letters, numbers, and underscores.');
                         return;
                     }
-                    if (cfg.customTables[id] || usage[id]) {
+                    if (cfg.customTables[id] || (cfg.apiTables && cfg.apiTables[id]) || usage[id]) {
                         woAlert('A table with that ID already exists.');
                         return;
                     }
                     cfg.customTables[id] = {
                         columns: ['Column 1'],
                         rows: [{}]
+                    };
+                    tablesTab();
+                });
+            };
+
+            // ── API tables — beta_2 (experimental). A named table backed by
+            // a live REST fetch instead of the DOM or hand-typed data;
+            // resolveApiTable() (buildCtx's T() fallback) is what actually
+            // runs the fetch. Config UI is always visible/editable (so it
+            // can be set up before ever turning beta_2 on), but only
+            // resolves real data once that beta feature is enabled — same
+            // "inert, not hidden" convention as domain()/assetWOHistory().
+            if (!cfg.apiTables) cfg.apiTables = {};
+            var apiHeader = document.createElement('div');
+            apiHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin:14px 0 8px;';
+            apiHeader.innerHTML = '<span class="wo-rule-title">API Tables</span> <span class="wo-beta-pill" data-beta-pill-tip="Beta feature — Setup > Beta">BETA</span>' +
+                '<button type="button" id="__at_add" class="wo-btn wo-btn-primary" style="font-size:11px;margin-left:auto;">+ Add API Table</button>';
+            content.appendChild(apiHeader);
+            apiHeader.querySelectorAll('[data-beta-pill-tip]').forEach(function(el) {
+                attachTooltip(el, el.getAttribute('data-beta-pill-tip'));
+            });
+
+            var apiIntro = document.createElement('div');
+            apiIntro.style.cssText = 'color:var(--wo-muted);font-size:11px;margin-bottom:8px;';
+            apiIntro.textContent = 'Experimental — resolves live data from Maximo\'s REST API instead of a scan. Only works when the beta_2 "Maximo REST Data" feature is enabled (Setup > Beta).';
+            content.appendChild(apiIntro);
+
+            var apiIds = Object.keys(cfg.apiTables).sort();
+            if (!apiIds.length) {
+                var emptyApi = document.createElement('div');
+                emptyApi.style.cssText = 'color:var(--wo-muted);font-size:11px;';
+                emptyApi.textContent = 'None yet.';
+                content.appendChild(emptyApi);
+            }
+
+            apiIds.forEach(function(id) {
+                var t = cfg.apiTables[id];
+                if (!t.source) t.source = 'assetWO';
+                var box = document.createElement('div');
+                box.className = 'wo-card';
+                box.innerHTML =
+                    '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
+                    '<code class="wo-mono" style="font-size:11px;">' + String(id).replace(/</g, '&lt;') + '</code>' +
+                    '<button type="button" class="__at_del wo-btn-ghost wo-kebab-item-danger" aria-label="Delete table">' + TRASH_SVG + '</button>' +
+                    '</div>' +
+                    '<div style="margin-top:6px;">' +
+                    '<label style="color:var(--wo-muted);font-size:11px;">Source</label><br>' +
+                    '<select data-at-source style="margin-top:2px;">' +
+                    '<option value="assetWO"' + (t.source === 'assetWO' ? ' selected' : '') + '>Asset Work Order History</option>' +
+                    '<option value="assetDowntime"' + (t.source === 'assetDowntime' ? ' selected' : '') + '>Asset Downtime History</option>' +
+                    '</select>' +
+                    '</div>' +
+                    '<div style="margin-top:6px;">' +
+                    '<label style="color:var(--wo-muted);font-size:11px;">Asset # formula</label><br>' +
+                    formulaBox(t, 'assetFormula') +
+                    '</div>' +
+                    '<div style="margin-top:6px;">' +
+                    '<label style="color:var(--wo-muted);font-size:11px;">Site ID formula</label><br>' +
+                    formulaBox(t, 'siteFormula') +
+                    '</div>' +
+                    (t.source === 'assetWO' ? '<div style="margin-top:6px;">' +
+                        '<label style="color:var(--wo-muted);font-size:11px;">Limit</label><br>' +
+                        '<input type="number" data-at-limit min="1" value="' + (t.limit || 10) + '" style="width:80px;margin-top:2px;">' +
+                        '</div>' : '');
+                content.appendChild(box);
+
+                box.querySelector('.__at_del').onclick = function() {
+                    woConfirm('Delete API table "' + id + '"? Any formula referencing it will start returning empty results.').then(function(ok) {
+                        if (!ok) return;
+                        delete cfg.apiTables[id];
+                        tablesTab();
+                    });
+                };
+                box.querySelector('[data-at-source]').onchange = function(e) {
+                    t.source = e.target.value;
+                    tablesTab();
+                };
+                box.querySelectorAll('[data-f]').forEach(function(ta) {
+                    attachFormulaAssist(ta);
+                });
+                var formulaTextareas = box.querySelectorAll('[data-f]');
+                if (formulaTextareas[0]) formulaTextareas[0].oninput = function(e) {
+                    t.assetFormula = e.target.value;
+                };
+                if (formulaTextareas[1]) formulaTextareas[1].oninput = function(e) {
+                    t.siteFormula = e.target.value;
+                };
+                var limitInput = box.querySelector('[data-at-limit]');
+                if (limitInput) limitInput.oninput = function(e) {
+                    t.limit = (+e.target.value) || 10;
+                };
+            });
+
+            apiHeader.querySelector('#__at_add').onclick = function() {
+                woPrompt('Table ID (used in formulas via T()/lookup() — letters, numbers, underscores only):').then(function(id) {
+                    if (!id) return;
+                    id = id.trim();
+                    if (!id) return;
+                    if (!/^[A-Za-z0-9_]+$/.test(id)) {
+                        woAlert('Table ID can only contain letters, numbers, and underscores.');
+                        return;
+                    }
+                    if (cfg.apiTables[id] || cfg.customTables[id] || usage[id]) {
+                        woAlert('A table with that ID already exists.');
+                        return;
+                    }
+                    cfg.apiTables[id] = {
+                        source: 'assetWO',
+                        assetFormula: '',
+                        siteFormula: '',
+                        limit: 10
                     };
                     tablesTab();
                 });
