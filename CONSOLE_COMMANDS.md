@@ -112,6 +112,18 @@ scalars. The "what fields actually exist" discovery technique, built in.
 ### `window.__woDumpAsset(assetnum, siteid)`
 Same full raw dump, for an asset instead of a WO.
 
+### `window.__woBeta2Report(assetnum?, siteid?)`
+One-shot diagnostic bundle: tests whether `/maximo/oslc/os/mxapi*` calls 406
+without an explicit `Accept: application/json` header (pass `assetnum`/`siteid`
+to run this half; omit both to skip it), and dumps every known domain list's
+real shape (`attributes` + first two `data` rows) so the array-of-arrays
+column order is visible instead of guessed from a collapsed console
+`Array(N)`. Logs the report and returns it as a string. Also available as a
+**"Run beta_2 Diagnostics"** button in Setup > Settings > Debug (dev tier
+only) — prompts for asset/site once, then copies the whole report straight
+to the clipboard so it can be pasted back without typing anything in
+DevTools.
+
 ---
 
 ## Quick escape hatches

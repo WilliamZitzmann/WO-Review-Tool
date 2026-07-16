@@ -32,7 +32,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26197.1246z';
+    var BUILD_ID = '26197.1328z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -2310,6 +2310,12 @@
     // varies per WO.
     var betaApiTableCache = {};
 
+    // Remembered purely as a convenience prefill for the Settings > Debug
+    // "Run beta_2 Diagnostics" button (below) — not persisted, just saves
+    // retyping the same asset/site on a second run this session.
+    var lastDiagAssetnum = '',
+        lastDiagSiteid = '';
+
     // Evaluates one of an API table's own config formulas (assetFormula/
     // siteFormula) — reuses runVariable() exactly like V() does elsewhere
     // in buildCtx (runVariable rebuilds its own fresh buildCtx(data)
@@ -3961,6 +3967,90 @@
         });
     };
 
+    // One-click bundle of the two open beta_2 unknowns as of v0.25.1: (1)
+    // whether the mxapi* REST calls 406 because they're missing an Accept
+    // header (asset/siteid required to test — every mxapi* call so far has
+    // 406'd, so this is the prime suspect), and (2) what a real domain
+    // list's array-of-arrays rows actually look like (attributes + first
+    // two rows), needed before domainDecodeRaw() can be fixed for real
+    // instead of guessed from a collapsed console Array(N). Built so the
+    // person hitting these bugs can run one thing and paste back the
+    // result, rather than hand-typing fetch()/JSON.parse() snippets.
+    // Returns a Promise<string> (the report) so both the console command
+    // and the Settings button share one implementation.
+    function buildBeta2DiagnosticReport(assetnum, siteid) {
+        var lines = ['WO Review Tool beta_2 diagnostics — v' + TOOL_VERSION, ''];
+
+        function rawFetch(url, withAcceptHeader) {
+            return new Promise(function(resolve) {
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', url, true);
+                if (withAcceptHeader) xhr.setRequestHeader('Accept', 'application/json');
+                xhr.onload = function() {
+                    resolve(xhr.status);
+                };
+                xhr.onerror = function() {
+                    resolve('network error');
+                };
+                xhr.send();
+            });
+        }
+
+        var restCheck = Promise.resolve();
+        if (assetnum && siteid) {
+            var url = '/maximo/oslc/os/mxapiwo?oslc.where=' + encodeURIComponent('assetnum="' + assetnum + '" and siteid="' + siteid + '"') + '&oslc.select=wonum&lean=1&_format=json';
+            restCheck = Promise.all([
+                rawFetch(url, false),
+                rawFetch(url, true)
+            ]).then(function(statuses) {
+                lines.push('=== REST 406 check (asset ' + assetnum + ', site ' + siteid + ') ===');
+                lines.push('No Accept header: HTTP ' + statuses[0]);
+                lines.push('Accept: application/json: HTTP ' + statuses[1]);
+                lines.push('');
+            });
+        } else {
+            lines.push('=== REST 406 check ===', '(skipped — no assetnum/siteid given)', '');
+        }
+
+        return restCheck.then(function() {
+            lines.push('=== Domain list shapes ===');
+            KNOWN_DOMAIN_KEYS.forEach(function(key) {
+                var raw = localStorage.getItem(key);
+                if (raw === null) {
+                    lines.push(key + ': not present on this page');
+                    return;
+                }
+                var parsed;
+                try {
+                    parsed = JSON.parse(raw);
+                } catch (e) {
+                    lines.push(key + ': not valid JSON');
+                    return;
+                }
+                if (parsed && Array.isArray(parsed.data)) {
+                    lines.push(key + ':');
+                    lines.push('  attributes: ' + JSON.stringify(parsed.attributes));
+                    lines.push('  row0: ' + JSON.stringify(parsed.data[0]));
+                    lines.push('  row1: ' + JSON.stringify(parsed.data[1]));
+                } else if (Array.isArray(parsed)) {
+                    lines.push(key + ': array of ' + parsed.length + ', first entry: ' + JSON.stringify(parsed[0]));
+                } else if (parsed && typeof parsed === 'object') {
+                    lines.push(key + ': plain object, keys: ' + Object.keys(parsed).slice(0, 10).join(', '));
+                } else {
+                    lines.push(key + ': parsed to ' + typeof parsed);
+                }
+            });
+            return lines.join('\n');
+        });
+    }
+
+    window.__woBeta2Report = function(assetnum, siteid) {
+        return buildBeta2DiagnosticReport(assetnum, siteid).then(function(report) {
+            console.log(report);
+            return report;
+        });
+    };
+
     function getGroupHiddenCols(gid) {
         var gs = getGS();
         return (gs[gid] && gs[gid].hiddenCols) || [];
@@ -5012,6 +5102,19 @@
     // routeWorkflow('return') so all three can never disagree.
     function currentOrComputedReturnMessage() {
         return currentReturnMsg !== null ? currentReturnMsg : buildReturnMessage();
+    }
+
+    // Generic clipboard copy (temp textarea + execCommand — same technique
+    // copyReturnMessage() below uses for the return message specifically).
+    // Kept separate from that one since its animation/status-line side
+    // effects are specific to the Quick Return box.
+    function copyTextToClipboard(text) {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
     }
 
     // Shared by the Copy button's click handler and the Alt+C hotkey action —
@@ -10020,13 +10123,39 @@
                 var dbgDiv = document.createElement('div');
                 dbgDiv.className = 'wo-card';
                 dbgDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Debug</span></div>' +
-                    '<div data-coll-body style="margin-top:7px;"><button id="__st_debug" type="button" class="wo-btn">Run Debug Dump (check DevTools console)</button></div>';
+                    '<div data-coll-body style="margin-top:7px;display:flex;flex-direction:column;gap:6px;align-items:flex-start;">' +
+                    '<button id="__st_debug" type="button" class="wo-btn">Run Debug Dump (check DevTools console)</button>' +
+                    '<button id="__st_beta2diag" type="button" class="wo-btn">Run beta_2 Diagnostics (copies report to clipboard)</button>' +
+                    '</div>';
                 content.appendChild(dbgDiv);
                 makeCollapsible(dbgDiv, 'Debug', false);
                 dbgDiv.querySelector('#__st_debug').onclick = function() {
                     window.__woDebugTables();
                     window.__woDebugCache();
                     woAlert('Check DevTools console for debug dump.');
+                };
+                // One click: prompts once for asset/site (only needed for the
+                // REST 406 half of the report — Cancel/blank still runs the
+                // domain-shape half), then copies the whole report to the
+                // clipboard so it can be pasted straight back, no manual
+                // fetch()/JSON.parse() console typing required.
+                dbgDiv.querySelector('#__st_beta2diag').onclick = function() {
+                    woPrompt('Asset # to test REST calls against (blank to skip that part):', lastDiagAssetnum).then(function(assetnum) {
+                        if (assetnum === null) return;
+                        lastDiagAssetnum = assetnum.trim();
+                        var sitePromise = lastDiagAssetnum ?
+                            woPrompt('Site ID for that asset:', lastDiagSiteid) :
+                            Promise.resolve('');
+                        sitePromise.then(function(siteid) {
+                            if (siteid === null) return;
+                            lastDiagSiteid = siteid.trim();
+                            buildBeta2DiagnosticReport(lastDiagAssetnum, lastDiagSiteid).then(function(report) {
+                                console.log(report);
+                                copyTextToClipboard(report);
+                                woAlert('Diagnostics copied to clipboard — paste it back.');
+                            });
+                        });
+                    });
                 };
             }
 
