@@ -47,13 +47,27 @@
  *                                        repo (Cache-Control: no-store on
  *                                        the response). No data, no role —
  *                                        just the login form.
+ *   POST /admin/login                  — public. Body { username, password
+ *                                        }. Real accounts (PBKDF2-hashed
+ *                                        passwords), not raw bearer tokens
+ *                                        — returns a signed session token
+ *                                        on success. See handleAdminLogin.
  *   All other /admin/* routes require `Authorization: Bearer <token>`,
  *   resolved by resolveAdminIdentity() — either ROOT_ADMIN_TOKEN (a
- *   Wrangler secret, unconditional, bypasses adminGroups.json entirely) or
- *   a hashed member token found in adminGroups.json. See
+ *   Wrangler secret, unconditional break-glass, bypasses adminGroups.json
+ *   entirely) or a session token issued by /admin/login (HMAC-signed,
+ *   ADMIN_SESSION_SECRET, 12h TTL — but every request still re-checks the
+ *   account/group actually exist, so a revoked account's session dies on
+ *   its next request regardless of TTL). See
  *   access-control/PERMISSIONS_GUIDE.md for the full hierarchy/delegation
- *   model (buckets, field levels, admin groups, the ancestor-condition
- *   "hardlock" prepend). Route list:
+ *   model (buckets, field levels, admin groups/accounts, the
+ *   ancestor-condition "hardlock" prepend). Route list:
+ *     POST   /admin/login
+ *     POST   /admin/accounts/me/change-password
+ *     POST   /admin/accounts/:id/reset-password
+ *     GET    /admin/root-accounts
+ *     POST   /admin/root-accounts
+ *     DELETE /admin/root-accounts/:id
  *     GET    /admin/permissions
  *     POST   /admin/permissions/:section        (allow|blacklist|override|extraGrants)
  *     DELETE /admin/permissions/:section/:id
@@ -65,7 +79,9 @@
  *     PATCH  /admin/field-levels
  *     GET    /admin/groups
  *     POST   /admin/groups
- *     POST   /admin/groups/:id/members
+ *     POST   /admin/groups/:id/members          — creates an ACCOUNT (username
+ *                                                  + temp password shown once),
+ *                                                  not a bearer token.
  *     DELETE /admin/groups/:id/members/:memberId
  *     DELETE /admin/groups/:id
  *     GET    /admin/version
@@ -78,27 +94,42 @@
  *   GitHub 409 (two writes landing in the same instant) is surfaced as a
  *   plain error for the human to retry — extremely rare at this scale.
  *
+ * No password reset via email/SMS - there is no email-sending capability
+ * in this system and none is being added for this. Reset is always
+ * admin-assisted (someone with authority over the account's bucket, or
+ * root, triggers /admin/accounts/:id/reset-password) or self-service via
+ * /admin/accounts/me/change-password (requires knowing the current one).
+ *
  * Required secrets (wrangler secret put ...):
- *   GITHUB_PAT       — fine-grained PAT covering BOTH repos (public
- *                       WO-Review-Tool for version.json, private
- *                       WO-Review-Tool-Private for wo_tool.js/
- *                       permissions.json/buckets.json/adminGroups.json/
- *                       admin.html). Needs Contents:Read-and-write on both,
- *                       plus Issues:write on the private repo (feedback
- *                       reports).
- *   TOKEN_SECRET     — random string, signs the short-lived regular-user
- *                       access tokens (/check-access, /tool, /feedback).
- *   ROOT_ADMIN_TOKEN — random string, unconditional full-admin bearer
- *                       token — the break-glass credential that always
- *                       works even if adminGroups.json is empty, missing,
- *                       or corrupted. Never stored inside adminGroups.json
- *                       itself.
+ *   GITHUB_PAT            — fine-grained PAT covering BOTH repos (public
+ *                            WO-Review-Tool for version.json, private
+ *                            WO-Review-Tool-Private for wo_tool.js/
+ *                            permissions.json/buckets.json/adminGroups.json/
+ *                            admin.html). Needs Contents:Read-and-write on
+ *                            both, plus Issues:write on the private repo
+ *                            (feedback reports).
+ *   TOKEN_SECRET          — random string, signs the short-lived
+ *                            regular-user access tokens (/check-access,
+ *                            /tool, /feedback).
+ *   ROOT_ADMIN_TOKEN       — random string, unconditional full-admin
+ *                            bearer token — the break-glass credential
+ *                            that always works even if adminGroups.json is
+ *                            empty, missing, or corrupted, and the only
+ *                            way to bootstrap the first root ACCOUNT (see
+ *                            POST /admin/root-accounts). Never stored
+ *                            inside adminGroups.json itself.
+ *   ADMIN_SESSION_SECRET   — random string, signs admin session tokens
+ *                            issued by /admin/login. A distinct secret
+ *                            from TOKEN_SECRET on purpose — the two
+ *                            credential classes (regular-user vs. admin)
+ *                            shouldn't share a trust domain.
  *
  * Required vars (wrangler.toml [vars]):
  *   GITHUB_OWNER, GITHUB_REPO (private repo), GITHUB_PUBLIC_REPO, GITHUB_BRANCH
  */
 
 const TOKEN_TTL_MS = 2 * 60 * 1000; // 2 minutes — used almost immediately after issue
+const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours — bounds a left-open tab; sessionStorage's own tab-close boundary is the more common expiry in practice
 const CANONICAL_FIELDS = ['username', 'email', 'country', 'insertSite', 'langcode', 'displayName'];
 
 function corsHeaders() {
@@ -437,8 +468,57 @@ function randomBase64Url(byteLen) {
 function genId(prefix) {
     return prefix + '_' + randomBase64Url(9);
 }
-function genAdminToken() {
-    return 'adm_' + randomBase64Url(32);
+
+// ── Admin account passwords (PBKDF2-SHA256, Workers-native via
+// crypto.subtle — no external dependency). Not for the regular-user token
+// flow above, which stays exactly as it was. ──
+var PBKDF2_ITERATIONS = 100000;
+
+function bytesToHex(bytes) {
+    return Array.from(bytes).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+}
+function hexToBytes(hex) {
+    var bytes = new Uint8Array(hex.length / 2);
+    for (var i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+    return bytes;
+}
+// Constant-time-ish comparison — avoids a short-circuit-on-first-mismatch
+// timing difference between "close" and "wildly wrong" hash guesses.
+function timingSafeEqualHex(a, b) {
+    if (a.length !== b.length) return false;
+    var diff = 0;
+    for (var i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    return diff === 0;
+}
+async function deriveHash(password, saltBytes, iterations) {
+    var keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+    var bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: saltBytes, iterations: iterations, hash: 'SHA-256' }, keyMaterial, 256);
+    return bytesToHex(new Uint8Array(bits));
+}
+async function hashPassword(password) {
+    var salt = crypto.getRandomValues(new Uint8Array(16));
+    var hash = await deriveHash(password, salt, PBKDF2_ITERATIONS);
+    return { salt: bytesToHex(salt), hash: hash, iterations: PBKDF2_ITERATIONS };
+}
+// Always runs a full PBKDF2 derivation, even against a dummy stored hash
+// when the account doesn't exist (see handleAdminLogin) — a login that
+// short-circuits on "no such user" is a timing side-channel that lets an
+// attacker enumerate valid usernames by response time alone.
+var DUMMY_PASSWORD_HASH = { salt: '00000000000000000000000000000000', hash: '0', iterations: PBKDF2_ITERATIONS };
+async function verifyPassword(password, stored) {
+    var computed = await deriveHash(password, hexToBytes(stored.salt), stored.iterations);
+    return timingSafeEqualHex(computed, stored.hash);
+}
+// Temporary passwords (initial account creation, admin-triggered reset) —
+// human-typeable, not a raw hex blob, since the recipient has to type this
+// in once to log in and set a real password.
+function genTempPassword() {
+    var alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'; // no 0/O/1/l/I
+    var bytes = new Uint8Array(14);
+    crypto.getRandomValues(bytes);
+    var out = '';
+    for (var i = 0; i < bytes.length; i++) out += alphabet[bytes[i] % alphabet.length];
+    return out.slice(0, 4) + '-' + out.slice(4, 9) + '-' + out.slice(9, 14);
 }
 
 // ── Generic GitHub Contents API read-with-sha / write (ADMIN paths only —
@@ -510,9 +590,38 @@ async function loadBucketsDoc(env) {
 
 async function loadAdminGroupsDoc(env) {
     var f = await fetchPrivateFileWithSha(env, 'adminGroups.json');
-    var doc = f.exists ? JSON.parse(f.text) : { groups: [] };
+    var doc = f.exists ? JSON.parse(f.text) : { rootAccounts: [], groups: [] };
+    doc.rootAccounts = doc.rootAccounts || [];
     doc.groups = doc.groups || [];
     return { doc: doc, sha: f.sha };
+}
+
+// Finds an account by id, searching root accounts first, then every
+// group's members. Returns { account, group } - group is null for a root
+// account (it doesn't belong to one).
+function findAccountById(doc, accountId) {
+    var root = (doc.rootAccounts || []).find(function(a) { return a.id === accountId; });
+    if (root) return { account: root, group: null };
+    for (var i = 0; i < (doc.groups || []).length; i++) {
+        var g = doc.groups[i];
+        var m = (g.members || []).find(function(a) { return a.id === accountId; });
+        if (m) return { account: m, group: g };
+    }
+    return null;
+}
+function findAccountByUsername(doc, username) {
+    var uname = username.toLowerCase();
+    var root = (doc.rootAccounts || []).find(function(a) { return a.username.toLowerCase() === uname; });
+    if (root) return { account: root, group: null };
+    for (var i = 0; i < (doc.groups || []).length; i++) {
+        var g = doc.groups[i];
+        var m = (g.members || []).find(function(a) { return a.username.toLowerCase() === uname; });
+        if (m) return { account: m, group: g };
+    }
+    return null;
+}
+function usernameTaken(doc, username) {
+    return !!findAccountByUsername(doc, username);
 }
 
 // ── Bucket tree helpers ──
@@ -625,12 +734,23 @@ function fieldInUseAtDepths(field, buckets, byId) {
 }
 
 // ── Admin identity resolution ──
-// ROOT_ADMIN_TOKEN is checked BEFORE adminGroups.json is even fetched — it
-// always works, independent of that file's existence or integrity. This is
-// the break-glass safety net: since delegation lives in a GitHub file the
-// Worker itself writes to, there must be one credential that can't be
-// locked out by a bad write to that file. Never store ROOT_ADMIN_TOKEN's
-// value inside adminGroups.json — the two mechanisms stay fully separate.
+// Two credential classes, checked in order:
+//  1. ROOT_ADMIN_TOKEN (Wrangler secret) — checked BEFORE adminGroups.json
+//     is even fetched, always works independent of that file's existence
+//     or integrity. The break-glass safety net: since delegation lives in
+//     a GitHub file the Worker itself writes to, there must be one
+//     credential that can't be locked out by a bad write to that file.
+//     Never stored inside adminGroups.json — the two mechanisms stay
+//     fully separate.
+//  2. A session token (see handleAdminLogin/ADMIN_SESSION_TTL_MS) — issued
+//     after a real username/password login, HMAC-signed with
+//     ADMIN_SESSION_SECRET (a distinct secret from the regular-user
+//     TOKEN_SECRET, so compromising one credential class doesn't
+//     compromise the other). The token itself only carries IDs; every
+//     request still re-checks the account/group actually exist in
+//     adminGroups.json, so revoking an account (or resetting its
+//     password) invalidates any already-issued session on its very next
+//     request — not just once the token's TTL expires.
 async function resolveAdminIdentity(request, env) {
     var m = /^Bearer\s+(.+)$/.exec(request.headers.get('Authorization') || '');
     if (!m) return null;
@@ -638,30 +758,37 @@ async function resolveAdminIdentity(request, env) {
     if (!presented) return null;
     if (env.ROOT_ADMIN_TOKEN && presented === env.ROOT_ADMIN_TOKEN) {
         return {
-            isRoot: true, bucketId: null, label: 'root', groupId: null, memberId: null,
+            isRoot: true, bucketId: null, label: 'root (break-glass)', groupId: null, accountId: null,
             allowPeerAdminCreation: true, allowChildAdminCreation: true,
         };
     }
+    var session = await verifyToken(env.ADMIN_SESSION_SECRET, presented);
+    if (!session) return null;
+
     var groupsDoc;
     try {
         groupsDoc = (await loadAdminGroupsDoc(env)).doc;
     } catch (e) {
-        return null; // corrupt/unreachable adminGroups.json fails closed for scoped tokens
+        return null; // corrupt/unreachable adminGroups.json fails closed for session tokens
     }
-    var hash = await sha256Hex(presented);
-    for (var i = 0; i < groupsDoc.groups.length; i++) {
-        var g = groupsDoc.groups[i];
-        var member = (g.members || []).find(function(mm) { return mm.tokenHash === hash; });
-        if (member) {
-            return {
-                isRoot: false, bucketId: g.bucketId, label: member.label,
-                groupId: g.id, memberId: member.id,
-                allowPeerAdminCreation: !!g.allowPeerAdminCreation,
-                allowChildAdminCreation: !!g.allowChildAdminCreation,
-            };
-        }
+    var found = findAccountById(groupsDoc, session.accountId);
+    if (!found) return null; // account deleted/revoked since the session token was issued
+    if (found.group === null) {
+        // Root account — confirmed session.isRoot already implied this at
+        // login time, but re-derive from the CURRENT doc rather than
+        // trusting the token's own claim, so a root account demoted (were
+        // that ever added) can't keep asserting root via an old token.
+        return {
+            isRoot: true, bucketId: null, label: found.account.label, groupId: null, accountId: found.account.id,
+            allowPeerAdminCreation: true, allowChildAdminCreation: true,
+        };
     }
-    return null;
+    return {
+        isRoot: false, bucketId: found.group.bucketId, label: found.account.label,
+        groupId: found.group.id, accountId: found.account.id,
+        allowPeerAdminCreation: !!found.group.allowPeerAdminCreation,
+        allowChildAdminCreation: !!found.group.allowChildAdminCreation,
+    };
 }
 
 function identityLevel(identity, byId) {
@@ -1065,7 +1192,9 @@ async function handleAdminGetGroups(request, env) {
             return {
                 id: g.id, bucketId: g.bucketId, label: g.label,
                 allowPeerAdminCreation: !!g.allowPeerAdminCreation, allowChildAdminCreation: !!g.allowChildAdminCreation,
-                members: (g.members || []).map(function(m) { return { id: m.id, label: m.label, createdAt: m.createdAt, createdBy: m.createdBy }; }),
+                members: (g.members || []).map(function(m) {
+                    return { id: m.id, username: m.username, label: m.label, mustChangePassword: !!m.mustChangePassword, createdAt: m.createdAt, createdBy: m.createdBy };
+                }),
             };
         });
     return json({ groups: visible });
@@ -1101,6 +1230,9 @@ async function handleAdminAddGroupMember(request, env, groupId) {
     requireAdmin(identity);
     var body;
     try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+    var username = String(body.username || '').trim();
+    if (!username) badRequest('username required');
+    if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username)) badRequest('username must be 3-32 characters (letters, numbers, dot, underscore, hyphen only)');
 
     var groupsLoad = await loadAdminGroupsDoc(env);
     var group = groupsLoad.doc.groups.find(function(g) { return g.id === groupId; });
@@ -1111,17 +1243,146 @@ async function handleAdminAddGroupMember(request, env, groupId) {
         if (identity.groupId !== groupId) forbid('you can only add members to your own group');
         if (!identity.allowPeerAdminCreation) forbid('your group is not permitted to create peer admins');
     }
+    if (usernameTaken(groupsLoad.doc, username)) return json({ ok: false, error: 'username already taken' }, 409);
 
-    var token = genAdminToken();
-    var tokenHash = await sha256Hex(token);
+    var tempPassword = genTempPassword();
     var member = {
-        id: genId('mem'), tokenHash: tokenHash, label: String(body.label || 'Admin'),
+        id: genId('acc'), username: username, passwordHash: await hashPassword(tempPassword),
+        label: String(body.label || username), mustChangePassword: true,
         createdAt: new Date().toISOString(), createdBy: identity.label,
     };
     group.members.push(member);
     await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
-        'admin: ' + identity.label + ' added member "' + member.label + '" to group "' + group.label + '"');
-    return json({ ok: true, member: { id: member.id, label: member.label }, token: token });
+        'admin: ' + identity.label + ' added account "' + username + '" to group "' + group.label + '"');
+    return json({ ok: true, member: { id: member.id, username: username, label: member.label }, tempPassword: tempPassword });
+}
+
+// ── Login (username/password -> signed session token) ──
+async function handleAdminLogin(request, env) {
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+    var username = String(body.username || '').trim();
+    var password = String(body.password || '');
+    if (!username || !password) return badRequest('username and password required');
+
+    var groupsDoc = (await loadAdminGroupsDoc(env)).doc;
+    var found = findAccountByUsername(groupsDoc, username);
+    // Always run a full password derivation, even for a username that
+    // doesn't exist (against a dummy hash) - a login that short-circuits
+    // on "no such user" is a timing side-channel an attacker can use to
+    // enumerate valid usernames without ever guessing a password.
+    var ok = await verifyPassword(password, found ? found.account.passwordHash : DUMMY_PASSWORD_HASH);
+    if (!found || !ok) return json({ error: 'invalid username or password' }, 401);
+
+    var isRoot = found.group === null;
+    var bucketId = isRoot ? null : found.group.bucketId;
+    var level = 0;
+    if (!isRoot) {
+        var bucketsLoad = await loadBucketsDoc(env);
+        level = bucketDepth(bucketId, bucketsById(bucketsLoad.doc.buckets));
+    }
+    var sessionToken = await makeToken(env.ADMIN_SESSION_SECRET, {
+        accountId: found.account.id, isRoot: isRoot, exp: Date.now() + ADMIN_SESSION_TTL_MS,
+    });
+    return json({
+        token: sessionToken, role: isRoot ? 'root' : 'scoped', label: found.account.label,
+        level: level, bucketId: bucketId, mustChangePassword: !!found.account.mustChangePassword,
+    });
+}
+
+// ── Change own password (requires current password) ──
+async function handleAdminChangeOwnPassword(request, env) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    if (!identity.accountId) forbid('the break-glass token has no account to change a password on — log in with a real account first');
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+    var currentPassword = String(body.currentPassword || '');
+    var newPassword = String(body.newPassword || '');
+    if (!currentPassword || !newPassword) badRequest('currentPassword and newPassword required');
+    if (newPassword.length < 10) badRequest('new password must be at least 10 characters');
+
+    var groupsLoad = await loadAdminGroupsDoc(env);
+    var found = findAccountById(groupsLoad.doc, identity.accountId);
+    if (!found) return notFound('account not found');
+    var ok = await verifyPassword(currentPassword, found.account.passwordHash);
+    if (!ok) return json({ error: 'current password is incorrect' }, 401);
+
+    found.account.passwordHash = await hashPassword(newPassword);
+    found.account.mustChangePassword = false;
+    await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
+        'admin: ' + identity.label + ' changed their own password');
+    return json({ ok: true });
+}
+
+// ── Admin-assisted password reset (no email/SMS in this system - this is
+// the only reset path). Generates a temp password, shown once, and forces
+// a real change on next login via mustChangePassword. ──
+async function handleAdminResetPassword(request, env, accountId) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var groupsLoad = await loadAdminGroupsDoc(env);
+    var found = findAccountById(groupsLoad.doc, accountId);
+    if (!found) return notFound('account not found');
+    var targetBucketId = found.group ? found.group.bucketId : null;
+    if (found.group === null && !identity.isRoot) forbid('only root can reset a root account\'s password');
+    if (found.group !== null && !identity.isRoot && !isAtOrBelow(targetBucketId, identity.bucketId, byId)) forbid('account outside your scope');
+
+    var tempPassword = genTempPassword();
+    found.account.passwordHash = await hashPassword(tempPassword);
+    found.account.mustChangePassword = true;
+    await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
+        'admin: ' + identity.label + ' reset the password for "' + found.account.username + '"');
+    return json({ ok: true, username: found.account.username, tempPassword: tempPassword });
+}
+
+// ── Root accounts (username/password, full/unscoped access - a normal-use
+// alternative to pasting ROOT_ADMIN_TOKEN every time) ──
+async function handleAdminGetRootAccounts(request, env) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireRoot(identity);
+    var groupsLoad = await loadAdminGroupsDoc(env);
+    return json({
+        accounts: groupsLoad.doc.rootAccounts.map(function(a) {
+            return { id: a.id, username: a.username, label: a.label, mustChangePassword: !!a.mustChangePassword, createdAt: a.createdAt, createdBy: a.createdBy };
+        }),
+    });
+}
+async function handleAdminCreateRootAccount(request, env) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireRoot(identity);
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+    var username = String(body.username || '').trim();
+    if (!username) badRequest('username required');
+    if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username)) badRequest('username must be 3-32 characters (letters, numbers, dot, underscore, hyphen only)');
+
+    var groupsLoad = await loadAdminGroupsDoc(env);
+    if (usernameTaken(groupsLoad.doc, username)) return json({ ok: false, error: 'username already taken' }, 409);
+
+    var tempPassword = genTempPassword();
+    var account = {
+        id: genId('acc'), username: username, passwordHash: await hashPassword(tempPassword),
+        label: String(body.label || username), mustChangePassword: true,
+        createdAt: new Date().toISOString(), createdBy: identity.label,
+    };
+    groupsLoad.doc.rootAccounts.push(account);
+    await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
+        'admin: ' + identity.label + ' created root account "' + username + '"');
+    return json({ ok: true, account: { id: account.id, username: username, label: account.label }, tempPassword: tempPassword });
+}
+async function handleAdminDeleteRootAccount(request, env, accountId) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireRoot(identity);
+    var groupsLoad = await loadAdminGroupsDoc(env);
+    var before = groupsLoad.doc.rootAccounts.length;
+    groupsLoad.doc.rootAccounts = groupsLoad.doc.rootAccounts.filter(function(a) { return a.id !== accountId; });
+    if (groupsLoad.doc.rootAccounts.length === before) return notFound('root account not found');
+    await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
+        'admin: ' + identity.label + ' deleted a root account');
+    return json({ ok: true });
 }
 
 async function handleAdminDeleteGroupMember(request, env, groupId, memberId) {
@@ -1203,6 +1464,15 @@ async function handleAdminShell(env, ctx) {
 async function routeAdmin(request, env, ctx, pathname) {
     var method = request.method;
     if (pathname === '/admin' && method === 'GET') return handleAdminShell(env, ctx);
+    if (pathname === '/admin/login' && method === 'POST') return handleAdminLogin(request, env);
+    if (pathname === '/admin/accounts/me/change-password' && method === 'POST') return handleAdminChangeOwnPassword(request, env);
+    var mReset = /^\/admin\/accounts\/([^/]+)\/reset-password$/.exec(pathname);
+    if (mReset && method === 'POST') return handleAdminResetPassword(request, env, mReset[1]);
+
+    if (pathname === '/admin/root-accounts' && method === 'GET') return handleAdminGetRootAccounts(request, env);
+    if (pathname === '/admin/root-accounts' && method === 'POST') return handleAdminCreateRootAccount(request, env);
+    var mRootAcc = /^\/admin\/root-accounts\/([^/]+)$/.exec(pathname);
+    if (mRootAcc && method === 'DELETE') return handleAdminDeleteRootAccount(request, env, mRootAcc[1]);
 
     if (pathname === '/admin/permissions' && method === 'GET') return handleAdminGetPermissions(request, env);
     var m1 = /^\/admin\/permissions\/([a-zA-Z]+)$/.exec(pathname);

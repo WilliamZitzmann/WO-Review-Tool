@@ -181,13 +181,22 @@ cookbook-level detail there.
   new JSON files) with `Cache-Control: no-store`. No data, no role — just
   a login form. Everything else under `/admin/*` requires
   `Authorization: Bearer <token>`.
-- **`resolveAdminIdentity()`** — `ROOT_ADMIN_TOKEN` (Wrangler secret)
-  checked first and unconditionally (bypasses `adminGroups.json` entirely
-  — the break-glass path, works even if that file is empty/missing/
-  corrupt); otherwise a SHA-256 hash-lookup across `adminGroups.json`'s
-  member tokens. A distinct credential class from the regular-user
-  `makeToken`/`verifyToken` HMAC session tokens — long-lived, revoked by
-  deletion, not by expiry.
+- **Real accounts, not raw bearer tokens.** `POST /admin/login` takes
+  `{username, password}` and returns a signed session token —
+  `resolveAdminIdentity()` accepts either `ROOT_ADMIN_TOKEN` (Wrangler
+  secret, checked first and unconditionally, bypasses `adminGroups.json`
+  entirely — the break-glass path, works even if that file is
+  empty/missing/corrupt) or a session token (HMAC-signed with
+  `ADMIN_SESSION_SECRET` — a distinct secret/trust-domain from the
+  regular-user `TOKEN_SECRET`). Passwords are PBKDF2-SHA256 hashed
+  (`hashPassword`/`verifyPassword`, Workers-native `crypto.subtle`, no
+  dependency), constant-time compared, salted per account. The session
+  token only carries IDs — every request re-checks the account/group still
+  exist in `adminGroups.json`, so revocation is immediate (next request),
+  not bounded by the 12h TTL. Password reset is admin-assisted only
+  (`POST /admin/accounts/:id/reset-password`) or self-service given the
+  current password (`POST /admin/accounts/me/change-password`) — no
+  email/SMS capability exists in this system and none was added for this.
 - **`buckets.json`** — a parent-pointer tree (company → country → site →
   workgroup, depth varies per branch) plus a `fieldLevels` map (which
   whoami field is usable at which depth). Never read by the live
@@ -200,9 +209,12 @@ cookbook-level detail there.
   confining the rule to that admin's branch regardless of what field they
   chose. `override`/`extraGrants` have no conditions to prepend onto, so
   they're root-only, unconditionally.
-- **`adminGroups.json`** — admin identities grouped by shared bucket +
-  delegation rights (`allowPeerAdminCreation`/`allowChildAdminCreation`),
-  members added/removed without redefining the permission each time.
+- **`adminGroups.json`** — `{rootAccounts: [...], groups: [...]}`. Each
+  group = shared bucket + delegation rights
+  (`allowPeerAdminCreation`/`allowChildAdminCreation`) + a list of
+  username/password accounts; `rootAccounts` are ungrouped, full-access
+  accounts (a normal-use alternative to `ROOT_ADMIN_TOKEN`). Accounts
+  added/removed without redefining the group's own permission each time.
 - **No client-supplied sha for admin writes** — every write does its own
   fresh (uncached) GitHub read immediately before writing (see
   `fetchFileWithSha`/`loadPermissionsLive`/`loadBucketsDoc`/

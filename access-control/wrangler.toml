@@ -12,4 +12,5 @@ GITHUB_BRANCH = "main"
 #   wrangler secret put GITHUB_PAT
 #   wrangler secret put TOKEN_SECRET
 #   wrangler secret put ROOT_ADMIN_TOKEN
+#   wrangler secret put ADMIN_SESSION_SECRET
 # See README.md for the full deploy walkthrough.

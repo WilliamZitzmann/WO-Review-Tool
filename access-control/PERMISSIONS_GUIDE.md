@@ -156,17 +156,21 @@ When a non-root admin creates an `allow`/`blacklist` entry, they only ever submi
 
 A field's level is (by design) the same number as the tree depth it's meant for — `insertSite` at level 3 means "only usable for buckets/rules at depth 3, by admins at depth 3 or more senior." A company-level admin (depth 1) can reference any field, including deep ones; a workgroup-level admin (depth 4) can only use workgroup-appropriate fields, not reach up and reference `email` even in their own rules. This doesn't add security (the hardlock above already makes any field choice safe) — it keeps authoring *intentional*, so a junior admin can't invent a confusing rule that technically only affects their branch but reads like it's about something else entirely. Only root can introduce a brand-new field name into `fieldLevels`; a more senior admin can reassign an existing field's level (move it between levels), but never a peer or junior.
 
-### Admin groups — delegate a permission once, add people to it
+### Admin groups & accounts — delegate a permission once, add people to it
 
-Instead of one token per person carrying its own copy of the same bucket+permissions, an **admin group** defines the permission once (which bucket, and two flags — can this group's members add peers to their own group, and can they create a new child group below them) and holds a list of members. Adding a fourth person to the same "Maintenance Workgroup Admins" group is just adding a member, not redefining anything.
+Instead of one credential per person carrying its own copy of the same bucket+permissions, an **admin group** defines the permission once (which bucket, and two flags — can this group's members add peers to their own group, and can they create a new child group below them) and holds a list of **accounts**. Adding a fourth person to the same "Maintenance Workgroup Admins" group is just adding an account, not redefining anything.
+
+Each account is a real **username + password** (PBKDF2-hashed, never stored or shown in plaintext after creation) — not a bearer token. Logging in (`POST /admin/login`) exchanges a username/password for a short-lived signed session token, which is what the admin page actually uses for subsequent requests. That session is remembered for the browser tab (`sessionStorage`, cleared on tab close) so signing in once covers the whole visit — but revocation is still immediate: every request re-checks the account/group actually still exist, so deleting an account (or resetting its password) kills any live session on its very next request, not just once the token's 12-hour TTL runs out.
 
 **Cookbook — give someone AVWP-only admin access:**
 1. In `/admin`, go to Buckets, find (or create) the `abbvie-ie-avwp` bucket.
 2. Go to Groups, create a new group scoped to that bucket — pick whether its members can add peers to themselves and/or spin up workgroup-level groups beneath them.
-3. Add that person as a member — the admin tool shows their token **once**. Give it to them directly (it's never recoverable afterward — revoking and re-adding is the only way back if it's lost).
+3. Add that person as an account (pick a username) — the admin tool shows a **temporary password once**. Give it to them directly (Slack, in person — whatever channel you'd trust with a password). They use it to log in, and are prompted to set a real password on that first login (`mustChangePassword`).
 
-They can now open `/admin` from anywhere (no Maximo needed), paste that token, and manage `allow` rules + sub-buckets + sub-admin-groups within AVWP, and nothing outside it.
+They can now open `/admin` from anywhere (no Maximo needed), log in with their own username/password, and manage `allow` rules + sub-buckets + sub-admin-groups within AVWP, and nothing outside it.
+
+**Lost password / locked out**: there's no email/SMS reset in this system — nothing sends anything anywhere. Reset is always admin-assisted: anyone with authority over that account's bucket (or root) hits "reset password" on the Groups tab, which generates a fresh temporary password (shown once, same as creation) and forces a real change on next login. A logged-in account can also change its own password any time via the header's "Change password" button, given the current one.
 
 ### Root — the one identity everything else is scoped relative to
 
-`ROOT_ADMIN_TOKEN` (a Wrangler secret, see `README.md`) always grants full, unscoped access — it bypasses `adminGroups.json` entirely, so it keeps working even if that file is empty, missing, or corrupted. Treat it like a master password. Root is the only identity that can: create top-level buckets, touch `override`/`extraGrants`, manage `version.json`, and register brand-new fields into `fieldLevels`.
+`ROOT_ADMIN_TOKEN` (a Wrangler secret, see `README.md`) always grants full, unscoped access — it bypasses `adminGroups.json` entirely, so it keeps working even if that file is empty, missing, or corrupted. Treat it like a master password, and use it sparingly — for day-to-day work, create yourself a **root account** instead (Root Accounts tab, root-only) so you're not retyping a 64-character secret. Root (via either credential) is the only identity that can: create top-level buckets, touch `override`/`extraGrants`, manage `version.json`, register brand-new fields into `fieldLevels`, and manage root accounts.

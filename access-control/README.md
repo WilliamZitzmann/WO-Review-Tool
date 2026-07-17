@@ -57,6 +57,11 @@ wrangler secret put ROOT_ADMIN_TOKEN
 ```
 (same generation method as `TOKEN_SECRET` — this is the unconditional, break-glass credential for the admin tool at `/admin`. It always grants full access regardless of what's in `adminGroups.json`, so treat it like a master password: store it somewhere durable outside the browser, e.g. a password manager. See `PERMISSIONS_GUIDE.md`'s "Buckets, field levels & delegated admin groups" section for the full admin model before you start delegating.)
 
+```
+wrangler secret put ADMIN_SESSION_SECRET
+```
+(same generation method — signs the session tokens issued by `/admin/login` once someone signs in with a real username/password, distinct from `TOKEN_SECRET` on purpose so the regular-user and admin credential classes never share a trust domain.)
+
 ## 5. Edit wrangler.toml
 
 Open `wrangler.toml` and confirm/change:
@@ -94,12 +99,12 @@ Should return the full `wo_tool.js` source. Try it again with the same token aft
 
 ## 7b. Set up the admin tool
 
-The admin tool (`permissions.json`/`buckets.json`/`adminGroups.json`/`version.json` management without hand-editing on GitHub) needs three more one-time steps before it works, on top of the `ROOT_ADMIN_TOKEN` secret from step 4:
+The admin tool (`permissions.json`/`buckets.json`/`adminGroups.json`/`version.json` management without hand-editing on GitHub) needs a few more one-time steps before it works, on top of the `ROOT_ADMIN_TOKEN`/`ADMIN_SESSION_SECRET` secrets from step 4:
 
 1. In the private repo, create two empty seed files (the admin tool bootstraps everything else from here via `/admin`):
    ```
    buckets.json      → {"fieldLevels": {}, "buckets": []}
-   adminGroups.json  → {"groups": []}
+   adminGroups.json  → {"rootAccounts": [], "groups": []}
    ```
 2. Also commit `admin.html` to the private repo (the admin page itself — served through the Worker at `/admin`, same pattern as `wo_tool.js`).
 3. Test the shell and a real admin call:
@@ -111,6 +116,13 @@ The admin tool (`permissions.json`/`buckets.json`/`adminGroups.json`/`version.js
    curl -H "Authorization: Bearer <your ROOT_ADMIN_TOKEN>" https://<your-worker-url>/admin/permissions
    ```
    Should return `{"role":"root", ...}` with your full `permissions.json` contents.
+4. **Bootstrap yourself a real root account** (so you're not retyping `ROOT_ADMIN_TOKEN` every visit — see PERMISSIONS_GUIDE.md's "Root" section):
+   ```
+   curl -X POST https://<your-worker-url>/admin/root-accounts \
+     -H "Authorization: Bearer <your ROOT_ADMIN_TOKEN>" -H "Content-Type: application/json" \
+     -d '{"username":"yourname","label":"Your Name"}'
+   ```
+   Returns `{"ok":true,"account":{...},"tempPassword":"..."}` — the temp password is shown **once**. Open `/admin` in a browser, sign in with that username/temp password, and you'll be prompted to set a real one immediately. Keep `ROOT_ADMIN_TOKEN` itself tucked away as the break-glass fallback ("Use a break-glass token instead" link on the login screen) rather than your everyday credential.
 
 From there, open `/admin` in a browser, paste your `ROOT_ADMIN_TOKEN`, and start building out buckets/field levels/admin groups — see `PERMISSIONS_GUIDE.md`'s "Buckets, field levels & delegated admin groups" section for the model (hierarchy, who can delegate what, the ancestor-condition "hardlock" that keeps a delegated admin's rules confined to their branch).
 
