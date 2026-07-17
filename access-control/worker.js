@@ -96,6 +96,8 @@
  *     DELETE /admin/buckets/:id?cascade=true
  *     GET    /admin/buckets/:id/resolved-config
  *     PATCH  /admin/field-levels
+ *     DELETE /admin/field-levels/:field       — refuses (409) if still referenced by a
+ *                                                bucket or a permission rule's conditions
  *     GET    /admin/groups
  *     POST   /admin/groups
  *     POST   /admin/groups/:id/members          — creates an ACCOUNT (email +
@@ -839,6 +841,17 @@ function fieldInUseAtDepths(field, buckets, byId) {
     });
     return Object.keys(depths).map(Number);
 }
+// A field can be unreferenced by any bucket but still live inside a
+// permission rule's conditions (e.g. an ad-hoc allow rule keyed on it
+// without ever backing a bucket) - "in use" for delete-safety purposes
+// must check both, not just bucket definitions.
+function fieldUsedInPermissionConditions(field, permsDoc) {
+    return ['override', 'blacklist', 'allow', 'extraGrants'].some(function(section) {
+        return (permsDoc[section] || []).some(function(entry) {
+            return (entry.conditions || []).some(function(c) { return c.field === field; });
+        });
+    });
+}
 
 // ── Admin identity resolution ──
 // Two credential classes, checked in order:
@@ -1092,9 +1105,19 @@ async function handleAdminGetBuckets(request, env) {
     var byId = bucketsById(bucketsLoad.doc.buckets);
     var visible = identity.isRoot ? bucketsLoad.doc.buckets :
         bucketsLoad.doc.buckets.filter(function(b) { return isAtOrBelow(b.id, identity.bucketId, byId); });
+    // fieldUsage lets the Field Levels tab grey out "delete" without a
+    // separate round-trip per field - checks both bucket definitions AND
+    // permission-rule conditions (a field can be referenced by one without
+    // the other).
+    var permsLoad = await loadPermissionsLive(env);
+    var fieldUsage = {};
+    Object.keys(bucketsLoad.doc.fieldLevels).forEach(function(f) {
+        fieldUsage[f] = fieldInUseAtDepths(f, bucketsLoad.doc.buckets, byId).length > 0 || fieldUsedInPermissionConditions(f, permsLoad.doc);
+    });
     return json({
         buckets: visible, fieldLevels: bucketsLoad.doc.fieldLevels, level: identityLevel(identity, byId),
         canonicalFields: CANONICAL_FIELDS, // known whoami field names, for the admin UI's field picker (§ registered fieldLevels keys cover any custom ones already in use)
+        fieldUsage: fieldUsage,
     });
 }
 
@@ -1276,6 +1299,28 @@ async function handleAdminPatchFieldLevels(request, env) {
     await writePrivateFile(env, 'buckets.json', JSON.stringify(bucketsLoad.doc, null, 2), bucketsLoad.sha,
         'admin: ' + identity.label + ' set field "' + field + '" to level ' + newLevel);
     return json({ ok: true, field: field, level: newLevel });
+}
+
+async function handleAdminDeleteFieldLevel(request, env, field) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var level = identityLevel(identity, byId);
+    var fieldLevels = bucketsLoad.doc.fieldLevels;
+    if (!fieldLevels.hasOwnProperty(field)) return notFound('field not registered');
+    if (!canReassignField(level, field, fieldLevels)) forbid('must be strictly more senior than this field\'s current level to delete it');
+    if (fieldInUseAtDepths(field, bucketsLoad.doc.buckets, byId).length > 0) {
+        return json({ ok: false, error: 'field "' + field + '" is used by one or more buckets — cannot delete while in use' }, 409);
+    }
+    var permsLoad = await loadPermissionsLive(env);
+    if (fieldUsedInPermissionConditions(field, permsLoad.doc)) {
+        return json({ ok: false, error: 'field "' + field + '" is referenced by one or more permission rule conditions — cannot delete while in use' }, 409);
+    }
+    delete fieldLevels[field];
+    await writePrivateFile(env, 'buckets.json', JSON.stringify(bucketsLoad.doc, null, 2), bucketsLoad.sha,
+        'admin: ' + identity.label + ' deleted field level "' + field + '"');
+    return json({ ok: true });
 }
 
 // ── /admin/groups ──
@@ -1726,6 +1771,8 @@ async function routeAdmin(request, env, ctx, pathname) {
     if (m4 && method === 'DELETE') return handleAdminDeleteBucket(request, env, m4[1]);
 
     if (pathname === '/admin/field-levels' && method === 'PATCH') return handleAdminPatchFieldLevels(request, env);
+    var mFieldDel = /^\/admin\/field-levels\/([^/]+)$/.exec(pathname);
+    if (mFieldDel && method === 'DELETE') return handleAdminDeleteFieldLevel(request, env, decodeURIComponent(mFieldDel[1]));
 
     if (pathname === '/admin/groups' && method === 'GET') return handleAdminGetGroups(request, env);
     if (pathname === '/admin/groups' && method === 'POST') return handleAdminCreateGroup(request, env);
