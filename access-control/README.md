@@ -21,13 +21,13 @@ Instead:
 ## 2. Create a GitHub fine-grained PAT
 
 GitHub Settings → Developer settings → Fine-grained personal access tokens → Generate new token.
-- Repository access: **only** `WO-Review-Tool-Private`.
-- Permissions: **Contents: Read-only**, plus **Issues: Read and write** (needed for the `/feedback` endpoint, which files bug/suggestion reports as Issues on this repo). Nothing else.
-- Set an expiration and put a calendar reminder to rotate it — a fine-grained PAT scoped to just these two permissions on one private repo is low-blast-radius, but it's still a real credential.
+- Repository access: **both** `WO-Review-Tool-Private` **and** `WO-Review-Tool` (a fine-grained PAT can cover more than one repo — this is deliberate: the admin layer below needs to write `permissions.json`/`buckets.json`/`adminGroups.json`/`admin.html` in the private repo AND `version.json` in the public repo, and a single Worker environment is the real trust boundary regardless of PAT count, so splitting into two PATs wouldn't buy real isolation, just an extra secret to rotate).
+- Permissions: **Contents: Read and write** on both repos, plus **Issues: Read and write** on the private repo (needed for the `/feedback` endpoint, which files bug/suggestion reports as Issues there). Nothing else.
+- Set an expiration and put a calendar reminder to rotate it — still a real credential, even scoped this tightly.
 
 Copy the token now; GitHub won't show it again.
 
-If you already have a PAT deployed from before `/feedback` existed, it only has Contents:Read — edit its permissions on GitHub (fine-grained PATs can be edited in place, no need to regenerate) to add Issues: Read and write, or `/feedback` will fail with a GitHub 403/404.
+If you already have a PAT deployed from before the admin layer existed, it only has Contents:Read-only on the private repo — edit its permissions on GitHub (fine-grained PATs can be edited in place, no need to regenerate) to add Contents:Read-and-write on both repos, or every `/admin/*` write will fail with a GitHub 403.
 
 ## 3. Install Wrangler and log in
 
@@ -52,11 +52,17 @@ wrangler secret put TOKEN_SECRET
 ```
 (paste any long random string — e.g. generate one with `openssl rand -hex 32`, or in a browser console: `crypto.getRandomValues(new Uint8Array(32)).reduce((s,b)=>s+b.toString(16).padStart(2,'0'),'')`)
 
+```
+wrangler secret put ROOT_ADMIN_TOKEN
+```
+(same generation method as `TOKEN_SECRET` — this is the unconditional, break-glass credential for the admin tool at `/admin`. It always grants full access regardless of what's in `adminGroups.json`, so treat it like a master password: store it somewhere durable outside the browser, e.g. a password manager. See `PERMISSIONS_GUIDE.md`'s "Buckets, field levels & delegated admin groups" section for the full admin model before you start delegating.)
+
 ## 5. Edit wrangler.toml
 
 Open `wrangler.toml` and confirm/change:
 - `GITHUB_OWNER` — your GitHub username.
 - `GITHUB_REPO` — the private repo's name from step 1.
+- `GITHUB_PUBLIC_REPO` — the public repo's name (`WO-Review-Tool` by default) — used by the admin tool's Version tab to read/write `version.json`.
 - `GITHUB_BRANCH` — usually `main`.
 
 ## 6. Deploy
@@ -86,6 +92,28 @@ curl "https://<your-worker-url>/tool?token=<token from above>"
 ```
 Should return the full `wo_tool.js` source. Try it again with the same token after ~2 minutes — it should now 403 (expired).
 
+## 7b. Set up the admin tool
+
+The admin tool (`permissions.json`/`buckets.json`/`adminGroups.json`/`version.json` management without hand-editing on GitHub) needs three more one-time steps before it works, on top of the `ROOT_ADMIN_TOKEN` secret from step 4:
+
+1. In the private repo, create two empty seed files (the admin tool bootstraps everything else from here via `/admin`):
+   ```
+   buckets.json      → {"fieldLevels": {}, "buckets": []}
+   adminGroups.json  → {"groups": []}
+   ```
+2. Also commit `admin.html` to the private repo (the admin page itself — served through the Worker at `/admin`, same pattern as `wo_tool.js`).
+3. Test the shell and a real admin call:
+   ```
+   curl https://<your-worker-url>/admin
+   ```
+   Should return the admin page's HTML with `Cache-Control: no-store` in the response headers — no token needed to load the shell, only to do anything with it.
+   ```
+   curl -H "Authorization: Bearer <your ROOT_ADMIN_TOKEN>" https://<your-worker-url>/admin/permissions
+   ```
+   Should return `{"role":"root", ...}` with your full `permissions.json` contents.
+
+From there, open `/admin` in a browser, paste your `ROOT_ADMIN_TOKEN`, and start building out buckets/field levels/admin groups — see `PERMISSIONS_GUIDE.md`'s "Buckets, field levels & delegated admin groups" section for the model (hierarchy, who can delegate what, the ancestor-condition "hardlock" that keeps a delegated admin's rules confined to their branch).
+
 ## 8. Wire up loader.js
 
 Set `WORKER_BASE_URL` at the top of `loader.js` to your deployed Worker URL, commit, push to the **public** repo (loader.js itself has no secrets in it — it's just orchestration).
@@ -114,4 +142,6 @@ The "dev channel" (unpinned tip-of-branch) doesn't need a tag at all — it alwa
 
 - **PAT expired/compromised**: revoke it on GitHub, generate a new one, `wrangler secret put GITHUB_PAT` again, no redeploy needed (secrets update live).
 - **TOKEN_SECRET rotated**: same — `wrangler secret put TOKEN_SECRET`. Any tokens issued under the old secret stop verifying immediately (they're short-lived anyway, ~2 minutes).
-- **permissions.json changed**: just commit to the private repo — the Worker fetches it fresh on every request (no caching to invalidate).
+- **ROOT_ADMIN_TOKEN rotated/compromised**: same — `wrangler secret put ROOT_ADMIN_TOKEN`. Unlike the other two, this one is long-lived by design (it's the break-glass admin credential, not a short-lived session token), so rotate it deliberately rather than on a timer — and re-share the new value with yourself (and only yourself) the same way you'd handle any other master credential.
+- **A delegated admin's token compromised**: no secret rotation needed — revoke it directly in the admin tool (`DELETE /admin/groups/:id/members/:memberId`, or delete the whole group if the group itself is compromised). Takes effect immediately (admin reads are always live, never cached).
+- **permissions.json changed**: just commit to the private repo — the regular-user-facing `/bootstrap`/`/check-access` path fetches it fresh within its ~30s edge cache TTL; `/admin/*` reads are always live, no caching at all.

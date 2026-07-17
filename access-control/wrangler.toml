@@ -5,9 +5,11 @@ compatibility_date = "2025-01-01"
 [vars]
 GITHUB_OWNER = "WilliamZitzmann"
 GITHUB_REPO = "WO-Review-Tool-Private"
+GITHUB_PUBLIC_REPO = "WO-Review-Tool"
 GITHUB_BRANCH = "main"
 
 # Secrets are NOT set here — set them with:
 #   wrangler secret put GITHUB_PAT
 #   wrangler secret put TOKEN_SECRET
+#   wrangler secret put ROOT_ADMIN_TOKEN
 # See README.md for the full deploy walkthrough.

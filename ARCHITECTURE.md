@@ -123,12 +123,14 @@ Replaces an earlier single-`tier` design. `permissions.json`:
 ```jsonc
 {
   "maximoHosts": [{ "hostname": "...", "url": "..." }],
-  "override": [{ "username": "ZITZMWX", "grants": ["user"] }],  // bypasses blacklist
-  "blacklist": [ [ { "field": "...", "op": "...", "value": "..." } ] ],  // OR of AND-groups
-  "allow": [{ "grants": ["user"], "conditions": [ /* AND-group */ ] }],
+  "override": [{ "username": "ZITZMWX", "grants": ["user"], "bucketId": null }],  // bypasses blacklist
+  "blacklist": [{ "bucketId": null, "conditions": [ /* AND-group */ ] }],  // OR of these objects
+  "allow": [{ "grants": ["user"], "bucketId": null, "conditions": [ /* AND-group */ ] }],
   "extraGrants": { "ZITZMWX": ["dev", "beta_0"] }  // additive, merged onto whatever base grants matched
 }
 ```
+
+`bucketId` (admin-delegation metadata — see §3.4) is never read by `evaluateAccess`/`evalGroup`/`computeRequiredFields`; `null`/omitted means root-owned. `blacklist` entries used to be bare condition arrays — reshaped to `{bucketId, conditions}` objects when §3.4 shipped, which touched `evaluateAccess`'s blacklist check and `computeRequiredFields` (both now read `entry.conditions` instead of treating the entry itself as the conditions array).
 
 Precedence: **override → blacklist → allow → deny** (see `evaluateAccess`).
 `resolveGrants()` merges the matching rule's base grants (default `["user"]`
@@ -161,6 +163,63 @@ it here, keep that doc current instead.
   `/bootstrap` even fires, not only inside `proceedWithAccessCheck()`.
   Deliberate tradeoff: a revoke can take up to 15 minutes to land on a
   browser that already cached a grant, instead of the very next click.
+
+### 3.4 Admin layer (`/admin/*`) — delegated hierarchical management
+
+A separate surface on the same Worker for managing `permissions.json`,
+`buckets.json`, `adminGroups.json`, and (public repo) `version.json`
+without hand-editing on GitHub. Fully independent trust model from
+everything above — regular-user access is a client-reported whoami claim;
+admin access is a bearer token, checked entirely server-side, so it works
+without Maximo open at all. Full model documented in
+`access-control/PERMISSIONS_GUIDE.md`'s "Buckets, field levels & delegated
+admin groups" section — summary here for orientation, don't duplicate the
+cookbook-level detail there.
+
+- **`GET /admin`** — unauthenticated shell, serves `admin.html` (private
+  repo, fourth artifact alongside `wo_tool.js`/`permissions.json`/the two
+  new JSON files) with `Cache-Control: no-store`. No data, no role — just
+  a login form. Everything else under `/admin/*` requires
+  `Authorization: Bearer <token>`.
+- **`resolveAdminIdentity()`** — `ROOT_ADMIN_TOKEN` (Wrangler secret)
+  checked first and unconditionally (bypasses `adminGroups.json` entirely
+  — the break-glass path, works even if that file is empty/missing/
+  corrupt); otherwise a SHA-256 hash-lookup across `adminGroups.json`'s
+  member tokens. A distinct credential class from the regular-user
+  `makeToken`/`verifyToken` HMAC session tokens — long-lived, revoked by
+  deletion, not by expiry.
+- **`buckets.json`** — a parent-pointer tree (company → country → site →
+  workgroup, depth varies per branch) plus a `fieldLevels` map (which
+  whoami field is usable at which depth). Never read by the live
+  `/bootstrap`/`/check-access` path. `isAtOrBelow()`/`isBelow()` are the
+  two containment primitives everything else is built on (inclusive vs.
+  strict — see the function comments in `worker.js`).
+- **The hardlock**: a non-root admin's `allow`/`blacklist` write only ever
+  submits their own condition; the Worker prepends the full ancestor
+  chain (`bucketConditionChain()`) before storing it, structurally
+  confining the rule to that admin's branch regardless of what field they
+  chose. `override`/`extraGrants` have no conditions to prepend onto, so
+  they're root-only, unconditionally.
+- **`adminGroups.json`** — admin identities grouped by shared bucket +
+  delegation rights (`allowPeerAdminCreation`/`allowChildAdminCreation`),
+  members added/removed without redefining the permission each time.
+- **No client-supplied sha for admin writes** — every write does its own
+  fresh (uncached) GitHub read immediately before writing (see
+  `fetchFileWithSha`/`loadPermissionsLive`/`loadBucketsDoc`/
+  `loadAdminGroupsDoc`), so the staleness window is one request, not
+  "since the client's last GET." A raw GitHub 409 (two writes in the same
+  instant) surfaces as a plain retryable error.
+- **`GITHUB_PAT`** now covers both repos (`Contents: Read-and-write` on
+  each) — a deliberate simplification over an earlier two-PAT draft, since
+  a single Worker environment is the actual trust boundary regardless of
+  PAT count.
+
+**Deferred, not built yet**: the *consuming* side of `configProfileId` /
+`resolveConfigForBucket()` — a user's `wo_tool.js` install actually
+matching their whoami to a bucket and fetching that bucket's cascaded
+default config. Today this only exists as admin-side schema + a pure
+resolver function for the admin UI's preview; `configs/index.json` and
+`wo_tool.js`'s installer are untouched.
 
 ---
 

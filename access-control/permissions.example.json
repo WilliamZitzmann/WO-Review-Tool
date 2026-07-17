@@ -1,5 +1,5 @@
 {
-  "_comment": "TEMPLATE ONLY. The real file must NOT live in this public repo — it belongs only in the private repo the Worker reads from (see access-control/README.md). Every condition's 'field' must be one of the canonical whoami fields loader.js sends: username, email, country, insertSite, langcode, displayName. 'grants' arrays replace the old single 'tier' string — a user can hold more than one at once (e.g. [\"user\",\"dev\",\"beta_0\"]). 'beta_0' is a wildcard meaning 'all betas'; any other 'beta_N' gates one specific feature. Omitting 'grants' defaults to [\"user\"].",
+  "_comment": "TEMPLATE ONLY. The real file must NOT live in this public repo — it belongs only in the private repo the Worker reads from (see access-control/README.md). Every condition's 'field' must be one of the canonical whoami fields loader.js sends: username, email, country, insertSite, langcode, displayName (plus any custom field registered in buckets.json's fieldLevels — see PERMISSIONS_GUIDE.md). 'grants' arrays replace the old single 'tier' string — a user can hold more than one at once (e.g. [\"user\",\"dev\",\"beta_0\"]). 'beta_0' is a wildcard meaning 'all betas'; any other 'beta_N' gates one specific feature. Omitting 'grants' defaults to [\"user\"]. 'bucketId' on override/allow/blacklist entries is admin-layer metadata only (which delegated admin group owns this entry) — the live access check never reads it; omit it (or use null) for anything root-owned. blacklist entries are {bucketId, conditions} objects, not bare condition arrays — see the buckets/delegation section of PERMISSIONS_GUIDE.md before hand-adding one.",
 
   "maximoHosts": [
     {
@@ -9,34 +9,45 @@
   ],
 
   "override": [
-    { "username": "KIMX", "grants": ["user"] }
+    { "username": "KIMX", "grants": ["user"], "bucketId": null }
   ],
 
   "blacklist": [
-    [
-      { "field": "username", "op": "eq", "value": "JAMESXW" }
-    ],
-    [
-      { "field": "country", "op": "neq", "value": "IE" },
-      { "field": "insertSite", "op": "neq", "value": "AVWP" }
-    ]
+    {
+      "bucketId": null,
+      "conditions": [
+        { "field": "username", "op": "eq", "value": "JAMESXW" }
+      ]
+    },
+    {
+      "bucketId": null,
+      "conditions": [
+        { "field": "country", "op": "neq", "value": "IE" },
+        { "field": "insertSite", "op": "neq", "value": "AVWP" }
+      ]
+    }
   ],
 
   "allow": [
     {
       "grants": ["user"],
+      "bucketId": null,
       "conditions": [
         { "field": "insertSite", "op": "eq", "value": "AVWP" }
       ]
     },
     {
       "grants": ["user"],
+      "bucketId": "abbvie-ie-avwp",
       "conditions": [
-        { "field": "email", "op": "endsWith", "value": "@abbvie.com" }
+        { "field": "email", "op": "endsWith", "value": "@abbvie.com" },
+        { "field": "country", "op": "eq", "value": "IE" },
+        { "field": "insertSite", "op": "eq", "value": "AVWP" }
       ]
     },
     {
       "grants": ["user"],
+      "bucketId": null,
       "conditions": [
         { "field": "country", "op": "eq", "value": "IE" }
       ]

@@ -12,7 +12,7 @@
  * covers transit, and app-layer crypto wouldn't change what a user with
  * devtools open on their own legitimate session can already see.
  *
- * Endpoints:
+ * Regular-user endpoints (unchanged behavior from before the admin layer below):
  *   GET  /bootstrap      — public. Returns { maximoHosts, requiredFields }.
  *   POST /check-access   — body: { fields: {...} } (only the fields
  *                          /bootstrap said were required). Evaluates
@@ -40,17 +40,62 @@
  *                          never needs private-repo access themselves) and
  *                          returns { ok, issueUrl }.
  *
+ * Admin endpoints (new — manage permissions.json / buckets.json /
+ * adminGroups.json / version.json without hand-editing on GitHub):
+ *   GET  /admin                        — public, unauthenticated shell.
+ *                                        Serves admin.html from the private
+ *                                        repo (Cache-Control: no-store on
+ *                                        the response). No data, no role —
+ *                                        just the login form.
+ *   All other /admin/* routes require `Authorization: Bearer <token>`,
+ *   resolved by resolveAdminIdentity() — either ROOT_ADMIN_TOKEN (a
+ *   Wrangler secret, unconditional, bypasses adminGroups.json entirely) or
+ *   a hashed member token found in adminGroups.json. See
+ *   access-control/PERMISSIONS_GUIDE.md for the full hierarchy/delegation
+ *   model (buckets, field levels, admin groups, the ancestor-condition
+ *   "hardlock" prepend). Route list:
+ *     GET    /admin/permissions
+ *     POST   /admin/permissions/:section        (allow|blacklist|override|extraGrants)
+ *     DELETE /admin/permissions/:section/:id
+ *     GET    /admin/buckets
+ *     POST   /admin/buckets
+ *     PATCH  /admin/buckets/:id
+ *     DELETE /admin/buckets/:id?cascade=true
+ *     GET    /admin/buckets/:id/resolved-config
+ *     PATCH  /admin/field-levels
+ *     GET    /admin/groups
+ *     POST   /admin/groups
+ *     POST   /admin/groups/:id/members
+ *     DELETE /admin/groups/:id/members/:memberId
+ *     DELETE /admin/groups/:id
+ *     GET    /admin/version
+ *     POST   /admin/version
+ *   Every admin write does its own fresh (uncached) read of the file it's
+ *   about to change immediately before writing — see loadPermissionsLive/
+ *   loadBucketsDoc/loadAdminGroupsDoc — so no client-supplied sha is
+ *   needed for single-entry operations; the staleness window is the
+ *   lifetime of one request, not "since the client's last GET". A raw
+ *   GitHub 409 (two writes landing in the same instant) is surfaced as a
+ *   plain error for the human to retry — extremely rare at this scale.
+ *
  * Required secrets (wrangler secret put ...):
- *   GITHUB_PAT     — fine-grained PAT on the private repo holding
- *                    wo_tool.js + permissions.json. Needs Contents:read
- *                    (tool source + permissions) AND Issues:write
- *                    (feedback reports) — the original deploy only granted
- *                    Contents:read, so this scope has to be added to the
- *                    PAT on GitHub's side for /feedback to work.
- *   TOKEN_SECRET   — random string, signs the short-lived access tokens.
+ *   GITHUB_PAT       — fine-grained PAT covering BOTH repos (public
+ *                       WO-Review-Tool for version.json, private
+ *                       WO-Review-Tool-Private for wo_tool.js/
+ *                       permissions.json/buckets.json/adminGroups.json/
+ *                       admin.html). Needs Contents:Read-and-write on both,
+ *                       plus Issues:write on the private repo (feedback
+ *                       reports).
+ *   TOKEN_SECRET     — random string, signs the short-lived regular-user
+ *                       access tokens (/check-access, /tool, /feedback).
+ *   ROOT_ADMIN_TOKEN — random string, unconditional full-admin bearer
+ *                       token — the break-glass credential that always
+ *                       works even if adminGroups.json is empty, missing,
+ *                       or corrupted. Never stored inside adminGroups.json
+ *                       itself.
  *
  * Required vars (wrangler.toml [vars]):
- *   GITHUB_OWNER, GITHUB_REPO, GITHUB_BRANCH
+ *   GITHUB_OWNER, GITHUB_REPO (private repo), GITHUB_PUBLIC_REPO, GITHUB_BRANCH
  */
 
 const TOKEN_TTL_MS = 2 * 60 * 1000; // 2 minutes — used almost immediately after issue
@@ -59,8 +104,8 @@ const CANONICAL_FIELDS = ['username', 'email', 'country', 'insertSite', 'langcod
 function corsHeaders() {
     return {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     };
 }
 
@@ -103,6 +148,11 @@ async function fetchPrivateFile(env, path, ref) {
 // released tag never gets its content changed after the fact), so pinned
 // tool fetches cache far longer than the branch HEAD / permissions.json,
 // which can change at any time.
+//
+// NOTE: this cache is ONLY used by the regular-user path (loadPermissions,
+// handleGetTool below). All /admin/* reads bypass it entirely (see
+// fetchFileWithSha) — admin operations need live data, not a ~30s-stale
+// edge copy, especially since a write immediately re-reads before merging.
 const PERMISSIONS_CACHE_TTL = 30; // seconds
 const TOOL_SRC_CACHE_TTL_PINNED = 24 * 60 * 60; // seconds — a "vX.Y.Z" tag never changes
 const TOOL_SRC_CACHE_TTL_UNPINNED = 15; // seconds — dev channel tracks a moving branch
@@ -164,8 +214,11 @@ function evaluateAccess(perms, user) {
         return { granted: true, grants: resolveGrants(perms, username, override.grants) };
     }
 
-    var blacklisted = (perms.blacklist || []).some(function(group) {
-        return evalGroup(user, group);
+    // blacklist entries are {bucketId, conditions} objects (bucketId is
+    // admin-layer metadata only — see buckets.json / PERMISSIONS_GUIDE.md's
+    // "delegated admin groups" section; this evaluator never reads it).
+    var blacklisted = (perms.blacklist || []).some(function(entry) {
+        return evalGroup(user, entry.conditions);
     });
     if (blacklisted) {
         return { granted: false };
@@ -206,12 +259,15 @@ function computeRequiredFields(perms) {
             if (CANONICAL_FIELDS.indexOf(c.field) !== -1) fields[c.field] = true;
         });
     }
-    (perms.blacklist || []).forEach(collect);
+    (perms.blacklist || []).forEach(function(entry) { collect(entry.conditions); });
     (perms.allow || []).forEach(function(group) { collect(group.conditions); });
     return Object.keys(fields);
 }
 
 // ── Stateless short-lived signed tokens (HMAC-SHA256, no KV/storage) ──
+// Used ONLY for the regular-user flow (/check-access -> /tool/-feedback).
+// Admin tokens (adminGroups.json) are a completely different, longer-lived
+// credential class — see resolveAdminIdentity() below.
 function b64url(bytes) {
     var bin = '';
     var arr = new Uint8Array(bytes);
@@ -254,7 +310,7 @@ async function verifyToken(secret, token) {
     return data;
 }
 
-// ── Handlers ──
+// ── Regular-user handlers (unchanged behavior) ──
 async function handleBootstrap(env, ctx) {
     var perms = await loadPermissions(env, ctx);
     return json({
@@ -349,6 +405,836 @@ async function handleGetTool(request, env, ctx) {
     });
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// ── Admin layer ──
+// ══════════════════════════════════════════════════════════════════════
+
+// ── UTF-8-safe base64 (GitHub's Contents API is base64-of-raw-bytes;
+// btoa/atob alone only handle latin1, and labels/usernames can be non-ASCII) ──
+function utf8ToBase64(str) {
+    var bytes = new TextEncoder().encode(str);
+    var bin = '';
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+}
+function base64ToUtf8(b64) {
+    var bin = atob(b64.replace(/\n/g, ''));
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+}
+
+async function sha256Hex(str) {
+    var buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+    return Array.from(new Uint8Array(buf)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+}
+
+function randomBase64Url(byteLen) {
+    var arr = new Uint8Array(byteLen);
+    crypto.getRandomValues(arr);
+    return b64url(arr.buffer);
+}
+function genId(prefix) {
+    return prefix + '_' + randomBase64Url(9);
+}
+function genAdminToken() {
+    return 'adm_' + randomBase64Url(32);
+}
+
+// ── Generic GitHub Contents API read-with-sha / write (ADMIN paths only —
+// always live, never edge-cached, since a write immediately re-reads
+// before merging and a stale admin-side view is exactly what would let a
+// scoped admin's merge clobber a concurrent edit). ──
+async function fetchFileWithSha(env, owner, repo, path) {
+    var url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${env.GITHUB_BRANCH}`;
+    var res = await fetch(url, {
+        headers: {
+            'Authorization': `Bearer ${env.GITHUB_PAT}`,
+            'Accept': 'application/vnd.github+json',
+            'User-Agent': 'wo-review-tool-worker',
+        },
+    });
+    if (res.status === 404) return { text: null, sha: null, exists: false };
+    if (!res.ok) throw new Error(`GitHub fetch failed for ${path}: HTTP ${res.status}`);
+    var data = await res.json();
+    return { text: base64ToUtf8(data.content), sha: data.sha, exists: true };
+}
+
+async function writeFile(env, owner, repo, path, contentText, sha, message) {
+    var url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+    var body = { message: message, content: utf8ToBase64(contentText), branch: env.GITHUB_BRANCH };
+    if (sha) body.sha = sha;
+    var res = await fetch(url, {
+        method: 'PUT',
+        headers: {
+            'Authorization': `Bearer ${env.GITHUB_PAT}`,
+            'Accept': 'application/vnd.github+json',
+            'User-Agent': 'wo-review-tool-worker',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+        var err = new Error(`GitHub write failed for ${path}: HTTP ${res.status}`);
+        err.status = res.status;
+        throw err;
+    }
+    var data = await res.json();
+    return data.content.sha;
+}
+
+function fetchPrivateFileWithSha(env, path) { return fetchFileWithSha(env, env.GITHUB_OWNER, env.GITHUB_REPO, path); }
+function writePrivateFile(env, path, text, sha, message) { return writeFile(env, env.GITHUB_OWNER, env.GITHUB_REPO, path, text, sha, message); }
+function fetchPublicFileWithSha(env, path) { return fetchFileWithSha(env, env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, path); }
+function writePublicFile(env, path, text, sha, message) { return writeFile(env, env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, path, text, sha, message); }
+
+async function loadPermissionsLive(env) {
+    var f = await fetchPrivateFileWithSha(env, 'permissions.json');
+    if (!f.exists) throw new Error('permissions.json not found in private repo');
+    var doc = JSON.parse(f.text);
+    doc.override = doc.override || [];
+    doc.blacklist = doc.blacklist || [];
+    doc.allow = doc.allow || [];
+    doc.extraGrants = doc.extraGrants || {};
+    doc.maximoHosts = doc.maximoHosts || [];
+    return { doc: doc, sha: f.sha };
+}
+
+async function loadBucketsDoc(env) {
+    var f = await fetchPrivateFileWithSha(env, 'buckets.json');
+    var doc = f.exists ? JSON.parse(f.text) : { fieldLevels: {}, buckets: [] };
+    doc.fieldLevels = doc.fieldLevels || {};
+    doc.buckets = doc.buckets || [];
+    return { doc: doc, sha: f.sha };
+}
+
+async function loadAdminGroupsDoc(env) {
+    var f = await fetchPrivateFileWithSha(env, 'adminGroups.json');
+    var doc = f.exists ? JSON.parse(f.text) : { groups: [] };
+    doc.groups = doc.groups || [];
+    return { doc: doc, sha: f.sha };
+}
+
+// ── Bucket tree helpers ──
+function bucketsById(buckets) {
+    var m = {};
+    buckets.forEach(function(b) { m[b.id] = b; });
+    return m;
+}
+
+// Inclusive of ancestorId itself — used for grant/group-membership
+// containment ("their own node or any descendant").
+function isAtOrBelow(candidateId, ancestorId, byId) {
+    if (ancestorId == null) return true; // root contains everything
+    if (candidateId == null) return false; // "everything" is never at-or-below one node
+    var cur = candidateId, guard = 0;
+    while (cur != null) {
+        if (cur === ancestorId) return true;
+        var node = byId[cur];
+        if (!node) return false; // dangling/unknown id - fail closed
+        cur = node.parentId;
+        if (++guard > 1000) return false; // cycle guard - buckets.json is hand-editable
+    }
+    return false;
+}
+
+// Strict — excludes ancestorId itself. Used for bucket CRUD and new-child-
+// group creation ("beneath their own node", not the node itself).
+function isBelow(candidateId, ancestorId, byId) {
+    if (candidateId == null) return false;
+    if (ancestorId == null) return true; // every real bucket is beneath the implicit apex
+    return candidateId !== ancestorId && isAtOrBelow(candidateId, ancestorId, byId);
+}
+
+// Root-level buckets are depth 1; root/full-admin is depth 0.
+function bucketDepth(bucketId, byId) {
+    if (bucketId == null) return 0;
+    var depth = 0, cur = bucketId, guard = 0;
+    while (cur != null) {
+        var node = byId[cur];
+        if (!node) return -1; // dangling
+        depth++;
+        cur = node.parentId;
+        if (++guard > 1000) return -1;
+    }
+    return depth;
+}
+
+// Root-to-leaf chain of {field,op,value}, from the top-level ancestor down
+// through and INCLUDING bucketId's own condition — this is what gets
+// prepended onto a scoped admin's submitted conditions (see
+// buildEntryConditions below), the mechanism that makes "hardlocked above
+// them" a structural guarantee rather than a UI convention.
+function bucketConditionChain(bucketId, byId) {
+    var chain = [], cur = bucketId, guard = 0;
+    while (cur != null) {
+        var node = byId[cur];
+        if (!node) break;
+        chain.unshift({ field: node.field, op: node.op, value: node.value });
+        cur = node.parentId;
+        if (++guard > 1000) break;
+    }
+    return chain;
+}
+
+// Nearest-ancestor-wins config cascade. Pure — no wo_tool.js/configs/
+// index.json wiring here, this only answers "given a bucket, what's the
+// nearest-ancestor-or-self assigned config" for the admin UI's preview.
+function resolveConfigForBucket(bucketId, buckets) {
+    var byId = bucketsById(buckets);
+    var cur = bucketId, guard = 0;
+    while (cur != null) {
+        var node = byId[cur];
+        if (!node) return null;
+        if (node.configProfileId) return node.configProfileId;
+        cur = node.parentId;
+        if (++guard > 1000) return null;
+    }
+    return null;
+}
+
+// ── Field-level governance ──
+// A field's level defaults to 0 (root-only) if never registered — safe by
+// default, consistent with "untagged = full-admin-only" used elsewhere.
+function effectiveFieldLevel(field, fieldLevels) {
+    return fieldLevels.hasOwnProperty(field) ? fieldLevels[field] : 0;
+}
+// Usable by that level and above (more senior) — adminLevel 0 (root) can
+// use anything; a level-4 (most junior) identity can only use fields
+// registered at level 4 or deeper.
+function canUseField(adminLevel, field, fieldLevels) {
+    return adminLevel <= effectiveFieldLevel(field, fieldLevels);
+}
+// Reassigning a field's level requires being strictly more senior than its
+// CURRENT level — root always allowed regardless.
+function canReassignField(adminLevel, field, fieldLevels) {
+    if (adminLevel === 0) return true;
+    return adminLevel < effectiveFieldLevel(field, fieldLevels);
+}
+// Only root can introduce a field name that doesn't exist in fieldLevels
+// yet — keeps the field vocabulary centrally governed.
+function canRegisterNewField(adminLevel) {
+    return adminLevel === 0;
+}
+function fieldInUseAtDepths(field, buckets, byId) {
+    var depths = {};
+    buckets.forEach(function(b) {
+        if (b.field === field) depths[bucketDepth(b.id, byId)] = true;
+    });
+    return Object.keys(depths).map(Number);
+}
+
+// ── Admin identity resolution ──
+// ROOT_ADMIN_TOKEN is checked BEFORE adminGroups.json is even fetched — it
+// always works, independent of that file's existence or integrity. This is
+// the break-glass safety net: since delegation lives in a GitHub file the
+// Worker itself writes to, there must be one credential that can't be
+// locked out by a bad write to that file. Never store ROOT_ADMIN_TOKEN's
+// value inside adminGroups.json — the two mechanisms stay fully separate.
+async function resolveAdminIdentity(request, env) {
+    var m = /^Bearer\s+(.+)$/.exec(request.headers.get('Authorization') || '');
+    if (!m) return null;
+    var presented = m[1].trim();
+    if (!presented) return null;
+    if (env.ROOT_ADMIN_TOKEN && presented === env.ROOT_ADMIN_TOKEN) {
+        return {
+            isRoot: true, bucketId: null, label: 'root', groupId: null, memberId: null,
+            allowPeerAdminCreation: true, allowChildAdminCreation: true,
+        };
+    }
+    var groupsDoc;
+    try {
+        groupsDoc = (await loadAdminGroupsDoc(env)).doc;
+    } catch (e) {
+        return null; // corrupt/unreachable adminGroups.json fails closed for scoped tokens
+    }
+    var hash = await sha256Hex(presented);
+    for (var i = 0; i < groupsDoc.groups.length; i++) {
+        var g = groupsDoc.groups[i];
+        var member = (g.members || []).find(function(mm) { return mm.tokenHash === hash; });
+        if (member) {
+            return {
+                isRoot: false, bucketId: g.bucketId, label: member.label,
+                groupId: g.id, memberId: member.id,
+                allowPeerAdminCreation: !!g.allowPeerAdminCreation,
+                allowChildAdminCreation: !!g.allowChildAdminCreation,
+            };
+        }
+    }
+    return null;
+}
+
+function identityLevel(identity, byId) {
+    return identity.isRoot ? 0 : bucketDepth(identity.bucketId, byId);
+}
+
+// Defense-in-depth before any permissions.json write — a malformed write
+// here breaks live access for every user of the tool, unlike a typical
+// CRUD bug, so this is checked regardless of which section actually
+// changed.
+function validatePermissionsShape(doc) {
+    if (!doc || typeof doc !== 'object') throw new Error('invalid permissions document');
+    if (!Array.isArray(doc.maximoHosts)) throw new Error('maximoHosts must be an array');
+    if (!Array.isArray(doc.override)) throw new Error('override must be an array');
+    if (!Array.isArray(doc.blacklist)) throw new Error('blacklist must be an array');
+    if (!Array.isArray(doc.allow)) throw new Error('allow must be an array');
+    if (!doc.extraGrants || typeof doc.extraGrants !== 'object') throw new Error('extraGrants must be an object');
+    doc.blacklist.forEach(function(entry, i) {
+        if (!entry || !Array.isArray(entry.conditions)) throw new Error('blacklist[' + i + '] missing conditions array');
+    });
+    doc.allow.forEach(function(entry, i) {
+        if (!entry || !Array.isArray(entry.conditions)) throw new Error('allow[' + i + '] missing conditions array');
+    });
+    doc.override.forEach(function(entry, i) {
+        if (!entry || !entry.username) throw new Error('override[' + i + '] missing username');
+    });
+}
+
+function requireAdmin(identity) {
+    if (!identity) {
+        var err = new Error('missing or invalid admin token');
+        err.status = 401;
+        throw err;
+    }
+}
+function requireRoot(identity) {
+    requireAdmin(identity);
+    if (!identity.isRoot) {
+        var err = new Error('root admin only');
+        err.status = 403;
+        throw err;
+    }
+}
+function forbid(message) {
+    var err = new Error(message);
+    err.status = 403;
+    throw err;
+}
+function badRequest(message) {
+    var err = new Error(message);
+    err.status = 400;
+    throw err;
+}
+function notFound(message) {
+    var err = new Error(message);
+    err.status = 404;
+    throw err;
+}
+
+// ── /admin/permissions ──
+async function handleAdminGetPermissions(request, env) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var permsLoad = await loadPermissionsLive(env);
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var level = identityLevel(identity, byId);
+
+    if (identity.isRoot) {
+        return json({
+            role: 'root', label: identity.label, level: level, bucketId: null,
+            override: permsLoad.doc.override, blacklist: permsLoad.doc.blacklist,
+            allow: permsLoad.doc.allow, extraGrants: permsLoad.doc.extraGrants,
+            maximoHosts: permsLoad.doc.maximoHosts,
+        });
+    }
+    var allow = permsLoad.doc.allow.filter(function(e) { return isAtOrBelow(e.bucketId, identity.bucketId, byId); });
+    var blacklist = permsLoad.doc.blacklist.filter(function(e) { return isAtOrBelow(e.bucketId, identity.bucketId, byId); });
+    return json({
+        role: 'scoped', label: identity.label, level: level, bucketId: identity.bucketId,
+        allow: allow, blacklist: blacklist,
+        hidden: {
+            override: permsLoad.doc.override.length,
+            extraGrants: Object.keys(permsLoad.doc.extraGrants).length,
+            maximoHosts: permsLoad.doc.maximoHosts.length,
+            allow: permsLoad.doc.allow.length - allow.length,
+            blacklist: permsLoad.doc.blacklist.length - blacklist.length,
+        },
+    });
+}
+
+function buildEntryConditions(bucketId, ownConditions, byId) {
+    return bucketConditionChain(bucketId, byId).concat(ownConditions || []);
+}
+
+async function handleAdminUpsertPermissionEntry(request, env, section) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    if (section === 'override' || section === 'extraGrants') requireRoot(identity);
+
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+
+    var permsLoad = await loadPermissionsLive(env);
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var level = identityLevel(identity, byId);
+    var now = new Date().toISOString();
+
+    if (section === 'extraGrants') {
+        var username = String(body.username || '').trim();
+        if (!username) badRequest('username required');
+        permsLoad.doc.extraGrants[username] = Array.isArray(body.grants) ? body.grants : [];
+        validatePermissionsShape(permsLoad.doc);
+        await writePrivateFile(env, 'permissions.json', JSON.stringify(permsLoad.doc, null, 2), permsLoad.sha,
+            'admin: ' + identity.label + ' set extraGrants for ' + username);
+        return json({ ok: true, username: username, grants: permsLoad.doc.extraGrants[username] });
+    }
+
+    if (section === 'override') {
+        var list = permsLoad.doc.override;
+        var entry = body.id ? list.find(function(e) { return e.id === body.id; }) : null;
+        if (body.id && !entry) return notFound('override entry not found');
+        var newEntry = {
+            id: entry ? entry.id : genId('ovr'),
+            username: String(body.username || '').trim(),
+            grants: Array.isArray(body.grants) ? body.grants : ['user'],
+            bucketId: body.bucketId || null,
+            lastModifiedBy: identity.label, lastModifiedAt: now,
+        };
+        if (!newEntry.username) badRequest('username required');
+        if (entry) { Object.assign(entry, newEntry); } else { list.push(newEntry); }
+        validatePermissionsShape(permsLoad.doc);
+        await writePrivateFile(env, 'permissions.json', JSON.stringify(permsLoad.doc, null, 2), permsLoad.sha,
+            'admin: ' + identity.label + ' ' + (entry ? 'updated' : 'created') + ' override for ' + newEntry.username);
+        return json({ ok: true, entry: newEntry });
+    }
+
+    // section === 'allow' | 'blacklist'
+    var bucketId = body.bucketId != null ? body.bucketId : null;
+    if (!identity.isRoot && !isAtOrBelow(bucketId, identity.bucketId, byId)) forbid('target bucket outside your scope');
+    var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions : [];
+    ownConditions.forEach(function(c) {
+        if (!canUseField(level, c.field, bucketsLoad.doc.fieldLevels)) forbid('field "' + c.field + '" not permitted at your level');
+    });
+
+    var arr = permsLoad.doc[section];
+    var existing = body.id ? arr.find(function(e) { return e.id === body.id; }) : null;
+    if (body.id && !existing) return notFound(section + ' entry not found');
+    // Editing an entry's bucketId requires containment on BOTH the entry's
+    // current bucket and its new one — otherwise a scoped admin could
+    // retarget a rule they don't control into their own branch.
+    if (existing && !identity.isRoot && !isAtOrBelow(existing.bucketId, identity.bucketId, byId)) forbid('existing entry outside your scope');
+
+    var conditions = buildEntryConditions(bucketId, ownConditions, byId);
+    var newEntry2 = {
+        id: existing ? existing.id : genId(section === 'allow' ? 'alw' : 'blk'),
+        bucketId: bucketId,
+        conditions: conditions,
+        lastModifiedBy: identity.label, lastModifiedAt: now,
+    };
+    if (section === 'allow') newEntry2.grants = Array.isArray(body.grants) ? body.grants : ['user'];
+    if (existing) { Object.assign(existing, newEntry2); } else { arr.push(newEntry2); }
+    validatePermissionsShape(permsLoad.doc);
+    await writePrivateFile(env, 'permissions.json', JSON.stringify(permsLoad.doc, null, 2), permsLoad.sha,
+        'admin: ' + identity.label + ' ' + (existing ? 'updated' : 'created') + ' ' + section + ' rule (bucket ' + (bucketId || 'root') + ')');
+    return json({ ok: true, entry: newEntry2 });
+}
+
+async function handleAdminDeletePermissionEntry(request, env, section, id) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    if (section === 'override' || section === 'extraGrants') requireRoot(identity);
+
+    var permsLoad = await loadPermissionsLive(env);
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+
+    if (section === 'extraGrants') {
+        var username = decodeURIComponent(id);
+        delete permsLoad.doc.extraGrants[username];
+        validatePermissionsShape(permsLoad.doc);
+        await writePrivateFile(env, 'permissions.json', JSON.stringify(permsLoad.doc, null, 2), permsLoad.sha,
+            'admin: ' + identity.label + ' removed extraGrants for ' + username);
+        return json({ ok: true });
+    }
+
+    var arr = permsLoad.doc[section];
+    var idx = arr.findIndex(function(e) { return e.id === id; });
+    if (idx === -1) return notFound(section + ' entry not found');
+    var target = arr[idx];
+    if (section !== 'override' && !identity.isRoot && !isAtOrBelow(target.bucketId, identity.bucketId, byId)) forbid('entry outside your scope');
+    arr.splice(idx, 1);
+    validatePermissionsShape(permsLoad.doc);
+    await writePrivateFile(env, 'permissions.json', JSON.stringify(permsLoad.doc, null, 2), permsLoad.sha,
+        'admin: ' + identity.label + ' deleted ' + section + ' entry ' + id);
+    return json({ ok: true });
+}
+
+// ── /admin/buckets ──
+async function handleAdminGetBuckets(request, env) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var visible = identity.isRoot ? bucketsLoad.doc.buckets :
+        bucketsLoad.doc.buckets.filter(function(b) { return isAtOrBelow(b.id, identity.bucketId, byId); });
+    return json({ buckets: visible, fieldLevels: bucketsLoad.doc.fieldLevels, level: identityLevel(identity, byId) });
+}
+
+async function handleAdminCreateBucket(request, env) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var level = identityLevel(identity, byId);
+    var parentId = body.parentId != null ? body.parentId : null;
+
+    if (!identity.isRoot && !isAtOrBelow(parentId, identity.bucketId, byId)) forbid('parent bucket outside your scope');
+    if (parentId == null && !identity.isRoot) forbid('only root can create a new top-level branch');
+    if (parentId != null && !byId[parentId]) notFound('parent bucket not found');
+
+    var field = String(body.field || '').trim();
+    if (!field) badRequest('field required');
+    var newDepth = parentId == null ? 1 : bucketDepth(parentId, byId) + 1;
+    var fieldLevels = bucketsLoad.doc.fieldLevels;
+    var fieldKnown = fieldLevels.hasOwnProperty(field);
+
+    if (!fieldKnown) {
+        if (!canRegisterNewField(level)) forbid('field "' + field + '" is not registered — only root can introduce a new field');
+        fieldLevels[field] = newDepth;
+    } else {
+        if (fieldLevels[field] !== newDepth) badRequest('field "' + field + '" is registered at level ' + fieldLevels[field] + ', not ' + newDepth);
+        if (!canUseField(level, field, fieldLevels)) forbid('field "' + field + '" not permitted at your level');
+    }
+
+    var newBucket = {
+        id: genId('bkt'), parentId: parentId, label: String(body.label || field),
+        field: field, op: String(body.op || 'eq'), value: body.value != null ? body.value : '',
+        configProfileId: body.configProfileId || null,
+        createdBy: identity.label, createdAt: new Date().toISOString(),
+    };
+    bucketsLoad.doc.buckets.push(newBucket);
+    await writePrivateFile(env, 'buckets.json', JSON.stringify(bucketsLoad.doc, null, 2), bucketsLoad.sha,
+        'admin: ' + identity.label + ' created bucket "' + newBucket.label + '"');
+    return json({ ok: true, bucket: newBucket });
+}
+
+async function handleAdminPatchBucket(request, env, id) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var level = identityLevel(identity, byId);
+    var bucket = byId[id];
+    if (!bucket) return notFound('bucket not found');
+    if (!isBelow(id, identity.bucketId, byId)) forbid('bucket outside your scope (or is your own node — bucket CRUD is strictly below, not at, your own node)');
+
+    if (body.field !== undefined && body.field !== bucket.field) {
+        var newField = String(body.field).trim();
+        var depth = bucketDepth(id, byId);
+        var fieldLevels = bucketsLoad.doc.fieldLevels;
+        if (!fieldLevels.hasOwnProperty(newField)) {
+            if (!canRegisterNewField(level)) forbid('field "' + newField + '" is not registered — only root can introduce a new field');
+            fieldLevels[newField] = depth;
+        } else if (fieldLevels[newField] !== depth) {
+            badRequest('field "' + newField + '" is registered at level ' + fieldLevels[newField] + ', not ' + depth);
+        } else if (!canUseField(level, newField, fieldLevels)) {
+            forbid('field "' + newField + '" not permitted at your level');
+        }
+        bucket.field = newField;
+    }
+    if (body.op !== undefined) bucket.op = String(body.op);
+    if (body.value !== undefined) bucket.value = body.value;
+    if (body.label !== undefined) bucket.label = String(body.label);
+    if (body.configProfileId !== undefined) bucket.configProfileId = body.configProfileId || null;
+    bucket.lastModifiedBy = identity.label;
+    bucket.lastModifiedAt = new Date().toISOString();
+
+    await writePrivateFile(env, 'buckets.json', JSON.stringify(bucketsLoad.doc, null, 2), bucketsLoad.sha,
+        'admin: ' + identity.label + ' updated bucket "' + bucket.label + '"');
+    return json({ ok: true, bucket: bucket });
+}
+
+async function handleAdminDeleteBucket(request, env, id) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var url = new URL(request.url);
+    var cascade = url.searchParams.get('cascade') === 'true';
+
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    if (!byId[id]) return notFound('bucket not found');
+    if (!isBelow(id, identity.bucketId, byId)) forbid('bucket outside your scope');
+
+    var descendantIds = bucketsLoad.doc.buckets.filter(function(b) { return isAtOrBelow(b.id, id, byId); }).map(function(b) { return b.id; });
+    var hasChildren = descendantIds.length > 1;
+
+    var permsLoad = await loadPermissionsLive(env);
+    var referencingGrants = permsLoad.doc.allow.filter(function(e) { return descendantIds.indexOf(e.bucketId) !== -1; })
+        .concat(permsLoad.doc.blacklist.filter(function(e) { return descendantIds.indexOf(e.bucketId) !== -1; })).length;
+
+    if ((hasChildren || referencingGrants > 0) && !cascade) {
+        return json({ ok: false, error: 'bucket has children or referencing grant entries — pass ?cascade=true to delete the whole subtree' }, 409);
+    }
+
+    bucketsLoad.doc.buckets = bucketsLoad.doc.buckets.filter(function(b) { return descendantIds.indexOf(b.id) === -1; });
+    await writePrivateFile(env, 'buckets.json', JSON.stringify(bucketsLoad.doc, null, 2), bucketsLoad.sha,
+        'admin: ' + identity.label + ' deleted bucket ' + id + (cascade ? ' (cascade)' : ''));
+
+    if (!cascade) return json({ ok: true });
+
+    // Non-atomic follow-up writes — documented limitation (see
+    // PERMISSIONS_GUIDE.md / ARCHITECTURE.md): the bucket subtree is
+    // already gone at this point regardless of whether these succeed. An
+    // orphaned grant/group's bucketId simply fails every containment
+    // check closed from now on either way.
+    var warnings = [];
+    try {
+        permsLoad.doc.allow = permsLoad.doc.allow.filter(function(e) { return descendantIds.indexOf(e.bucketId) === -1; });
+        permsLoad.doc.blacklist = permsLoad.doc.blacklist.filter(function(e) { return descendantIds.indexOf(e.bucketId) === -1; });
+        validatePermissionsShape(permsLoad.doc);
+        await writePrivateFile(env, 'permissions.json', JSON.stringify(permsLoad.doc, null, 2), permsLoad.sha,
+            'admin: ' + identity.label + ' removed grants for deleted bucket subtree ' + id);
+    } catch (e) {
+        warnings.push('subtree deleted, but removing its grant entries failed: ' + String(e && e.message || e) + ' — reload and clean up manually');
+    }
+    try {
+        var groupsLoad = await loadAdminGroupsDoc(env);
+        var before = groupsLoad.doc.groups.length;
+        groupsLoad.doc.groups = groupsLoad.doc.groups.filter(function(g) { return descendantIds.indexOf(g.bucketId) === -1; });
+        if (groupsLoad.doc.groups.length !== before) {
+            await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
+                'admin: ' + identity.label + ' removed admin groups for deleted bucket subtree ' + id);
+        }
+    } catch (e) {
+        warnings.push('subtree deleted, but removing its admin group(s) failed: ' + String(e && e.message || e) + ' — some admin(s) may still hold now-orphaned (non-functional) tokens, reload and revoke manually');
+    }
+    return json({ ok: true, warnings: warnings });
+}
+
+async function handleAdminResolvedConfig(request, env, id) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    if (!byId[id]) return notFound('bucket not found');
+    if (!identity.isRoot && !isAtOrBelow(id, identity.bucketId, byId)) forbid('bucket outside your scope');
+    var configProfileId = resolveConfigForBucket(id, bucketsLoad.doc.buckets);
+    return json({ bucketId: id, configProfileId: configProfileId });
+}
+
+async function handleAdminPatchFieldLevels(request, env) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+    var field = String(body.field || '').trim();
+    var newLevel = Number(body.level);
+    if (!field) badRequest('field required');
+    if (!Number.isInteger(newLevel) || newLevel < 1) badRequest('level must be a positive integer');
+
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var level = identityLevel(identity, byId);
+    var fieldLevels = bucketsLoad.doc.fieldLevels;
+    var isNew = !fieldLevels.hasOwnProperty(field);
+
+    if (isNew) {
+        if (!canRegisterNewField(level)) forbid('only root can register a new field');
+    } else if (!canReassignField(level, field, fieldLevels)) {
+        forbid('must be strictly more senior than this field\'s current level to reassign it');
+    }
+    var inUseDepths = fieldInUseAtDepths(field, bucketsLoad.doc.buckets, byId);
+    if (inUseDepths.some(function(d) { return d !== newLevel; })) {
+        badRequest('existing bucket(s) at a different depth already use field "' + field + '" — cannot reassign without breaking them');
+    }
+
+    fieldLevels[field] = newLevel;
+    await writePrivateFile(env, 'buckets.json', JSON.stringify(bucketsLoad.doc, null, 2), bucketsLoad.sha,
+        'admin: ' + identity.label + ' set field "' + field + '" to level ' + newLevel);
+    return json({ ok: true, field: field, level: newLevel });
+}
+
+// ── /admin/groups ──
+async function handleAdminGetGroups(request, env) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var groupsLoad = await loadAdminGroupsDoc(env);
+    var visible = (identity.isRoot ? groupsLoad.doc.groups :
+        groupsLoad.doc.groups.filter(function(g) { return isAtOrBelow(g.bucketId, identity.bucketId, byId); }))
+        .map(function(g) {
+            return {
+                id: g.id, bucketId: g.bucketId, label: g.label,
+                allowPeerAdminCreation: !!g.allowPeerAdminCreation, allowChildAdminCreation: !!g.allowChildAdminCreation,
+                members: (g.members || []).map(function(m) { return { id: m.id, label: m.label, createdAt: m.createdAt, createdBy: m.createdBy }; }),
+            };
+        });
+    return json({ groups: visible });
+}
+
+async function handleAdminCreateGroup(request, env) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    if (!identity.isRoot && !identity.allowChildAdminCreation) forbid('your group is not permitted to create child admin groups');
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var bucketId = body.bucketId;
+    if (!bucketId || !byId[bucketId]) return notFound('bucket not found');
+    if (!isBelow(bucketId, identity.bucketId, byId)) forbid('bucket outside your scope (child-group creation targets a descendant bucket, not your own)');
+
+    var groupsLoad = await loadAdminGroupsDoc(env);
+    var newGroup = {
+        id: genId('grp'), bucketId: bucketId, label: String(body.label || 'Admins'),
+        allowPeerAdminCreation: !!body.allowPeerAdminCreation, allowChildAdminCreation: !!body.allowChildAdminCreation,
+        members: [],
+    };
+    groupsLoad.doc.groups.push(newGroup);
+    await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
+        'admin: ' + identity.label + ' created admin group "' + newGroup.label + '"');
+    return json({ ok: true, group: newGroup });
+}
+
+async function handleAdminAddGroupMember(request, env, groupId) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+
+    var groupsLoad = await loadAdminGroupsDoc(env);
+    var group = groupsLoad.doc.groups.find(function(g) { return g.id === groupId; });
+    if (!group) return notFound('group not found');
+    // Peer creation is specifically "add a member to YOUR OWN group" — not
+    // any group in scope. Root bypasses this entirely.
+    if (!identity.isRoot) {
+        if (identity.groupId !== groupId) forbid('you can only add members to your own group');
+        if (!identity.allowPeerAdminCreation) forbid('your group is not permitted to create peer admins');
+    }
+
+    var token = genAdminToken();
+    var tokenHash = await sha256Hex(token);
+    var member = {
+        id: genId('mem'), tokenHash: tokenHash, label: String(body.label || 'Admin'),
+        createdAt: new Date().toISOString(), createdBy: identity.label,
+    };
+    group.members.push(member);
+    await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
+        'admin: ' + identity.label + ' added member "' + member.label + '" to group "' + group.label + '"');
+    return json({ ok: true, member: { id: member.id, label: member.label }, token: token });
+}
+
+async function handleAdminDeleteGroupMember(request, env, groupId, memberId) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var groupsLoad = await loadAdminGroupsDoc(env);
+    var group = groupsLoad.doc.groups.find(function(g) { return g.id === groupId; });
+    if (!group) return notFound('group not found');
+    if (!identity.isRoot && !isAtOrBelow(group.bucketId, identity.bucketId, byId)) forbid('group outside your scope');
+
+    var before = group.members.length;
+    group.members = group.members.filter(function(m) { return m.id !== memberId; });
+    if (group.members.length === before) return notFound('member not found');
+    await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
+        'admin: ' + identity.label + ' revoked a member from group "' + group.label + '"');
+    return json({ ok: true });
+}
+
+async function handleAdminDeleteGroup(request, env, groupId) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var groupsLoad = await loadAdminGroupsDoc(env);
+    var group = groupsLoad.doc.groups.find(function(g) { return g.id === groupId; });
+    if (!group) return notFound('group not found');
+    if (!identity.isRoot && !isAtOrBelow(group.bucketId, identity.bucketId, byId)) forbid('group outside your scope');
+
+    groupsLoad.doc.groups = groupsLoad.doc.groups.filter(function(g) { return g.id !== groupId; });
+    await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
+        'admin: ' + identity.label + ' deleted admin group "' + group.label + '"');
+    return json({ ok: true });
+}
+
+// ── /admin/version (public repo, root-only) ──
+async function handleAdminGetVersion(request, env) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireRoot(identity);
+    var f = await fetchPublicFileWithSha(env, 'version.json');
+    if (!f.exists) return notFound('version.json not found');
+    return json({ doc: JSON.parse(f.text) });
+}
+
+async function handleAdminPostVersion(request, env) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireRoot(identity);
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+    var doc = body.doc;
+    if (!doc || !doc.channels || !Array.isArray(doc.versions)) badRequest('invalid version document');
+    var known = doc.versions.map(function(v) { return v.version; });
+    if (known.indexOf(doc.latest) === -1) badRequest('"latest" (' + doc.latest + ') does not match any versions[].version');
+    Object.keys(doc.channels).forEach(function(ch) {
+        if (known.indexOf(doc.channels[ch]) === -1) badRequest('channels.' + ch + ' (' + doc.channels[ch] + ') does not match any versions[].version');
+    });
+
+    var f = await fetchPublicFileWithSha(env, 'version.json');
+    await writePublicFile(env, 'version.json', JSON.stringify(doc, null, 2), f.sha,
+        'admin: ' + identity.label + ' updated version.json');
+    return json({ ok: true });
+}
+
+// ── Admin shell ──
+async function handleAdminShell(env, ctx) {
+    try {
+        var html = await cachedFetchPrivateFile(env, ctx, 'admin.html', null, 15);
+        return new Response(html, {
+            status: 200,
+            headers: Object.assign({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }, corsHeaders()),
+        });
+    } catch (e) {
+        return new Response('Admin page unavailable.', { status: 502, headers: corsHeaders() });
+    }
+}
+
+// ── Admin routing ──
+async function routeAdmin(request, env, ctx, pathname) {
+    var method = request.method;
+    if (pathname === '/admin' && method === 'GET') return handleAdminShell(env, ctx);
+
+    if (pathname === '/admin/permissions' && method === 'GET') return handleAdminGetPermissions(request, env);
+    var m1 = /^\/admin\/permissions\/([a-zA-Z]+)$/.exec(pathname);
+    if (m1 && method === 'POST') return handleAdminUpsertPermissionEntry(request, env, m1[1]);
+    var m2 = /^\/admin\/permissions\/([a-zA-Z]+)\/([^/]+)$/.exec(pathname);
+    if (m2 && method === 'DELETE') return handleAdminDeletePermissionEntry(request, env, m2[1], m2[2]);
+
+    if (pathname === '/admin/buckets' && method === 'GET') return handleAdminGetBuckets(request, env);
+    if (pathname === '/admin/buckets' && method === 'POST') return handleAdminCreateBucket(request, env);
+    var m3 = /^\/admin\/buckets\/([^/]+)\/resolved-config$/.exec(pathname);
+    if (m3 && method === 'GET') return handleAdminResolvedConfig(request, env, m3[1]);
+    var m4 = /^\/admin\/buckets\/([^/]+)$/.exec(pathname);
+    if (m4 && method === 'PATCH') return handleAdminPatchBucket(request, env, m4[1]);
+    if (m4 && method === 'DELETE') return handleAdminDeleteBucket(request, env, m4[1]);
+
+    if (pathname === '/admin/field-levels' && method === 'PATCH') return handleAdminPatchFieldLevels(request, env);
+
+    if (pathname === '/admin/groups' && method === 'GET') return handleAdminGetGroups(request, env);
+    if (pathname === '/admin/groups' && method === 'POST') return handleAdminCreateGroup(request, env);
+    var m5 = /^\/admin\/groups\/([^/]+)\/members$/.exec(pathname);
+    if (m5 && method === 'POST') return handleAdminAddGroupMember(request, env, m5[1]);
+    var m6 = /^\/admin\/groups\/([^/]+)\/members\/([^/]+)$/.exec(pathname);
+    if (m6 && method === 'DELETE') return handleAdminDeleteGroupMember(request, env, m6[1], m6[2]);
+    var m7 = /^\/admin\/groups\/([^/]+)$/.exec(pathname);
+    if (m7 && method === 'DELETE') return handleAdminDeleteGroup(request, env, m7[1]);
+
+    if (pathname === '/admin/version' && method === 'GET') return handleAdminGetVersion(request, env);
+    if (pathname === '/admin/version' && method === 'POST') return handleAdminPostVersion(request, env);
+
+    return json({ error: 'not found' }, 404);
+}
+
 export default {
     async fetch(request, env, ctx) {
         if (request.method === 'OPTIONS') {
@@ -368,9 +1254,13 @@ export default {
             if (url.pathname === '/feedback' && request.method === 'POST') {
                 return await handleFeedback(request, env);
             }
+            if (url.pathname === '/admin' || url.pathname.indexOf('/admin/') === 0) {
+                return await routeAdmin(request, env, ctx, url.pathname);
+            }
             return json({ error: 'not found' }, 404);
         } catch (err) {
-            return json({ error: 'server error', message: String(err && err.message || err) }, 500);
+            var status = (err && err.status) || 500;
+            return json({ error: status === 500 ? 'server error' : err.message, message: String(err && err.message || err) }, status);
         }
     },
 };
