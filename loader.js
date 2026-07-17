@@ -64,7 +64,12 @@
                 country: d.country || '',
                 insertSite: d.insertSite || d.defaultSite || '',
                 langcode: d.langcode || '',
-                displayName: d.displayName || d.displayname || ''
+                displayName: d.displayName || d.displayname || '',
+                defaultSiteDescription: d.defaultSiteDescription || '',
+                primaryEmail: d.primaryemail || d.email || '',
+                city: d.city || '',
+                firstName: d.firstname || '',
+                lastName: d.lastname || ''
             };
         });
     }

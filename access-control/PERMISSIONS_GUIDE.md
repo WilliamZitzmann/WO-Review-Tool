@@ -29,6 +29,13 @@ Pulled from Maximo's `whoami`, mapped to these canonical names:
 | `insertSite` | `insertSite` | `AVWP` |
 | `langcode` | `langcode` | `EN` |
 | `displayName` | `displayName` | `Zitzmann, William` |
+| `defaultSiteDescription` | `defaultSiteDescription` | `AbbVie Westport - EUR` |
+| `primaryEmail` | `primaryemail` (falls back to `email`) | `william.zitzmann@abbvie.com` |
+| `city` | `city` | `Westport` |
+| `firstName` | `firstname` | `William` |
+| `lastName` | `lastname` | `Zitzmann` |
+
+These 11 are what `loader.js`'s `readWhoami()` currently forwards — the raw whoami response actually has ~30 fields (org code, timezone, phone, etc.); anything not in this table needs a small `loader.js` change first (add a line to the object it returns) before a rule can reference it, same as the "Onboarding a second company" caveat below. Note there's **no workgroup/department/craft field** in the real response — an earlier design sketch assumed a 4-level company→country→site→workgroup hierarchy, but that 4th level doesn't correspond to anything whoami actually returns (the closest thing, `defaultOrg`/`insertOrg`, is an org code like `ORG19`, not a workgroup). Today the real hierarchy tops out at site.
 
 The Worker only asks the browser to send whichever of these fields your rules actually reference (checked automatically — you don't manage this list yourself), so adding a condition on a new field just works, *as long as `loader.js` actually populates that field name from Maximo's raw whoami response*. A field outside this table (e.g. a custom `workgroup` attribute) needs a small `loader.js` change first — see "Onboarding a second company" below for the same caveat in a different context.
 

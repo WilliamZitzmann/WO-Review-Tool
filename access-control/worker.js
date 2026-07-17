@@ -171,7 +171,7 @@
 
 const TOKEN_TTL_MS = 2 * 60 * 1000; // 2 minutes — used almost immediately after issue
 const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours — bounds a left-open tab; sessionStorage's own tab-close boundary is the more common expiry in practice
-const CANONICAL_FIELDS = ['username', 'email', 'country', 'insertSite', 'langcode', 'displayName'];
+const CANONICAL_FIELDS = ['username', 'email', 'country', 'insertSite', 'langcode', 'displayName', 'defaultSiteDescription', 'primaryEmail', 'city', 'firstName', 'lastName'];
 
 function corsHeaders() {
     return {
