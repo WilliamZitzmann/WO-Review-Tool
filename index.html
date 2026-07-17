@@ -1068,10 +1068,11 @@ rows.forEach(<span class="kw">function</span>(r) {
     <tbody>
       <tr><td><strong>Field Rows</strong></td><td>Registered fields, arranged in rows — group several per row for a compact layout, or one per row for long values</td></tr>
       <tr><td><strong>Variable Fields</strong></td><td>Variable values, shown alongside your other fields</td></tr>
-      <tr><td><strong>Linked Table</strong></td><td>A captured table's rows, inline, with a column-visibility toggle</td></tr>
+      <tr><td><strong>Linked Tables</strong></td><td>Any number of tables' rows, inline, each with its own column-visibility toggle and click-to-sort column headers. A scanned table, a custom table, or an API table (Tables tab) can all be linked — pick as many as you want with the checklist in Setup &gt; Groups. With more than one, each gets its own small label so they stay distinguishable</td></tr>
       <tr><td><strong>Rules</strong></td><td>Tick which rules this group references — their status blocks appear inside, and their statuses drive the group's badge</td></tr>
     </tbody>
   </table>
+  <p>Click a linked table's column header to sort by it — click again to reverse. Sort and hidden-column choices are remembered per table, per group, and are purely local display preferences (not part of the shared config).</p>
 
   <h3>Header Message</h3>
   <p>Turn on "Show inline header message" to put a short line next to the group's title. Three types:</p>
@@ -1134,9 +1135,10 @@ rows.forEach(<span class="kw">function</span>(r) {
   </div>
 
   <h3>Table &amp; Dialog Capture</h3>
-  <p>When a scan target's Wait Table (or a group's Linked Table) names a table, the tool reads its rows directly off the page, available in formulas via <code>T('Table Name')</code>, <code>rowCount(...)</code>, <code>col(...)</code>, <code>has(...)</code>, and <code>lookup(...)</code> (see the <a href="#s17">Formula Reference</a>). A Dialog-type target opens a Maximo popup instead of switching tabs, captures data the same way, then dismisses it automatically — you won't see it stay open.</p>
-  <p>Setup's <b>Tables</b> tab lists every table your Groups/Scan config references and lets you give it a friendlier display name. It also lets you build a <b>custom table</b> — small hand-entered lookup data that didn't come from a Maximo scan (e.g. part numbers, cost centers) — which formulas can read with the exact same <code>T()</code>/<code>col()</code>/<code>has()</code>/<code>lookup()</code> functions as a scanned table. It edits like a spreadsheet — right-click any cell to add or delete a row, column, or clear that cell.</p>
-  <p>The Tables tab also has an <b>API Tables</b> section <span class="tag-teal">requires the Maximo REST Data beta feature</span> — a table backed by a live REST lookup instead of a scan or hand-typed rows: recent work orders or downtime history for an asset. You give it a Source, and formulas for which asset/site to pull (so the same table definition can follow whichever WO you're currently reviewing). Once set up, it reads through <code>T()</code>/<code>lookup()</code>/<code>col()</code> exactly like any other table — see <a href="#s15">Beta Features</a>.</p>
+  <p>When a scan target's Wait Table (or one of a group's Linked Tables) names a table, the tool reads its rows directly off the page, available in formulas via <code>T('Table Name')</code>, <code>rowCount(...)</code>, <code>col(...)</code>, <code>has(...)</code>, and <code>lookup(...)</code> (see the <a href="#s17">Formula Reference</a>). A Dialog-type target opens a Maximo popup instead of switching tabs, captures data the same way, then dismisses it automatically — you won't see it stay open.</p>
+  <p>Setup's <b>Tables</b> tab lists every table your Groups/Scan config references and lets you give it a friendlier display name. It also lets you build a <b>custom table</b> — small hand-entered lookup data that didn't come from a Maximo scan (e.g. part numbers, cost centers) — which formulas can read with the exact same <code>T()</code>/<code>col()</code>/<code>has()</code>/<code>lookup()</code> functions as a scanned table. It edits like a spreadsheet — use the <b>+ Row</b>/<b>+ Col</b> buttons, or right-click any cell to add or delete a row, column, or clear that cell.</p>
+  <p>Any custom table column can also be turned into a <b>formula column</b> instead of hand-typed values — right-click its header and choose <b>Make Formula Column</b>. Its formula runs fresh for every row, and can use <code>R('Column Name')</code> to read another column from that same row (e.g. decoding a typed-in code into a meaning via <code>domain(...)</code>) — see the <a href="#s17">Formula Reference</a>.</p>
+  <p>The Tables tab also has an <b>API Tables</b> section <span class="tag-teal">requires the Maximo REST Data beta feature</span> — a table backed by live/cached Maximo data instead of a scan or hand-typed rows. Three sources: recent work orders or downtime history for an asset (live REST, with formulas for which asset/site to pull so the table follows whichever WO you're reviewing), or a <b>Domain List</b> — any of Maximo's own domains (e.g. <code>WOCLASS</code>, <code>ABBWPRIORITY</code>) already cached in this browser, exposed as a full table (every column, not just the one <code>domain()</code> decodes) by just naming the domain. Once set up, any of these reads through <code>T()</code>/<code>lookup()</code>/<code>col()</code> exactly like any other table — see <a href="#s15">Beta Features</a>.</p>
 </section>
 
 <!-- ══════════════════════════════════════════════════ -->
@@ -1349,6 +1351,7 @@ rows.forEach(<span class="kw">function</span>(r) {
       <tr><td><code>assetWOHistory(assetnum, siteid, limit)</code></td><td><strong>[beta_2]</strong> Recent work orders for an asset, newest first, fetched live from Maximo's REST API - not from anything scanned. Returns <code>[]</code> if beta_2 is off, or until the fetch resolves</td></tr>
       <tr><td><code>assetDowntimeHistory(assetnum, siteid)</code></td><td><strong>[beta_2]</strong> The asset's full downtime history (not just what's linked to the current WO) as an array of <code>{startdate, enddate}</code>, fetched live from Maximo's REST API. Returns <code>[]</code> if beta_2 is off, or until the fetch resolves</td></tr>
       <tr><td><code>V(id)</code></td><td>A variable's computed value, by ID or label</td></tr>
+      <tr><td><code>R(colName)</code></td><td>Only works inside a custom table's own formula column (Setup &gt; Tables) - reads another column's value from the row currently being computed</td></tr>
     </tbody>
   </table>
 

@@ -32,7 +32,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26197.2031z';
+    var BUILD_ID = '26198.0822z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -271,7 +271,7 @@
             title: 'Summary',
             layout: 'vertical',
             fields: ['Work Order :: Work Order', 'Work Order :: Description', 'Work Order :: Asset', 'Work Order :: Location', 'Work Order :: Work Type', 'Work Order :: Status'],
-            table: null,
+            tables: [],
             ruleRefs: [],
             defaultCollapsed: false
         }, {
@@ -279,7 +279,7 @@
             title: 'Time',
             layout: 'horizontal',
             fields: ['Work Order :: Actual Start', 'Work Order :: Actual Finish', 'Work Order :: Duration'],
-            table: null,
+            tables: [],
             ruleRefs: ['r_duration'],
             defaultCollapsed: false
         }, {
@@ -287,7 +287,7 @@
             title: 'Lot',
             layout: 'vertical',
             fields: ['Work Order :: Production Run Lot #'],
-            table: null,
+            tables: [],
             ruleRefs: ['r_lot'],
             defaultCollapsed: false
         }, {
@@ -295,7 +295,7 @@
             title: 'Downtime',
             layout: 'vertical',
             fields: [],
-            table: 'm69f3c12d',
+            tables: ['m69f3c12d'],
             ruleRefs: ['r_downtime'],
             defaultCollapsed: true
         }, {
@@ -303,7 +303,7 @@
             title: 'Related WOs',
             layout: 'vertical',
             fields: [],
-            table: 'Related Work Orders',
+            tables: ['Related Work Orders'],
             ruleRefs: ['r_related'],
             defaultCollapsed: true
         }, {
@@ -311,7 +311,7 @@
             title: 'Approvers',
             layout: 'vertical',
             fields: ['Approvers :: Approval Group 1', 'Approvers :: Approval Group 2', 'Approvers :: Approval Group 3'],
-            table: null,
+            tables: [],
             ruleRefs: ['r_approver'],
             defaultCollapsed: true
         }, {
@@ -319,7 +319,7 @@
             title: 'Labor',
             layout: 'vertical',
             fields: [],
-            table: 'Labor',
+            tables: ['Labor'],
             ruleRefs: [],
             defaultCollapsed: false
         }],
@@ -727,6 +727,24 @@
         return overrides[id] || KNOWN_TABLE_NAMES[id] || id;
     }
 
+    // Read accessor for a group's linked tables. Groups used to carry a
+    // single `table` (string|null) field - now `tables` (string[]), so a
+    // group can display more than one. Rather than migrating every saved
+    // config's stored shape (real risk on a live, single-source-of-truth
+    // config with no way to roll back a bad migration), every read goes
+    // through this: prefer `group.tables` if present, else wrap the legacy
+    // `group.table` in a single-element array, else empty. Never writes
+    // anything back - the Groups Setup tab is the only place that writes
+    // `group.tables` directly (see its multi-select), at which point that
+    // group is on the new shape for good; `group.table` itself is left
+    // alone (dead, unread) rather than deleted, since deleting it would be
+    // a write this accessor is deliberately not in the business of making.
+    function groupTables(group) {
+        if (!group) return [];
+        if (Array.isArray(group.tables)) return group.tables;
+        return group.table ? [group.table] : [];
+    }
+
     function findPrefixDoc(prefix) {
         var docs = findAllDocs();
         for (var i = 0; i < docs.length; i++) {
@@ -754,7 +772,14 @@
         });
         var cfg2 = getCfg();
         cfg2.groups.forEach(function(g) {
-            if (g.table && !tableGroups[g.table]) tableGroups[g.table] = [];
+            groupTables(g).forEach(function(t) {
+                // Custom/API tables (Tables tab) never come from a DOM scan —
+                // registering one here would make resolveTableRowsForDisplay()
+                // find a (wrongly) already-captured empty cache.tables[t]
+                // entry and never fall through to the real custom/API data.
+                if ((cfg2.customTables && cfg2.customTables[t]) || (cfg2.apiTables && cfg2.apiTables[t])) return;
+                if (!tableGroups[t]) tableGroups[t] = [];
+            });
         });
         var tables = {},
             tableErrors = {};
@@ -929,6 +954,30 @@
         return isNaN(n) ? null : n;
     }
 
+    // Click-to-sort for a group's displayed table (§ render()). Numeric-aware
+    // via the same toNumOrNull() sum()/avg()/toNumber() already use, so a
+    // column of "1,234"-style numbers sorts numerically instead of
+    // lexicographically (which would put "10" before "2") - falls back to a
+    // case-insensitive locale compare for anything that isn't numeric.
+    // Returns a new array; never mutates the resolved rows in place, since
+    // those can be the SAME array reference held in cache.tables (a live
+    // scan result) or returned straight through by resolveApiTable()'s
+    // cache.
+    function sortTableRows(rows, col, dir) {
+        var copy = rows.slice();
+        copy.sort(function(a, b) {
+            var av = a[col],
+                bv = b[col];
+            var an = toNumOrNull(av),
+                bn = toNumOrNull(bv);
+            var cmp = (an !== null && bn !== null) ?
+                (an - bn) :
+                String(av == null ? '' : av).localeCompare(String(bv == null ? '' : bv), undefined, { sensitivity: 'base' });
+            return cmp * dir;
+        });
+        return copy;
+    }
+
     // toNumber()/toString() — explicit type conversion for a formula, e.g.
     // a captured Maximo field is always a string even when it looks
     // numeric, so oneOf()/sum()/avg() or a numeric comparison can need this
@@ -994,7 +1043,7 @@
             if (data.tables && data.tables.hasOwnProperty(t)) return data.tables[t];
             var cfgNow = getCfg();
             var custom = cfgNow.customTables || {};
-            if (custom[t]) return custom[t].rows || [];
+            if (custom[t]) return resolveCustomTableRows(custom[t], data);
             var apiDef = (cfgNow.apiTables || {})[t];
             if (apiDef) return resolveApiTable(t, apiDef, data);
             return [];
@@ -2285,14 +2334,34 @@
     // help you verify would be useless the one time you actually need it
     // (before you've confirmed the feature works, you probably haven't
     // turned it on yet).
+    // In-memory cache of each domain's parsed localStorage entry, keyed by
+    // domain name. Domain lists are effectively static for a session (only
+    // Maximo itself re-caches them, and rarely mid-session) — re-parsing the
+    // same JSON blob on every single domain()/domain-table read (e.g. once
+    // per row of a scanned table, on every render) was pure waste. Keeps the
+    // raw string alongside the parsed value and only re-parses when that
+    // string actually changed, rather than never invalidating at all.
+    var domainRawCache = {};
+
+    function getDomainRaw(key) {
+        if (!key) return null;
+        var str = localStorage.getItem(key);
+        if (!str) return null;
+        var cached = domainRawCache[key];
+        if (cached && cached.str === str) return cached.parsed;
+        var parsed;
+        try {
+            parsed = JSON.parse(str);
+        } catch (e) {
+            parsed = null;
+        }
+        domainRawCache[key] = { str: str, parsed: parsed };
+        return parsed;
+    }
+
     function domainDecodeRaw(key, code) {
         if (!key || code == null || code === '') return '';
-        var raw;
-        try {
-            raw = JSON.parse(localStorage.getItem(key) || 'null');
-        } catch (e) {
-            return '';
-        }
+        var raw = getDomainRaw(key);
         if (!raw) return '';
         var codeStr = String(code);
         // Real shape, confirmed via __woBeta2Report() across 15 domains on
@@ -2346,6 +2415,42 @@
     function domainFn(key, code) {
         if (!isBetaFeatureOn('beta_2')) return '';
         return domainDecodeRaw(key, code);
+    }
+
+    // Every domain list is really just a table under the hood (rows + named
+    // columns — see domainDecodeRaw's shape comment above), but domain()
+    // only ever exposes a single column (description) for a single matched
+    // row. This turns the same cached/parsed data into a full array of row
+    // objects, so a domain list can be wired up as a Table (Tables tab >
+    // API Tables > source: "Domain List") and read with T()/col()/lookup()/
+    // count() like any other table — keeping every column (siteid, orgid,
+    // maxvalue, ...), not just the one domainDecodeRaw() happens to pick.
+    function domainTableRows(key) {
+        var raw = getDomainRaw(key);
+        if (!raw) return [];
+        if (Array.isArray(raw.data) && raw.attributes && typeof raw.attributes === 'object') {
+            var attrs = raw.attributes;
+            var names = Object.keys(attrs);
+            return raw.data.map(function(row) {
+                var obj = {};
+                names.forEach(function(name) {
+                    obj[name] = row[attrs[name]];
+                });
+                return obj;
+            });
+        }
+        if (Array.isArray(raw)) {
+            return raw.map(function(row) {
+                return (row && typeof row === 'object') ? row : { value: row };
+            });
+        }
+        if (raw && typeof raw === 'object') {
+            return Object.keys(raw).map(function(k) {
+                var v = raw[k];
+                return (v && typeof v === 'object') ? Object.assign({ value: k }, v) : { value: k, description: v };
+            });
+        }
+        return [];
     }
 
     // Raw fetchers (Promise-returning, no cache, no beta gate) — the actual
@@ -2425,16 +2530,76 @@
         return betaAssetDowntimeCache[key];
     }
 
+    // ── Custom table formula columns (cfg.customTables[id].columnFormulas) ──
+    // A custom table's columns are plain hand-typed values by default (see
+    // the Tables Setup tab), but any column can instead be marked a formula
+    // column — same formula text evaluated fresh for every row, with R(col)
+    // giving it access to that row's OTHER column values (its own table's
+    // T()/col()/lookup() would just recurse into itself). Not a general
+    // ARGN helper: R only exists inside this one evaluation, built fresh per
+    // call below rather than added to the shared ARGN/buildCtx used by
+    // runVariable/runFormula/actions/{{}} — those four entry points have no
+    // notion of "the current row" to bind it to. normalizeFormulaFunctionCase()
+    // is still applied so daysBetween/domain/etc. stay case-insensitive here
+    // too, just not R itself (kept uppercase-only, consistent with F/T/V).
+    var CT_ROW_ARGN = ARGN.concat(['R']);
+
+    function evalCustomTableColumnFormula(formula, row, data) {
+        if (!formula) return '';
+        try {
+            var c = buildCtx(data);
+            var R = function(colName) {
+                return row.hasOwnProperty(colName) ? row[colName] : '';
+            };
+            var av = [c.F, c.T, c.rowCount, c.col, c.has, c.lookup, c.count, c.isEmpty, c.notEmpty, c.ifBlank, c.toNumber, c.toString, c.trim, c.upper, c.lower, c.left, c.right, c.mid, c.sum, c.avg, c.today, c.hours, c.hoursBetween, c.daysBetween, c.oneOf, c.contains, c.matches, c.maxLaborHours, c.whoami, c.domain, c.assetWOHistory, c.assetDowntimeHistory, c.V, R];
+            var fn = Function.apply(null, CT_ROW_ARGN.concat(['return (' + normalizeFormulaFunctionCase(formula) + ');']));
+            var val = fn.apply(null, av);
+            return val == null ? '' : val;
+        } catch (e) {
+            return '#ERR';
+        }
+    }
+
+    // T()'s custom-table branch calls this instead of reading t.rows
+    // directly, so a table with no formula columns at all (the common case)
+    // is untouched — only rows with at least one formula column get rebuilt
+    // per read, since a formula column's value can depend on the current WO
+    // (F(), V(), other tables) and needs re-evaluating on every read, not
+    // just once when the row was typed.
+    function resolveCustomTableRows(t, data) {
+        var rows = t.rows || [];
+        var formulas = t.columnFormulas;
+        if (!formulas) return rows;
+        var formulaCols = Object.keys(formulas).filter(function(c) {
+            return formulas[c];
+        });
+        if (!formulaCols.length) return rows;
+        return rows.map(function(row) {
+            var out = {};
+            (t.columns || []).forEach(function(col) {
+                out[col] = row[col];
+            });
+            formulaCols.forEach(function(col) {
+                out[col] = evalCustomTableColumnFormula(formulas[col], row, data);
+            });
+            return out;
+        });
+    }
+
     // ── API tables (cfg.apiTables, beta_2 only) ──
     // A named table entry (Tables tab, "API Tables" section) that behaves
     // exactly like a scanned or custom table to T()/col()/has()/lookup()/
     // count()/rowCount() — but its rows come from a live REST fetch instead
     // of the DOM or hand-typed data. Definition shape:
-    // { source: 'assetWO'|'assetDowntime', assetFormula, siteFormula, limit }
+    // { source: 'assetWO'|'assetDowntime'|'domain', assetFormula, siteFormula, limit }
     // — assetFormula/siteFormula are themselves formula strings (e.g.
     // F('Work Order :: Asset')), evaluated fresh against the current scan
     // data every time the table is read, since the asset/site a rule needs
-    // varies per WO.
+    // varies per WO. source: 'domain' is the odd one out here — it isn't a
+    // REST fetch at all (domainTableRows() reads the same localStorage-cached
+    // domain list domain() does), so it resolves synchronously with no
+    // asset/site formulas and no entry in betaApiTableCache below (nothing
+    // to await, so nothing to cache a placeholder for).
     var betaApiTableCache = {};
 
     // Remembered purely as a convenience prefill for the Settings > Debug
@@ -2457,6 +2622,7 @@
 
     function resolveApiTable(id, def, data) {
         if (!isBetaFeatureOn('beta_2')) return [];
+        if (def.source === 'domain') return domainTableRows(def.domainKey);
         var assetnum = evalApiTableExpr(def.assetFormula, data);
         var siteid = evalApiTableExpr(def.siteFormula, data);
         if (!assetnum || !siteid) return [];
@@ -2477,6 +2643,25 @@
             render();
         }).catch(function() {});
         return betaApiTableCache[key];
+    }
+
+    // Same fallback chain T()'s buildCtx closure uses (scanned → custom →
+    // API), but reachable from render() for displaying a group's linked
+    // table(s) - render() has no `data` object shaped for buildCtx, but its
+    // own `cache` (which is exactly {fields, tables, ...}) already satisfies
+    // what resolveCustomTableRows()/resolveApiTable() need. Before this, a
+    // group could only ever display a SCANNED table (cache.tables) even
+    // though the Groups tab's own table picker already listed custom and
+    // API tables as valid choices — picking one silently rendered "No
+    // rows" forever, since nothing read customTables/apiTables at display
+    // time. This closes that gap.
+    function resolveTableRowsForDisplay(tableId, cfgNow, cache) {
+        if (cache.tables && cache.tables.hasOwnProperty(tableId)) return cache.tables[tableId];
+        var custom = (cfgNow.customTables || {})[tableId];
+        if (custom) return resolveCustomTableRows(custom, cache);
+        var apiDef = (cfgNow.apiTables || {})[tableId];
+        if (apiDef) return resolveApiTable(tableId, apiDef, cache);
+        return [];
     }
 
     // Clears the tool + its config on a confirmed revoke — deliberately
@@ -3617,7 +3802,12 @@
         });
         var cfg2 = getCfg();
         cfg2.groups.forEach(function(g) {
-            if (g.table && !(g.table in tableGroups)) tableGroups[g.table] = [];
+            groupTables(g).forEach(function(t) {
+                // See extractSnapshot()'s identical guard above - custom/API
+                // tables must never be registered as a scan target here.
+                if ((cfg2.customTables && cfg2.customTables[t]) || (cfg2.apiTables && cfg2.apiTables[t])) return;
+                if (!(t in tableGroups)) tableGroups[t] = [];
+            });
         });
         var tables = {},
             tableErrors = {};
@@ -4178,15 +4368,34 @@
         });
     };
 
-    function getGroupHiddenCols(gid) {
+    // Per-(group, table) display state: hidden columns + sort. Keyed by
+    // table id, not just group id, now that a group can display more than
+    // one table (see groupTables()) — two tables in the same group hiding/
+    // sorting independently, not sharing one flat state. Replaces the old
+    // single-table getGroupHiddenCols()/saveGroupHiddenCols() (gid-only
+    // keying) outright rather than migrating it forward — there's no
+    // sound way to guess which of a group's now-possibly-several tables an
+    // old flat hiddenCols array belonged to, and losing a hidden-column
+    // preference is a low-stakes reset (dev channel, easy to redo in one
+    // click) compared to guessing wrong and hiding columns on the wrong
+    // table.
+    function getGroupTableState(gid, tableId) {
         var gs = getGS();
-        return (gs[gid] && gs[gid].hiddenCols) || [];
+        var g = gs[gid] || {};
+        var ts = (g.tableState && g.tableState[tableId]) || {};
+        return {
+            hiddenCols: ts.hiddenCols || [],
+            sortCol: ts.sortCol || '',
+            sortDir: ts.sortDir || 1
+        };
     }
 
-    function saveGroupHiddenCols(gid, cols) {
+    function saveGroupTableState(gid, tableId, patch) {
         var gs = getGS();
         if (!gs[gid]) gs[gid] = {};
-        gs[gid].hiddenCols = cols;
+        if (!gs[gid].tableState) gs[gid].tableState = {};
+        var cur = gs[gid].tableState[tableId] || {};
+        gs[gid].tableState[tableId] = Object.assign({}, cur, patch);
         saveGS(gs);
     }
     var panel, bodyEl, footerAreaEl, statusEl, summaryEl, updateScrollShadows = function() {};
@@ -4989,8 +5198,12 @@
             "#__wo_dock .wo-table-wrap{overflow-x:auto;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);}" +
             "#__wo_dock table.wo-table{width:100%;border-collapse:collapse;font-size:11px;}" +
             "#__wo_dock table.wo-table th{text-align:left;padding:6px 8px;white-space:nowrap;color:var(--wo-muted);font-size:10px;text-transform:uppercase;letter-spacing:.03em;background:var(--wo-surface-2);border-bottom:1px solid var(--wo-border);}" +
+            "#__wo_dock table.wo-table th.__wo_sort_th{cursor:pointer;user-select:none;}" +
+            "#__wo_dock table.wo-table th.__wo_sort_th:hover{color:var(--wo-text);}" +
             "#__wo_dock table.wo-table td{padding:6px 8px;border-bottom:1px solid var(--wo-border);max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
             "#__wo_dock table.wo-table tr:last-child td{border-bottom:none;}" +
+            "#__wo_dock .wo-table-block+.wo-table-block{margin-top:10px;}" +
+            "#__wo_dock .wo-table-label{color:var(--wo-muted);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;margin:6px 0 3px;}" +
             "#__wo_dock .wo-header-msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;font-size:10.5px;font-weight:400;}" +
             "#__wo_dock .__wo_tip_icon{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:3px;color:var(--wo-muted);cursor:default;flex-shrink:0;}" +
             "#__wo_dock .__wo_tip_icon:hover{color:#fff;background:var(--wo-field);}" +
@@ -5558,27 +5771,39 @@
                 bodyHtml += '</div>';
             }
 
-            if (group.table) {
-                var rows = cache.tables[group.table] || [];
-                var err = cache.tableErrors[group.table];
+            var groupTableIds = groupTables(group);
+            groupTableIds.forEach(function(tableId) {
+                var rows = resolveTableRowsForDisplay(tableId, cfg, cache);
+                var err = cache.tableErrors[tableId];
                 var showTableErr = false;
                 if (err && !rows.length) {
-                    var runStatus = tableRunStatus(group.table, scanCfgForTables);
+                    var runStatus = tableRunStatus(tableId, scanCfgForTables);
                     // 'skipped ...' (condition false, intentional) and 'OK ...'
                     // (step ran, table's just genuinely empty) both fall through
                     // to the plain "No rows" branch below, not an error.
                     showTableErr = runStatus === 'unknown' || runStatus.indexOf('TIMEOUT') === 0 || runStatus.indexOf('FAILED') === 0;
                 }
+                var tableIdEsc = String(tableId).replace(/"/g, '&quot;');
+                // Only label each table when a group shows more than one -
+                // the single-table case (the vast majority) stays exactly as
+                // plain as before, no redundant heading repeating the table
+                // name a user already picked in Setup.
+                var tableLabelHtml = groupTableIds.length > 1 ?
+                    '<div class="wo-table-label">' + String(friendlyTableName(cfg, tableId)).replace(/</g, '&lt;') + '</div>' : '';
+                bodyHtml += '<div class="wo-table-block" data-table-id="' + tableIdEsc + '">' + tableLabelHtml;
                 if (showTableErr) {
                     bodyHtml += '<div style="color:var(--wo-fail);margin-top:4px;font-size:11px;">Couldn\'t load this table — try rescanning.</div>';
                 } else if (rows.length === 0) {
                     bodyHtml += '<div style="color:var(--wo-muted);margin-top:4px;font-size:11px;">No rows</div>';
                 } else {
                     var allCols = Object.keys(rows[0]);
-                    var hiddenCols = getGroupHiddenCols(group.id);
+                    var tblState = getGroupTableState(group.id, tableId);
+                    var hiddenCols = tblState.hiddenCols;
                     var visCols = allCols.filter(function(c) {
                         return hiddenCols.indexOf(c) < 0;
                     });
+                    var sortedRows = (tblState.sortCol && allCols.indexOf(tblState.sortCol) >= 0) ?
+                        sortTableRows(rows, tblState.sortCol, tblState.sortDir) : rows;
                     bodyHtml += '<div class="wo-table-bar"><span class="wo-table-count">' + rows.length + ' row' + (rows.length !== 1 ? 's' : '') + '</span>' + '<button class="__wo_col_toggle_btn">⚙ Cols</button></div>';
                     bodyHtml += '<div class="__wo_col_panel" style="display:none;">';
                     allCols.forEach(function(c) {
@@ -5587,16 +5812,18 @@
                     });
                     bodyHtml += '</div>';
                     bodyHtml += '<div class="wo-table-wrap"><table class="wo-table"><tr>' + visCols.map(function(c) {
-                        return '<th>' + c + '</th>';
+                        var arrow = tblState.sortCol === c ? (tblState.sortDir === 1 ? ' ▲' : ' ▼') : '';
+                        return '<th class="__wo_sort_th" data-col="' + c.replace(/"/g, '&quot;') + '" title="Click to sort">' + String(c).replace(/</g, '&lt;') + arrow + '</th>';
                     }).join('') + '</tr>';
-                    rows.forEach(function(r) {
+                    sortedRows.forEach(function(r) {
                         bodyHtml += '<tr>' + visCols.map(function(c) {
                             return '<td title="' + String(r[c] || '').replace(/"/g, '&quot;') + '">' + String(r[c] || '').replace(/</g, '&lt;') + '</td>';
                         }).join('') + '</tr>';
                     });
                     bodyHtml += '</table></div>';
                 }
-            }
+                bodyHtml += '</div>';
+            });
             // ── header inline message ──
             // Always emit the wrapping span, even empty — it's the flex:1
             // spacer between the title and the action icons. Without it
@@ -5704,29 +5931,48 @@
             attachTooltip(tile.querySelector('.__wo_tx'), 'Hide this group');
             if (hmText) attachTooltip(tile.querySelector('.wo-header-msg'), hmText, true);
             if (badgeTip) attachTooltip(tile.querySelector('.wo-group-badge,.wo-badge-multi,.wo-badge-pills'), badgeTip);
-            var colBtn = tile.querySelector('.__wo_col_toggle_btn');
-            var colPanel = tile.querySelector('.__wo_col_panel');
-            if (colBtn && colPanel) {
-                attachTooltip(colBtn, 'Toggle visible columns');
-                colBtn.onclick = function(e) {
-                    e.stopPropagation();
-                    colPanel.style.display = colPanel.style.display === 'none' ? 'block' : 'none';
-                };
-                colPanel.querySelectorAll('.__wo_colcb').forEach(function(cb) {
-                    cb.onchange = function() {
-                        var hidden = getGroupHiddenCols(group.id);
-                        var col = cb.getAttribute('data-col');
-                        if (!cb.checked && hidden.indexOf(col) < 0) hidden.push(col);
-                        if (cb.checked) {
-                            hidden = hidden.filter(function(c) {
-                                return c !== col;
-                            });
-                        }
-                        saveGroupHiddenCols(group.id, hidden);
+            // One block per table this group displays (see groupTables()) -
+            // each carries its own column-toggle panel and sortable headers,
+            // independent of any other table in the same group.
+            tile.querySelectorAll('.wo-table-block').forEach(function(block) {
+                var blockTableId = block.getAttribute('data-table-id');
+                var colBtn = block.querySelector('.__wo_col_toggle_btn');
+                var colPanel = block.querySelector('.__wo_col_panel');
+                if (colBtn && colPanel) {
+                    attachTooltip(colBtn, 'Toggle visible columns');
+                    colBtn.onclick = function(e) {
+                        e.stopPropagation();
+                        colPanel.style.display = colPanel.style.display === 'none' ? 'block' : 'none';
+                    };
+                    colPanel.querySelectorAll('.__wo_colcb').forEach(function(cb) {
+                        cb.onchange = function() {
+                            var hidden = getGroupTableState(group.id, blockTableId).hiddenCols;
+                            var col = cb.getAttribute('data-col');
+                            if (!cb.checked && hidden.indexOf(col) < 0) hidden.push(col);
+                            if (cb.checked) {
+                                hidden = hidden.filter(function(c) {
+                                    return c !== col;
+                                });
+                            }
+                            saveGroupTableState(group.id, blockTableId, { hiddenCols: hidden });
+                            render();
+                        };
+                    });
+                }
+                block.querySelectorAll('.__wo_sort_th').forEach(function(th) {
+                    th.onclick = function(e) {
+                        e.stopPropagation();
+                        var col = th.getAttribute('data-col');
+                        var cur = getGroupTableState(group.id, blockTableId);
+                        // Same column clicked again → flip direction; a
+                        // different column → start ascending, same as
+                        // clicking a fresh column header in Excel.
+                        var nextDir = cur.sortCol === col ? -cur.sortDir : 1;
+                        saveGroupTableState(group.id, blockTableId, { sortCol: col, sortDir: nextDir });
                         render();
                     };
                 });
-            }
+            });
 
             // The header itself is now the sole collapse control (the old
             // separate arrow button was removed as redundant) \u2014 it needs
@@ -7966,7 +8212,8 @@
             domain: { sig: "domain(key, code)", args: ["key — a Maximo domain list name, e.g. DOWNCODE, HAZTYPE, WOCLASS", "code — the coded value to decode"], desc: "Decodes a code via one of Maximo's own cached domain lists. beta_2 only — returns '' if that beta feature is off." },
             assetWOHistory: { sig: "assetWOHistory(assetnum, siteid, limit)", args: ["assetnum — asset number", "siteid — Maximo site ID", "limit — max rows, default 10"], desc: "Recent work orders for an asset, newest first, fetched live from Maximo's REST API (array of {wonum, description, status, wopriority, reportdate, worktype, ...}). beta_2 only — returns [] if that beta feature is off, or [] until the (async) fetch resolves." },
             assetDowntimeHistory: { sig: "assetDowntimeHistory(assetnum, siteid)", args: ["assetnum — asset number", "siteid — Maximo site ID"], desc: "The asset's full downtime history (not just what's linked to the current WO) as an array of {startdate, enddate}, fetched live from Maximo's REST API. beta_2 only — returns [] if that beta feature is off, or [] until the (async) fetch resolves." },
-            V: { sig: "V(id)", args: ["id — a variable's ID or label"], desc: "A variable's computed value." }
+            V: { sig: "V(id)", args: ["id — a variable's ID or label"], desc: "A variable's computed value." },
+            R: { sig: "R(colName)", args: ["colName — another column's header in this same table"], desc: "Only works inside a custom table's own formula column (Tables tab) — reads another column's value from the row currently being computed." }
         };
 
         // A searchable list of every HELPER_REF entry, reachable from the
@@ -8968,11 +9215,16 @@
                 var fc = opts.fields.map(function(f) {
                     return '<label style="display:block;"><input type="checkbox" data-fd="' + f.replace(/"/g, '&quot;') + '" ' + (group.fields.indexOf(f) >= 0 ? 'checked' : '') + '>' + f + '</label>';
                 }).join('');
-                var to = '<option value="">-- none --</option>' + opts.tables.map(function(t) {
+                // Reads through groupTables() (not group.table/group.tables
+                // directly) so a group still on the old single-table shape
+                // shows its current selection correctly the first time this
+                // tab is opened, before any edit has migrated it forward.
+                var selectedTables = groupTables(group);
+                var to = opts.tables.length ? opts.tables.map(function(t) {
                     var friendly = friendlyTableName(cfg, t);
                     var friendlyEsc = friendly.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                    return '<option value="' + t.replace(/"/g, '&quot;') + '" ' + (group.table === t ? 'selected' : '') + '>' + friendlyEsc + (friendly !== t ? ' (' + t + ')' : '') + '</option>';
-                }).join('');
+                    return '<label style="display:block;"><input type="checkbox" data-tb="' + t.replace(/"/g, '&quot;') + '" ' + (selectedTables.indexOf(t) >= 0 ? 'checked' : '') + '>' + friendlyEsc + (friendly !== t ? ' (' + t + ')' : '') + '</label>';
+                }).join('') : '<div style="color:var(--wo-muted);font-size:11px;">No tables available yet — scan once, or add one in the Tables tab.</div>';
                 var rc = cfg.rules.map(function(r) {
                     return '<label style="display:block;"><input type="checkbox" data-rl="' + r.id + '" ' + ((group.ruleRefs || []).indexOf(r.id) >= 0 ? 'checked' : '') + '>' + r.label + '</label>';
                 }).join('');
@@ -9014,7 +9266,7 @@
                     '<div style="margin-top:4px;"><label>Tooltip:</label><br><input type="text" data-tt value="' + (group.tooltip || '').replace(/"/g, '&quot;') + '" style="width:100%;margin-top:2px;"></div>' +
                     '<div style="margin-top:4px;"><label>Expanded Message:</label><br><textarea data-em style="width:100%;height:44px;margin-top:2px;color:var(--wo-accent);">' + (group.expandedMsg || '').replace(/</g, '&lt;') + '</textarea></div>' +
                     '<div style="margin-top:6px;"><label><input type="checkbox" data-c ' + (group.defaultCollapsed ? 'checked' : '') + '> Collapsed by default</label></div>' +
-                    '<div style="margin-top:6px;"><b>Table:</b> <select data-tb>' + to + '</select></div>' +
+                    '<div style="margin-top:6px;max-height:90px;overflow:auto;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:4px;"><b>Tables:</b>' + to + '</div>' +
                     '<div style="margin-top:6px;" id="__roweditor_' + idx + '"><b>Field Rows</b> <button data-addrow type="button" class="wo-btn-ghost" style="margin-left:6px;">+ Add Row</button><div data-rowlist style="margin-top:4px;"></div></div>' +
                     '<div style="margin-top:6px;max-height:90px;overflow:auto;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:4px;"><b>Rules:</b>' + rc + '</div>' +
                     '<div class="wo-subbox" style="margin-top:8px;" id="__hm_block_' + idx + '">' +
@@ -9357,9 +9609,23 @@
                 box.querySelector('[data-c]').onchange = function(e) {
                     group.defaultCollapsed = e.target.checked;
                 };
-                box.querySelector('[data-tb]').onchange = function(e) {
-                    group.table = e.target.value || null;
-                };
+                box.querySelectorAll('[data-tb]').forEach(function(cb) {
+                    cb.onchange = function() {
+                        // First edit here migrates this group onto the new
+                        // shape for good — groupTables() prefers .tables
+                        // whenever it's an array, so once this exists the
+                        // legacy .table field is never read again (left in
+                        // place, just dead - see groupTables()'s own note on
+                        // why nothing here deletes it).
+                        var current = groupTables(group);
+                        var t = cb.getAttribute('data-tb');
+                        if (cb.checked && current.indexOf(t) < 0) current = current.concat([t]);
+                        else if (!cb.checked) current = current.filter(function(x) {
+                            return x !== t;
+                        });
+                        group.tables = current;
+                    };
+                });
                 box.querySelector('[data-tt]').oninput = function(e) {
                     group.tooltip = e.target.value || undefined;
                 };
@@ -9807,7 +10073,9 @@
                 usage[id][kind].push(label);
             }
             cfg.groups.forEach(function(g) {
-                if (g.table) noteUsage(g.table, 'groups', g.title);
+                groupTables(g).forEach(function(t) {
+                    noteUsage(t, 'groups', g.title);
+                });
             });
             (scan.scans || []).forEach(function(s) {
                 if (s.waitTable) noteUsage(s.waitTable, 'scans', s.title);
@@ -9877,16 +10145,32 @@
             // {ci, ri} for a data td. Mirrors the shared openRuleMenu/
             // closeRuleMenu single-open-menu pattern used by every other
             // kebab/context menu in this modal.
+            function ctAddRow(t) {
+                t.rows.push({});
+            }
+
+            function ctAddCol(t) {
+                var n = 1;
+                while (t.columns.indexOf('Column ' + n) >= 0) n++;
+                t.columns.push('Column ' + n);
+            }
+
             function ctGridContextMenu(e, t, hit) {
                 e.preventDefault();
                 closeRuleMenu();
                 var isHeader = hit.ri == null;
+                var colName = t.columns[hit.ci];
+                var isFormulaCol = !!(t.columnFormulas && t.columnFormulas[colName]);
                 var items = [];
                 items.push(['addrow', 'Add Row']);
                 items.push(['addcol', 'Add Column']);
-                if (!isHeader) items.push(['delcell', 'Delete Cell']);
+                // A formula column's cells are computed, not typed - nothing
+                // to delete per-cell (clearing it means editing/removing the
+                // column formula itself, in the box below the grid).
+                if (!isHeader && !isFormulaCol) items.push(['delcell', 'Delete Cell']);
                 if (!isHeader) items.push(['delrow', 'Delete Row']);
                 if (t.columns.length > 1) items.push(['delcol', 'Delete Column']);
+                if (isHeader) items.push(isFormulaCol ? ['rmformula', 'Remove Formula Column'] : ['mkformula', 'Make Formula Column']);
                 var menu = document.createElement('div');
                 menu.className = 'wo-kebab-menu';
                 menu.style.position = 'fixed';
@@ -9906,11 +10190,9 @@
                         closeRuleMenu();
                         var act = item.getAttribute('data-ct-act');
                         if (act === 'addrow') {
-                            t.rows.push({});
+                            ctAddRow(t);
                         } else if (act === 'addcol') {
-                            var n = 1;
-                            while (t.columns.indexOf('Column ' + n) >= 0) n++;
-                            t.columns.push('Column ' + n);
+                            ctAddCol(t);
                         } else if (act === 'delcell') {
                             delete t.rows[hit.ri][t.columns[hit.ci]];
                         } else if (act === 'delrow') {
@@ -9921,6 +10203,12 @@
                             t.rows.forEach(function(row) {
                                 delete row[name];
                             });
+                            if (t.columnFormulas) delete t.columnFormulas[name];
+                        } else if (act === 'mkformula') {
+                            if (!t.columnFormulas) t.columnFormulas = {};
+                            t.columnFormulas[colName] = t.columnFormulas[colName] || '';
+                        } else if (act === 'rmformula') {
+                            if (t.columnFormulas) delete t.columnFormulas[colName];
                         }
                         tablesTab();
                     };
@@ -9937,25 +10225,53 @@
                 box.className = 'wo-card';
                 var head = '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
                     '<code class="wo-mono" style="font-size:11px;">' + String(id).replace(/</g, '&lt;') + '</code>' +
+                    '<div style="display:flex;gap:6px;">' +
+                    '<button type="button" class="__ct_addrow wo-btn-ghost" style="font-size:11px;" title="Add row">+ Row</button>' +
+                    '<button type="button" class="__ct_addcol wo-btn-ghost" style="font-size:11px;" title="Add column">+ Col</button>' +
                     '<button type="button" class="__ct_del wo-btn-ghost wo-kebab-item-danger" aria-label="Delete table">' + TRASH_SVG + '</button>' +
+                    '</div>' +
                     '</div>';
 
                 var tableHtml = '<div class="wo-ct-grid-wrap"><table class="wo-ct-grid"><thead><tr>';
                 t.columns.forEach(function(col, ci) {
-                    tableHtml += '<th data-ct-col="' + ci + '"><input type="text" value="' + String(col).replace(/"/g, '&quot;') + '"></th>';
+                    var isFormulaCol = !!(t.columnFormulas && t.columnFormulas[col]);
+                    tableHtml += '<th data-ct-col="' + ci + '">' +
+                        (isFormulaCol ? '<span class="wo-mono" style="font-size:9px;color:var(--wo-accent);" title="Formula column - value computed below, not typed here">ƒx</span> ' : '') +
+                        '<input type="text" value="' + String(col).replace(/"/g, '&quot;') + '"></th>';
                 });
                 tableHtml += '</tr></thead><tbody>';
                 t.rows.forEach(function(row, ri) {
                     tableHtml += '<tr>';
                     t.columns.forEach(function(col, ci) {
-                        tableHtml += '<td data-ct-cell data-row="' + ri + '" data-col-idx="' + ci + '"><input type="text" value="' + String(row[col] || '').replace(/"/g, '&quot;') + '"></td>';
+                        var isFormulaCol = !!(t.columnFormulas && t.columnFormulas[col]);
+                        if (isFormulaCol) {
+                            tableHtml += '<td data-ct-cell data-row="' + ri + '" data-col-idx="' + ci + '" style="color:var(--wo-muted);font-style:italic;text-align:center;" title="Computed by this column\'s formula">ƒx</td>';
+                        } else {
+                            tableHtml += '<td data-ct-cell data-row="' + ri + '" data-col-idx="' + ci + '"><input type="text" value="' + String(row[col] || '').replace(/"/g, '&quot;') + '"></td>';
+                        }
                     });
                     tableHtml += '</tr>';
                 });
                 tableHtml += '</tbody></table></div>' +
-                    '<div style="color:var(--wo-muted);font-size:10px;margin-top:5px;">Right-click a cell to add/delete rows, columns, or a cell.</div>';
+                    '<div style="color:var(--wo-muted);font-size:10px;margin-top:5px;">Right-click a cell to add/delete rows, columns, or a cell — or right-click a column header to make/unmake it a formula column.</div>';
 
-                box.innerHTML = head + tableHtml;
+                var formulaColKeys = Object.keys(t.columnFormulas || {}).filter(function(c) {
+                    return t.columns.indexOf(c) >= 0;
+                });
+                var formulaSectionHtml = '';
+                if (formulaColKeys.length) {
+                    formulaSectionHtml = '<div style="margin-top:10px;border-top:1px solid var(--wo-border);padding-top:8px;">' +
+                        '<div style="color:var(--wo-muted);font-size:11px;margin-bottom:4px;">Formula columns (ƒx) — this formula is evaluated for every row. Use <code class="wo-mono">R(\'Column Name\')</code> to read another column from that same row.</div>' +
+                        formulaColKeys.map(function(colName) {
+                            return '<div data-ct-formula-wrap="' + String(colName).replace(/"/g, '&quot;') + '" style="margin-top:8px;">' +
+                                '<label style="color:var(--wo-muted);font-size:11px;">' + String(colName).replace(/</g, '&lt;') + '</label>' +
+                                formulaBox(t.columnFormulas, colName) +
+                                '</div>';
+                        }).join('') +
+                        '</div>';
+                }
+
+                box.innerHTML = head + tableHtml + formulaSectionHtml;
                 content.appendChild(box);
 
                 box.querySelector('.__ct_del').onclick = function() {
@@ -9965,6 +10281,22 @@
                         tablesTab();
                     });
                 };
+                box.querySelector('.__ct_addrow').onclick = function() {
+                    ctAddRow(t);
+                    tablesTab();
+                };
+                box.querySelector('.__ct_addcol').onclick = function() {
+                    ctAddCol(t);
+                    tablesTab();
+                };
+                box.querySelectorAll('[data-ct-formula-wrap]').forEach(function(wrap) {
+                    var colName = wrap.getAttribute('data-ct-formula-wrap');
+                    var ta = wrap.querySelector('textarea[data-f]');
+                    attachFormulaAssist(ta);
+                    ta.oninput = function(e) {
+                        t.columnFormulas[colName] = e.target.value;
+                    };
+                });
                 box.querySelectorAll('th[data-ct-col] input').forEach(function(input) {
                     input.oninput = function(e) {
                         var ci = +input.closest('th').getAttribute('data-ct-col');
@@ -9974,6 +10306,12 @@
                         // Rows are keyed by column name, not index - carry each
                         // row's existing value across the rename so retyping
                         // the header doesn't silently blank every cell in it.
+                        // columnFormulas is keyed by column name too - without
+                        // this, renaming a formula column would silently
+                        // strand its formula under the old name (invisible,
+                        // since the formula-columns section below only lists
+                        // names still present in t.columns) and the column
+                        // would revert to looking like an empty plain column.
                         if (oldName !== newName) {
                             t.rows.forEach(function(row) {
                                 if (row.hasOwnProperty(oldName)) {
@@ -9981,6 +10319,10 @@
                                     delete row[oldName];
                                 }
                             });
+                            if (t.columnFormulas && t.columnFormulas.hasOwnProperty(oldName)) {
+                                t.columnFormulas[newName] = t.columnFormulas[oldName];
+                                delete t.columnFormulas[oldName];
+                            }
                         }
                     };
                 });
@@ -10052,7 +10394,7 @@
 
             var apiIntro = document.createElement('div');
             apiIntro.style.cssText = 'color:var(--wo-muted);font-size:11px;margin-bottom:8px;';
-            apiIntro.textContent = 'Experimental — resolves live data from Maximo\'s REST API instead of a scan. Only works when the beta_2 "Maximo REST Data" feature is enabled (Setup > Beta).';
+            apiIntro.textContent = 'Experimental — resolves data from Maximo\'s REST API (Asset Work Order/Downtime History, live) or a domain list already cached in this browser (Domain List) instead of a scan. Only works when the beta_2 "Maximo REST Data" feature is enabled (Setup > Beta).';
             content.appendChild(apiIntro);
 
             var apiIds = Object.keys(cfg.apiTables).sort();
@@ -10078,20 +10420,27 @@
                     '<select data-at-source style="margin-top:2px;">' +
                     '<option value="assetWO"' + (t.source === 'assetWO' ? ' selected' : '') + '>Asset Work Order History</option>' +
                     '<option value="assetDowntime"' + (t.source === 'assetDowntime' ? ' selected' : '') + '>Asset Downtime History</option>' +
+                    '<option value="domain"' + (t.source === 'domain' ? ' selected' : '') + '>Domain List</option>' +
                     '</select>' +
                     '</div>' +
-                    '<div style="margin-top:6px;">' +
-                    '<label style="color:var(--wo-muted);font-size:11px;">Asset # formula</label><br>' +
-                    formulaBox(t, 'assetFormula') +
-                    '</div>' +
-                    '<div style="margin-top:6px;">' +
-                    '<label style="color:var(--wo-muted);font-size:11px;">Site ID formula</label><br>' +
-                    formulaBox(t, 'siteFormula') +
-                    '</div>' +
-                    (t.source === 'assetWO' ? '<div style="margin-top:6px;">' +
-                        '<label style="color:var(--wo-muted);font-size:11px;">Limit</label><br>' +
-                        '<input type="number" data-at-limit min="1" value="' + (t.limit || 10) + '" style="width:80px;margin-top:2px;">' +
-                        '</div>' : '');
+                    (t.source === 'domain' ?
+                        '<div style="margin-top:6px;">' +
+                        '<label style="color:var(--wo-muted);font-size:11px;">Domain name (e.g. ABBWPRIORITY) — exact key, matched against what Maximo has already cached in this browser</label><br>' +
+                        '<input type="text" data-at-domainkey value="' + String(t.domainKey || '').replace(/"/g, '&quot;') + '" style="width:100%;margin-top:2px;">' +
+                        '</div>'
+                        :
+                        '<div style="margin-top:6px;">' +
+                        '<label style="color:var(--wo-muted);font-size:11px;">Asset # formula</label><br>' +
+                        formulaBox(t, 'assetFormula') +
+                        '</div>' +
+                        '<div style="margin-top:6px;">' +
+                        '<label style="color:var(--wo-muted);font-size:11px;">Site ID formula</label><br>' +
+                        formulaBox(t, 'siteFormula') +
+                        '</div>' +
+                        (t.source === 'assetWO' ? '<div style="margin-top:6px;">' +
+                            '<label style="color:var(--wo-muted);font-size:11px;">Limit</label><br>' +
+                            '<input type="number" data-at-limit min="1" value="' + (t.limit || 10) + '" style="width:80px;margin-top:2px;">' +
+                            '</div>' : ''));
                 content.appendChild(box);
 
                 box.querySelector('.__at_del').onclick = function() {
@@ -10118,6 +10467,10 @@
                 var limitInput = box.querySelector('[data-at-limit]');
                 if (limitInput) limitInput.oninput = function(e) {
                     t.limit = (+e.target.value) || 10;
+                };
+                var domainKeyInput = box.querySelector('[data-at-domainkey]');
+                if (domainKeyInput) domainKeyInput.oninput = function(e) {
+                    t.domainKey = e.target.value.trim();
                 };
             });
 

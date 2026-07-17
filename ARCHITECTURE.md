@@ -851,6 +851,160 @@ tooltip), so this tool now does too:
   one fires when there's no complete enclosing call yet at all, so there's
   no signature to show alongside it.
 
+### 5.10 Domain-list caching, and domain lists as a table source (v0.25.1)
+
+Two follow-ups to the beta_2 diagnostics/domain work (§6):
+
+- **Caching** — `domainDecodeRaw(key, code)` used to `JSON.parse` the raw
+  `localStorage` entry on every single call, with no memoization — a rule
+  calling `domain(...)` once per row of a scanned table re-parsed the same
+  JSON blob from scratch on every render. `getDomainRaw(key)` now sits in
+  front of both `domainDecodeRaw()` and `domainTableRows()` (below): it
+  keeps `{str, parsed}` per domain key in `domainRawCache`, and only
+  re-parses when the current `localStorage` string no longer matches the
+  cached one — cheap string equality on the common (unchanged) path,
+  correct if Maximo ever re-caches that domain mid-session, and no TTL/
+  invalidation logic needed since "did the underlying string change" is
+  already the exact right invalidation signal.
+- **Domain lists as a table source** — `domain(key, code)` only ever
+  exposed one column (`description`) for one matched row, discarding
+  everything else a domain list actually carries (`siteid`, `orgid`,
+  `maxvalue`, ...) — see the shape comment on `domainDecodeRaw` for what's
+  really in there. `domainTableRows(key)` reuses `getDomainRaw()` and
+  converts whichever of the three known shapes it finds into a plain array
+  of row objects, one per domain row, keyed by that domain's own attribute
+  names. Wired into `resolveApiTable()` as `source: 'domain'` (Tables tab >
+  API Tables > "Domain List", `def.domainKey` — a plain string, not a
+  formula, since which domain list you want doesn't usually vary by WO)
+  — the odd one out among API table sources since it's not a REST fetch at
+  all, just the same `localStorage` read `domain()` already does, so it
+  resolves synchronously with no `betaApiTableCache` entry, no promise, no
+  asset/site formulas. Once defined, it reads through `T()`/`col()`/
+  `lookup()`/`count()` exactly like any other table, with every column the
+  domain list actually has available — not just the one `domain()` picks.
+
+### 5.11 Custom table formula columns, and a `+` add affordance (v0.25.1)
+
+Two Tables-tab usability follow-ups, same root request (decode a typed-in
+code into its meaning without hand-typing the meaning into every row):
+
+- **`+ Row` / `+ Col` buttons** — adding a row or column to a custom table
+  was right-click-only (`ctGridContextMenu`), with no visible affordance
+  hinting that was even possible. `ctAddRow(t)`/`ctAddCol(t)` factor the
+  actual mutation out of the context-menu handler (which now just calls
+  them) so the new header buttons and the context-menu item share one
+  implementation instead of two copies drifting apart.
+- **Formula columns** (`cfg.customTables[id].columnFormulas`, `{colName:
+  formula}`) — any custom table column can be marked a formula column via
+  its header's right-click menu (`Make Formula Column`/`Remove Formula
+  Column`). Its formula is evaluated fresh for every row by
+  `evalCustomTableColumnFormula()`, a **separate** small `Function.apply`
+  call from the one `runVariable`/`runFormula`/etc. share — it binds the
+  same `ARGN` helpers (via a fresh `buildCtx(data)`) plus one extra: `R
+  (colName)`, which reads another column's value from the row currently
+  being computed. `R` is deliberately **not** added to the shared `ARGN`/
+  `buildCtx` used by the four normal formula entry points — none of them
+  have a notion of "the current row" to bind it to, and adding a row-only
+  helper there would mean every other entry point needs to supply
+  *something* for it too. `R` does get a `HELPER_REF` entry (so the
+  signature tooltip/autocomplete recognize it) and flows through
+  `normalizeFormulaFunctionCase()` like every other formula in this table
+  does — but `R` itself stays case-sensitive (uppercase-only), since it's
+  not in `ARGN`/`ARGN_LOWER` at all, consistent with the single-letter `F`/
+  `T`/`V` convention rather than the general helper-name rule.
+  - `T()`'s custom-table branch now calls `resolveCustomTableRows(t, data)`
+    instead of reading `t.rows` directly. A table with zero formula columns
+    (the common case) returns `t.rows` completely untouched — no behavior
+    or performance change. Only once at least one formula column exists
+    does it rebuild every row into a fresh object (typed columns copied
+    as-is, formula columns replaced with `evalCustomTableColumnFormula()`'s
+    result) on every read, since a formula's value can depend on the
+    outer WO (`F()`, `V()`, other tables) and has to be re-evaluated per
+    read, not just once when the row was typed.
+  - No cycle protection: a formula column whose formula calls
+    `T()`/`lookup()`/`col()` on its **own** table id recurses back into
+    `resolveCustomTableRows()` for the same table and blows the call stack.
+    `evalCustomTableColumnFormula()`'s `try/catch` still catches that
+    (returns `'#ERR'` for the cell rather than crashing the page) —
+    self-correcting, not guarded against, same lack-of-cycle-protection
+    posture as variables referencing each other circularly elsewhere in
+    this file.
+  - Renaming a formula column's header now also carries its entry in
+    `columnFormulas` over to the new name (mirroring the existing row-value
+    carry-over on rename) — without this, a rename would silently strand
+    the formula under the old (now-unused) key and the column would look
+    like it reverted to an empty plain column.
+
+### 5.12 Multi-table groups, sortable columns, custom/API tables in groups (v0.25.1)
+
+Three related asks, one migration:
+
+- **`group.table` (string) → `group.tables` (string[])** — a group used to
+  link at most one table. Rather than migrating every saved config's
+  *stored* shape (real risk on a live, single-source-of-truth config with
+  no rollback if the migration logic itself has a bug), every read goes
+  through a new `groupTables(group)` accessor: prefers `group.tables` if
+  it's an array, else wraps the legacy `group.table` in a single-element
+  array, else `[]`. Nothing ever deletes the old `group.table` field — it's
+  just left inert once a group has been edited in the new UI (which writes
+  `group.tables` directly). `DEFAULT_CFG`'s own groups were updated to the
+  new shape too (a fresh install is never "legacy" for even one render).
+  Every call site that used to read `group.table` directly now goes through
+  `groupTables()`: `render()`'s own display, the Groups tab's own edit UI,
+  `tablesTab()`'s per-table usage tracking (`noteUsage`), and both
+  scan-snapshot functions (`extractSnapshot()`/`extractSnapshotFull()`)
+  that pre-register a group's linked tables as scan targets.
+- **Custom/API tables are now valid group content — this was a bug fix,
+  not new capability.** The Groups tab's table picker already listed
+  custom and API table ids as choices (`fieldKeyOptions()` has always
+  included both) — but `render()`'s display code read `cache.tables[...]`
+  only, which nothing but a real DOM scan ever populates. Picking a
+  custom/API table silently rendered "No rows" forever. `render()` now
+  calls a new `resolveTableRowsForDisplay(tableId, cfgNow, cache)`, which
+  mirrors `buildCtx`'s own `T()` fallback chain (scanned → custom → API)
+  using `cache` itself as the `data` argument those resolvers expect
+  (`cache` already has the `{fields, tables}` shape `buildCtx` needs).
+  **The two scan-snapshot functions needed a matching guard**, not just a
+  `groupTables()` swap: they walk every group's linked tables to make sure
+  each gets *at least* an empty-array entry in `cache.tables` (so a
+  genuinely-empty scanned table reads as "no rows" rather than "never
+  captured"). Blindly doing that for a custom/API table id would pre-seed
+  `cache.tables[id] = []`, and since `resolveTableRowsForDisplay()` checks
+  `cache.tables.hasOwnProperty(tableId)` *first*, that empty placeholder
+  would permanently shadow the real custom/API data — so both functions now
+  skip any table id that exists in `cfg.customTables`/`cfg.apiTables`
+  before registering it as a scan target.
+- **Column sorting** — click a `<th>` in a displayed table to sort by it
+  (ascending), click the same header again to reverse, click a different
+  header to switch column and reset to ascending — same three-state cycle
+  as clicking a column header in Excel/Sheets. `sortTableRows(rows, col,
+  dir)` is numeric-aware (reuses `toNumOrNull()`, the same comma-stripping
+  parse `sum()`/`avg()`/`toNumber()` already share) so a column of
+  `"1,234"`-style numbers sorts numerically instead of lexicographically,
+  falling back to a case-insensitive locale compare otherwise. Returns a
+  new array rather than sorting in place, since the rows array passed in
+  can be the *live* `cache.tables[...]` reference.
+- **Per-(group, table) display state** — hidden columns and sort state
+  used to live at `gs[gid].hiddenCols` (flat, one table's worth). Now that
+  a group can show several tables, `getGroupTableState(gid, tableId)` /
+  `saveGroupTableState(gid, tableId, patch)` key by `gs[gid].tableState[tableId]`
+  instead, replacing the old `getGroupHiddenCols`/`saveGroupHiddenCols`
+  outright — there's no sound way to guess which of a group's now-possibly-
+  several tables an old flat `hiddenCols` array belonged to, and resetting
+  a hidden-column preference is a low-stakes, easy-to-redo reset (dev
+  channel) compared to guessing wrong and hiding columns on the wrong
+  table. The main-panel render's per-table click wiring now iterates every
+  `.wo-table-block` in a tile (one per linked table, each carrying its own
+  `data-table-id`) instead of a single `querySelector`, pairing each
+  table's own column-toggle button/panel and sortable headers to its own
+  state key.
+- **Groups tab UI** — the single `<select data-tb>` became a checkbox list
+  (`fieldKeyOptions().tables`, same list the formula-assist `T()`/`lookup()`
+  autocomplete already draws from), matching the existing Field Rows/Rules
+  checkbox pattern in the same tab. Checking/unchecking writes straight to
+  `group.tables` — the first edit in this UI is what actually migrates a
+  group off the legacy `group.table` shape for good.
+
 ---
 
 ## 6. Beta feature framework

@@ -29,7 +29,14 @@
         "New formula helpers: toNumber(val) and toString(val), for explicit type conversion.",
         "Function-name autocomplete now shows just the function name (e.g. daysBetween), not daysBetween( - and both formula dropdowns support arrow keys plus Tab/Enter to accept the highlighted match, closer to Excel's own function autocomplete.",
         "Fixed: formula helper names are now case-insensitive - typing daysbetween( (any capitalization) now shows the signature tooltip immediately instead of nothing, and a saved formula using the wrong case is auto-corrected when it runs instead of erroring.",
-        "Fixed: domain(/lookup(/count(/whoami(/F(/T(/V( now show their signature tooltip AND their value-completion dropdown together (previously showing the dropdown hid the tooltip, so e.g. domain( only showed a bare list of domain names with no hint a second argument even exists)."
+        "Fixed: domain(/lookup(/count(/whoami(/F(/T(/V( now show their signature tooltip AND their value-completion dropdown together (previously showing the dropdown hid the tooltip, so e.g. domain( only showed a bare list of domain names with no hint a second argument even exists).",
+        "Performance (beta_2): domain() and domain-list tables no longer re-parse the same cached domain list from scratch on every call - parsed once, reused until Maximo's own cache for that domain actually changes.",
+        "New (beta_2): API Tables in the Tables tab can now use source \"Domain List\" - exposes any of Maximo's own domain lists (e.g. WOCLASS, ABBWPRIORITY) as a full table (every column, not just the one description domain() decodes), read by T()/lookup()/col() like any other table. Resolves instantly from what's already cached in your browser - no REST fetch, no asset/site needed.",
+        "Custom tables (Tables tab): added + Row / + Col buttons alongside the existing right-click menu.",
+        "New: custom table columns can now be formula columns - right-click a column header and choose \"Make Formula Column\" to compute that column's value from a formula instead of typing it in, evaluated fresh per row. New helper R('Column Name') reads another column from that same row (only works inside a custom table's own formula column) - e.g. decode a hand-typed code into its meaning via domain(...) without retyping the meaning into every row.",
+        "New: a group's Linked Table can now be multiple tables - the Groups tab's table picker is now a checklist instead of a single dropdown. Each linked table shows with its own column-visibility toggle and gets a small label once a group shows more than one.",
+        "New: click a linked table's column header to sort by it, click again to reverse - numeric-aware (1,234-style numbers sort as numbers, not text), remembered per table per group.",
+        "Fixed: a group's Linked Table dropdown always let you pick a custom table or an API table (Tables tab), but selecting one silently showed \"No rows\" forever - group display only ever read from a live scan. Custom and API tables now actually display."
       ]
     },
     {
