@@ -265,12 +265,30 @@ cookbook-level detail there.
   a single Worker environment is the actual trust boundary regardless of
   PAT count.
 
-**Deferred, not built yet**: the *consuming* side of `configProfileId` /
-`resolveConfigForBucket()` — a user's `wo_tool.js` install actually
-matching their whoami to a bucket and fetching that bucket's cascaded
-default config. Today this only exists as admin-side schema + a pure
-resolver function for the admin UI's preview; `configs/index.json` and
-`wo_tool.js`'s installer are untouched.
+**Two independent config mechanisms exist today, deliberately not merged:**
+1. `bucket.configProfileId` — a simple free-text label on a bucket,
+   resolved by nearest-ancestor-wins (`resolveConfigForBucket()`,
+   `GET /admin/buckets/:id/resolved-config`). No content storage — just a
+   string an admin can set, meant as a lightweight placeholder.
+2. **`/admin/configs`** (real config management, admin-side only) —
+   `configs/index.json` (lightweight metadata: name, description,
+   `bucketId`+`conditions` targeting) plus `configs/<id>.json` per config
+   (the actual content, same JSON shape as `wo_tool.js`'s Setup > Export/
+   Import). Full CRUD: upload (file or paste), download, duplicate (copy
+   an existing in-scope config's content into a new one — e.g. a site
+   admin duplicating a company-level config down to their own site),
+   rename/re-target/replace-content, delete. Targeting reuses
+   `buildEntryConditions()` — the exact same ancestor-hardlock as
+   permissions entries — except an empty `conditions[]` is allowed here
+   (unlike permissions): a config with no extra conditions just means
+   "applies to everyone at that bucket," not a vacuous access-control
+   match, so there's no equivalent risk to guard against.
+
+**Deferred, not built yet for either mechanism**: the *consuming* side —
+a user's `wo_tool.js` install actually matching their whoami to a bucket
+and fetching/applying that bucket's resolved config at install time. Both
+mechanisms today only exist as admin-side tooling; `wo_tool.js`'s
+installer doesn't call either one.
 
 ---
 
