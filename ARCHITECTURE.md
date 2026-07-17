@@ -123,14 +123,18 @@ Replaces an earlier single-`tier` design. `permissions.json`:
 ```jsonc
 {
   "maximoHosts": [{ "hostname": "...", "url": "..." }],
-  "override": [{ "username": "ZITZMWX", "grants": ["user"], "bucketId": null }],  // bypasses blacklist
-  "blacklist": [{ "bucketId": null, "conditions": [ /* AND-group */ ] }],  // OR of these objects
-  "allow": [{ "grants": ["user"], "bucketId": null, "conditions": [ /* AND-group */ ] }],
-  "extraGrants": { "ZITZMWX": ["dev", "beta_0"] }  // additive, merged onto whatever base grants matched
+  "override": [{ "id": "ove_...", "bucketId": null, "conditions": [ /* AND-group */ ], "grants": ["user"] }],  // bypasses blacklist
+  "blacklist": [{ "id": "bla_...", "bucketId": null, "conditions": [ /* AND-group */ ] }],  // OR of these objects
+  "allow": [{ "id": "all_...", "grants": ["user"], "bucketId": null, "conditions": [ /* AND-group */ ] }],
+  "extraGrants": [{ "id": "ext_...", "bucketId": null, "conditions": [ /* AND-group */ ], "grants": ["dev", "beta_0"] }]  // additive, merged onto whatever base grants matched
 }
 ```
 
-`bucketId` (admin-delegation metadata — see §3.4) is never read by `evaluateAccess`/`evalGroup`/`computeRequiredFields`; `null`/omitted means root-owned. `blacklist` entries used to be bare condition arrays — reshaped to `{bucketId, conditions}` objects when §3.4 shipped, which touched `evaluateAccess`'s blacklist check and `computeRequiredFields` (both now read `entry.conditions` instead of treating the entry itself as the conditions array).
+All four sections (`override`/`blacklist`/`allow`/`extraGrants`) share one uniform shape now: `{id, bucketId, conditions, grants?}`, AND within one entry's `conditions[]`, OR across entries in the same array. `override` and `extraGrants` used to be keyed by bare `username`/a `{username: grants[]}` map respectively — both migrated to this condition-based shape (see `PERMISSIONS_GUIDE.md`'s migration note); the admin UI's "edit" action and the ancestor-condition hardlock (§3.4) both depend on every entry having a real `id` and a real `conditions[]`. **`evalGroup()` treats a missing/empty `conditions[]` as a non-match, never a vacuous match** — `[].every(...)` is `true` in JS, which would otherwise mean "no conditions" silently granted everyone; `evalGroup` explicitly requires `conditions.length > 0` before evaluating. `validatePermissionsShape()` enforces this same non-empty rule on every write, so a hand-edited or partially-migrated entry fails the write instead of landing as a live universal-match.
+
+`bucketId` (admin-delegation metadata — see §3.4) is never read by `evaluateAccess`/`evalGroup`/`computeRequiredFields`; `null`/omitted means root-owned.
+
+**Non-root admins can only grant `"user"`** — `allow`/`override`/`extraGrants` writes from a non-root identity get their `grants[]` filtered server-side to `NON_ROOT_ALLOWED_GRANTS` (just `["user"]` today); `override`/`extraGrants` themselves are root-only endpoints regardless (403 for any non-root token) since they have no bucket-scoped conditions to hardlock onto.
 
 Precedence: **override → blacklist → allow → deny** (see `evaluateAccess`).
 `resolveGrants()` merges the matching rule's base grants (default `["user"]`
@@ -181,40 +185,75 @@ cookbook-level detail there.
   new JSON files) with `Cache-Control: no-store`. No data, no role — just
   a login form. Everything else under `/admin/*` requires
   `Authorization: Bearer <token>`.
-- **Real accounts, not raw bearer tokens.** `POST /admin/login` takes
-  `{username, password}` and returns a signed session token —
-  `resolveAdminIdentity()` accepts either `ROOT_ADMIN_TOKEN` (Wrangler
-  secret, checked first and unconditionally, bypasses `adminGroups.json`
-  entirely — the break-glass path, works even if that file is
-  empty/missing/corrupt) or a session token (HMAC-signed with
-  `ADMIN_SESSION_SECRET` — a distinct secret/trust-domain from the
+- **Real accounts, keyed by work email, not raw bearer tokens.**
+  `POST /admin/login` takes `{email, password}` and returns a signed
+  session token — `resolveAdminIdentity()` accepts either
+  `ROOT_ADMIN_TOKEN` (Wrangler secret, checked first and unconditionally,
+  bypasses `adminGroups.json` entirely — the break-glass path, works even
+  if that file is empty/missing/corrupt) or a session token (HMAC-signed
+  with `ADMIN_SESSION_SECRET` — a distinct secret/trust-domain from the
   regular-user `TOKEN_SECRET`). Passwords are PBKDF2-SHA256 hashed
   (`hashPassword`/`verifyPassword`, Workers-native `crypto.subtle`, no
   dependency), constant-time compared, salted per account. The session
   token only carries IDs — every request re-checks the account/group still
   exist in `adminGroups.json`, so revocation is immediate (next request),
-  not bounded by the 12h TTL. Password reset is admin-assisted only
-  (`POST /admin/accounts/:id/reset-password`) or self-service given the
-  current password (`POST /admin/accounts/me/change-password`) — no
-  email/SMS capability exists in this system and none was added for this.
+  not bounded by the 12h TTL. `findAccountByEmail()`/`emailTaken()`
+  replaced the old username-keyed lookups; `isValidEmail()` gates account
+  creation.
+- **Dual-mode account provisioning/reset (`provisionAccount()` in
+  worker.js)** — if `RESEND_API_KEY`/`RESEND_FROM_EMAIL` are both set
+  (Wrangler secret + `wrangler.toml` var), a new account or a password
+  reset emails a one-time setup link (`sendAccountSetupEmail()`, a
+  `type:'pwset'` HMAC token, 2h TTL, consumed by the new
+  `POST /admin/complete-signup`) instead of generating a temp password —
+  `admin.html` detects `?setToken=...` in its own URL and shows a
+  dedicated "set your password" screen instead of the login form. If
+  Resend isn't configured, both flows fall back to the original
+  shown-once temp-password behavior — no code change needed to switch
+  between the two, only the two config values. `POST /admin/forgot-password`
+  is a new **public**, enumeration-resistant endpoint (identical response
+  whether or not the email matches an account) that only does anything if
+  Resend is configured.
 - **`buckets.json`** — a parent-pointer tree (company → country → site →
   workgroup, depth varies per branch) plus a `fieldLevels` map (which
   whoami field is usable at which depth). Never read by the live
   `/bootstrap`/`/check-access` path. `isAtOrBelow()`/`isBelow()` are the
   two containment primitives everything else is built on (inclusive vs.
-  strict — see the function comments in `worker.js`).
+  strict — see the function comments in `worker.js`). `GET /admin/buckets`
+  also returns `canonicalFields` (`CANONICAL_FIELDS` in worker.js) so
+  `admin.html` can offer a dropdown of known whoami fields (plus a
+  "Custom…" fallback) when creating a bucket or registering a field level,
+  instead of a blind free-text box.
 - **The hardlock**: a non-root admin's `allow`/`blacklist` write only ever
-  submits their own condition; the Worker prepends the full ancestor
-  chain (`bucketConditionChain()`) before storing it, structurally
-  confining the rule to that admin's branch regardless of what field they
-  chose. `override`/`extraGrants` have no conditions to prepend onto, so
-  they're root-only, unconditionally.
+  submits their own condition (`ownConditions`); the Worker prepends the
+  full ancestor chain (`buildEntryConditions()`/`bucketConditionChain()`)
+  before storing it, structurally confining the rule to that admin's
+  branch regardless of what field they chose. `override`/`extraGrants`
+  have no conditions to prepend onto, so they're root-only,
+  unconditionally (`requireRoot` gate in
+  `handleAdminUpsertPermissionEntry`/`handleAdminDeletePermissionEntry`).
+  `admin.html`'s Permissions tab edit action re-derives the ancestor
+  count (`bucketConditionChainLength()`) to only expose the entry's own,
+  editable conditions — the inherited prefix is never shown as editable
+  and is always recomputed server-side from the chosen bucket on save,
+  never accepted verbatim from the client.
 - **`adminGroups.json`** — `{rootAccounts: [...], groups: [...]}`. Each
   group = shared bucket + delegation rights
   (`allowPeerAdminCreation`/`allowChildAdminCreation`) + a list of
-  username/password accounts; `rootAccounts` are ungrouped, full-access
+  email/password accounts; `rootAccounts` are ungrouped, full-access
   accounts (a normal-use alternative to `ROOT_ADMIN_TOKEN`). Accounts
   added/removed without redefining the group's own permission each time.
+- **Auto-`admin` grant + in-tool Admin tab.** `loadAdminAccountEmails()`
+  (edge-cached like `permissions.json`, fail-open to `{}` on error) builds
+  a lowercased set of every email across `rootAccounts` + all group
+  members. `handleCheckAccess` cross-references the logged-in whoami
+  email against that set after a normal `evaluateAccess()` grant, adding
+  `"admin"` on top if it matches — this never grants base tool access on
+  its own, only rides along on an already-successful check. `wo_tool.js`'s
+  Setup modal shows an "Admin" tab (ghost-styled, alongside Guide/Feedback)
+  only when `hasGrant('admin')` is true; clicking it just
+  `window.open(WORKER_BASE_URL + '/admin')`s — no admin data is ever
+  fetched into or held by the regular tool.
 - **No client-supplied sha for admin writes** — every write does its own
   fresh (uncached) GitHub read immediately before writing (see
   `fetchFileWithSha`/`loadPermissionsLive`/`loadBucketsDoc`/

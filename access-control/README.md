@@ -38,7 +38,7 @@ wrangler login
 
 This opens a browser to authorize Wrangler against your Cloudflare account (free account is fine — sign up at cloudflare.com if you don't have one).
 
-## 4. Set the two secrets
+## 4. Set the secrets
 
 From this `access-control/` directory:
 
@@ -60,7 +60,12 @@ wrangler secret put ROOT_ADMIN_TOKEN
 ```
 wrangler secret put ADMIN_SESSION_SECRET
 ```
-(same generation method — signs the session tokens issued by `/admin/login` once someone signs in with a real username/password, distinct from `TOKEN_SECRET` on purpose so the regular-user and admin credential classes never share a trust domain.)
+(same generation method — signs the session tokens issued by `/admin/login` once someone signs in with a real email/password, distinct from `TOKEN_SECRET` on purpose so the regular-user and admin credential classes never share a trust domain.)
+
+```
+wrangler secret put RESEND_API_KEY
+```
+(**optional.** A [Resend](https://resend.com) API key — get one free at resend.com. If set (along with `RESEND_FROM_EMAIL` in `wrangler.toml`, step 5), new admin accounts and password resets get a one-time emailed setup link instead of a temp password shown once in the admin UI. Skip this entirely and everything still works via the temp-password fallback — it's a pure upgrade, no code change needed either way, just this secret + that one var.)
 
 ## 5. Edit wrangler.toml
 
@@ -69,6 +74,7 @@ Open `wrangler.toml` and confirm/change:
 - `GITHUB_REPO` — the private repo's name from step 1.
 - `GITHUB_PUBLIC_REPO` — the public repo's name (`WO-Review-Tool` by default) — used by the admin tool's Version tab to read/write `version.json`.
 - `GITHUB_BRANCH` — usually `main`.
+- `RESEND_FROM_EMAIL` — only matters if you set `RESEND_API_KEY` above; the "from" address on account-setup/reset emails. `onboarding@resend.dev` works immediately with zero domain verification, but only delivers to the email your Resend account itself is registered under — fine for testing, swap to a verified real address before delegating to anyone else.
 
 ## 6. Deploy
 
@@ -120,9 +126,9 @@ The admin tool (`permissions.json`/`buckets.json`/`adminGroups.json`/`version.js
    ```
    curl -X POST https://<your-worker-url>/admin/root-accounts \
      -H "Authorization: Bearer <your ROOT_ADMIN_TOKEN>" -H "Content-Type: application/json" \
-     -d '{"username":"yourname","label":"Your Name"}'
+     -d '{"email":"you@yourcompany.com","label":"Your Name"}'
    ```
-   Returns `{"ok":true,"account":{...},"tempPassword":"..."}` — the temp password is shown **once**. Open `/admin` in a browser, sign in with that username/temp password, and you'll be prompted to set a real one immediately. Keep `ROOT_ADMIN_TOKEN` itself tucked away as the break-glass fallback ("Use a break-glass token instead" link on the login screen) rather than your everyday credential.
+   Without `RESEND_API_KEY`/`RESEND_FROM_EMAIL` configured (see step 4's secret list), returns `{"ok":true,"account":{...},"tempPassword":"..."}` — the temp password is shown **once**; open `/admin` in a browser, sign in with that email/temp password, and you'll be prompted to set a real one immediately. With Resend configured, returns `{"ok":true,"account":{...},"emailSent":true}` instead — you'll get a setup-link email at that address to click and set your own password. Keep `ROOT_ADMIN_TOKEN` itself tucked away as the break-glass fallback ("Use a break-glass token instead" link on the login screen) rather than your everyday credential.
 
 From there, open `/admin` in a browser, paste your `ROOT_ADMIN_TOKEN`, and start building out buckets/field levels/admin groups — see `PERMISSIONS_GUIDE.md`'s "Buckets, field levels & delegated admin groups" section for the model (hierarchy, who can delegate what, the ancestor-condition "hardlock" that keeps a delegated admin's rules confined to their branch).
 

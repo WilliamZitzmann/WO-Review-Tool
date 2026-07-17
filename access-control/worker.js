@@ -47,11 +47,23 @@
  *                                        repo (Cache-Control: no-store on
  *                                        the response). No data, no role —
  *                                        just the login form.
- *   POST /admin/login                  — public. Body { username, password
- *                                        }. Real accounts (PBKDF2-hashed
- *                                        passwords), not raw bearer tokens
+ *   POST /admin/login                  — public. Body { email, password }.
+ *                                        Real accounts (PBKDF2-hashed
+ *                                        passwords, email as the
+ *                                        identifier), not raw bearer tokens
  *                                        — returns a signed session token
  *                                        on success. See handleAdminLogin.
+ *   POST /admin/complete-signup        — public. Body { token, newPassword
+ *                                        }. Redeems a one-time emailed
+ *                                        setup/reset link (see
+ *                                        sendAccountSetupEmail), sets the
+ *                                        account's password, logs them in.
+ *   POST /admin/forgot-password        — public. Body { email }. Self-
+ *                                        service reset — always returns the
+ *                                        same generic response regardless
+ *                                        of whether the email matched an
+ *                                        account (no enumeration signal).
+ *                                        No-op if Resend isn't configured.
  *   All other /admin/* routes require `Authorization: Bearer <token>`,
  *   resolved by resolveAdminIdentity() — either ROOT_ADMIN_TOKEN (a
  *   Wrangler secret, unconditional break-glass, bypasses adminGroups.json
@@ -63,15 +75,22 @@
  *   model (buckets, field levels, admin groups/accounts, the
  *   ancestor-condition "hardlock" prepend). Route list:
  *     POST   /admin/login
+ *     POST   /admin/complete-signup
+ *     POST   /admin/forgot-password
  *     POST   /admin/accounts/me/change-password
  *     POST   /admin/accounts/:id/reset-password
  *     GET    /admin/root-accounts
  *     POST   /admin/root-accounts
  *     DELETE /admin/root-accounts/:id
  *     GET    /admin/permissions
- *     POST   /admin/permissions/:section        (allow|blacklist|override|extraGrants)
+ *     POST   /admin/permissions/:section        (allow|blacklist|override|extraGrants —
+ *                                                  all four are condition-based, {conditions[],
+ *                                                  grants?} — a non-root submission's grants
+ *                                                  silently collapse to just ["user"], dev/beta_*
+ *                                                  are root-only)
  *     DELETE /admin/permissions/:section/:id
- *     GET    /admin/buckets
+ *     GET    /admin/buckets                     — also returns canonicalFields (known whoami
+ *                                                  field names) for the admin UI's field picker
  *     POST   /admin/buckets
  *     PATCH  /admin/buckets/:id
  *     DELETE /admin/buckets/:id?cascade=true
@@ -79,9 +98,11 @@
  *     PATCH  /admin/field-levels
  *     GET    /admin/groups
  *     POST   /admin/groups
- *     POST   /admin/groups/:id/members          — creates an ACCOUNT (username
- *                                                  + temp password shown once),
- *                                                  not a bearer token.
+ *     POST   /admin/groups/:id/members          — creates an ACCOUNT (email +
+ *                                                  either a temp password shown
+ *                                                  once, or an emailed setup link
+ *                                                  if Resend is configured — see
+ *                                                  provisionAccount)
  *     DELETE /admin/groups/:id/members/:memberId
  *     DELETE /admin/groups/:id
  *     GET    /admin/version
@@ -94,11 +115,21 @@
  *   GitHub 409 (two writes landing in the same instant) is surfaced as a
  *   plain error for the human to retry — extremely rare at this scale.
  *
- * No password reset via email/SMS - there is no email-sending capability
- * in this system and none is being added for this. Reset is always
- * admin-assisted (someone with authority over the account's bucket, or
- * root, triggers /admin/accounts/:id/reset-password) or self-service via
- * /admin/accounts/me/change-password (requires knowing the current one).
+ * Password reset — two paths, both eventually funnel through the same
+ * emailed-link mechanism once Resend is configured (RESEND_API_KEY +
+ * RESEND_FROM_EMAIL): self-service (/admin/forgot-password) or admin-
+ * assisted (/admin/accounts/:id/reset-password, for someone who can't
+ * self-serve or before Resend is set up). If Resend ISN'T configured,
+ * account creation/reset falls back to showing a temp password once in
+ * the admin UI instead — the system stays fully functional either way,
+ * see isEmailSendingConfigured()/provisionAccount().
+ *
+ * Regular-user `admin` grant: handleCheckAccess cross-references the
+ * whoami email against every admin-account email (loadAdminAccountEmails,
+ * edge-cached like permissions.json) and adds an `admin` grant on top of
+ * an already-granted result — wo_tool.js shows an Admin button when this
+ * grant is present, linking here. Deliberately only ever ADDS to an
+ * existing grant, never grants regular tool access on its own.
  *
  * Required secrets (wrangler secret put ...):
  *   GITHUB_PAT            — fine-grained PAT covering BOTH repos (public
@@ -119,13 +150,23 @@
  *                            POST /admin/root-accounts). Never stored
  *                            inside adminGroups.json itself.
  *   ADMIN_SESSION_SECRET   — random string, signs admin session tokens
- *                            issued by /admin/login. A distinct secret
+ *                            issued by /admin/login, AND the one-time
+ *                            setup/reset links emailed by
+ *                            sendAccountSetupEmail (a distinct `type`
+ *                            claim keeps the two token kinds from being
+ *                            confused with each other). A distinct secret
  *                            from TOKEN_SECRET on purpose — the two
  *                            credential classes (regular-user vs. admin)
  *                            shouldn't share a trust domain.
+ *   RESEND_API_KEY         — optional. If unset (along with RESEND_FROM_EMAIL
+ *                            below), email sending is simply skipped and
+ *                            everything falls back to on-screen temp
+ *                            passwords — see isEmailSendingConfigured().
  *
  * Required vars (wrangler.toml [vars]):
  *   GITHUB_OWNER, GITHUB_REPO (private repo), GITHUB_PUBLIC_REPO, GITHUB_BRANCH
+ *   RESEND_FROM_EMAIL      — optional, not sensitive (just an address) — see
+ *                            RESEND_API_KEY above.
  */
 
 const TOKEN_TTL_MS = 2 * 60 * 1000; // 2 minutes — used almost immediately after issue
@@ -230,19 +271,28 @@ function evalCondition(user, cond) {
     }
 }
 
+// A missing/empty conditions array must NEVER match — an override/allow/
+// blacklist entry with no conditions is a data bug (e.g. a pre-migration
+// record), not "matches everyone." Array.prototype.every() on [] is
+// vacuously true, which would silently grant universal access if this
+// guard weren't here.
 function evalGroup(user, conditions) {
-    return (conditions || []).every(function(c) { return evalCondition(user, c); });
+    return Array.isArray(conditions) && conditions.length > 0 &&
+        conditions.every(function(c) { return evalCondition(user, c); });
 }
 
 // Precedence: override -> blacklist -> allow -> default deny.
+// override/blacklist/allow are ALL condition-based now (AND within one
+// entry's conditions[], OR across entries in the same list) — override
+// used to be a bare username-equality match; that's now just what it
+// migrates to (a single {field:"username",op:"eq",value:"..."} condition),
+// not a separate code path. See PERMISSIONS_GUIDE.md's migration note.
 function evaluateAccess(perms, user) {
-    var username = String(user.username || '').toLowerCase();
-
     var override = (perms.override || []).find(function(o) {
-        return String(o.username || '').toLowerCase() === username;
+        return evalGroup(user, o.conditions);
     });
     if (override) {
-        return { granted: true, grants: resolveGrants(perms, username, override.grants) };
+        return { granted: true, grants: resolveGrants(perms, user, override.grants) };
     }
 
     // blacklist entries are {bucketId, conditions} objects (bucketId is
@@ -259,39 +309,50 @@ function evaluateAccess(perms, user) {
         return evalGroup(user, group.conditions);
     });
     if (allowMatch) {
-        return { granted: true, grants: resolveGrants(perms, username, allowMatch.grants) };
+        return { granted: true, grants: resolveGrants(perms, user, allowMatch.grants) };
     }
 
     return { granted: false };
 }
 
 // Merges the base grants a user got from their matching override/allow rule
-// with any extra flags called out for them by name in perms.extraGrants —
-// this is the server-side replacement for the console
-// __woEnableBeta/__woEnableDev commands, not a separate access gate of its
-// own. Lets one person hold multiple grants at once (e.g. dev + beta_0)
-// without needing a dedicated override entry for every combination.
-function resolveGrants(perms, username, baseGrants) {
+// with any extra flags from every perms.extraGrants entry whose conditions
+// ALSO match this user — this is the server-side replacement for the
+// console __woEnableBeta/__woEnableDev commands, not a separate access gate
+// of its own. Lets one person hold multiple grants at once (e.g. dev +
+// beta_0) without needing a dedicated override entry for every combination.
+// extraGrants used to be a {username: [grants]} map (exact-match only, no
+// conditions) — now an array of {conditions[], grants[]} like every other
+// list here, so ALL matching entries contribute (not just one), same OR-
+// across-entries/AND-within-an-entry rule as override/allow/blacklist.
+function resolveGrants(perms, user, baseGrants) {
     var set = {};
     (baseGrants && baseGrants.length ? baseGrants : ['user']).forEach(function(g) { set[g] = true; });
-    var extraGrants = perms.extraGrants || {};
-    var key = Object.keys(extraGrants).filter(function(k) { return k.toLowerCase() === username; })[0];
-    (key ? extraGrants[key] : []).forEach(function(g) { set[g] = true; });
+    (perms.extraGrants || []).forEach(function(entry) {
+        if (evalGroup(user, entry.conditions)) {
+            (entry.grants || []).forEach(function(g) { set[g] = true; });
+        }
+    });
     return Object.keys(set);
 }
 
-// Every field name referenced anywhere in the ruleset, plus username always
-// (needed for override/tier lookups even if no condition references it
-// directly) — the client only ever sends this list, not every whoami field.
+// Every field name referenced anywhere in the ruleset, plus username and
+// email always — username for override/tier lookups even if no condition
+// references it directly, email because handleCheckAccess's auto-`admin`-
+// grant cross-reference (see below) needs it regardless of whether any
+// permissions.json rule happens to mention it. The client only ever sends
+// this list, not every whoami field.
 function computeRequiredFields(perms) {
-    var fields = { username: true };
+    var fields = { username: true, email: true };
     function collect(conditions) {
         (conditions || []).forEach(function(c) {
             if (CANONICAL_FIELDS.indexOf(c.field) !== -1) fields[c.field] = true;
         });
     }
+    (perms.override || []).forEach(function(entry) { collect(entry.conditions); });
     (perms.blacklist || []).forEach(function(entry) { collect(entry.conditions); });
     (perms.allow || []).forEach(function(group) { collect(group.conditions); });
+    (perms.extraGrants || []).forEach(function(entry) { collect(entry.conditions); });
     return Object.keys(fields);
 }
 
@@ -350,6 +411,34 @@ async function handleBootstrap(env, ctx) {
     });
 }
 
+// Set of every admin-account email (root + every group's members),
+// edge-cached the same way loadPermissions() caches permissions.json — a
+// revoke/new-admin lands within this TTL, not the next Worker restart.
+// Deliberately fail-open-to-empty-set (not fail-closed) on any read/parse
+// error: a hiccup reading adminGroups.json should never block a real
+// user's regular tool access, it should just mean nobody gets the extra
+// `admin` grant for that one request.
+async function loadAdminAccountEmails(env, ctx) {
+    var raw;
+    try {
+        raw = await cachedFetchPrivateFile(env, ctx, 'adminGroups.json', null, PERMISSIONS_CACHE_TTL);
+    } catch (e) {
+        return {};
+    }
+    var doc;
+    try {
+        doc = JSON.parse(raw);
+    } catch (e) {
+        return {};
+    }
+    var set = {};
+    (doc.rootAccounts || []).forEach(function(a) { if (a.email) set[a.email.toLowerCase()] = true; });
+    (doc.groups || []).forEach(function(g) {
+        (g.members || []).forEach(function(m) { if (m.email) set[m.email.toLowerCase()] = true; });
+    });
+    return set;
+}
+
 async function handleCheckAccess(request, env, ctx) {
     var body;
     try {
@@ -361,6 +450,19 @@ async function handleCheckAccess(request, env, ctx) {
     var perms = await loadPermissions(env, ctx);
     var result = evaluateAccess(perms, user);
     if (!result.granted) return json({ granted: false });
+
+    // Auto-`admin` grant: a Maximo user whose whoami email matches a real
+    // admin-account email gets the `admin` grant on top of whatever they
+    // already qualified for — wo_tool.js shows an Admin button when this
+    // grant is present, linking to /admin. Only ever ADDS to an already-
+    // granted result (see the early `if (!result.granted)` return above) —
+    // being an admin of the access system doesn't independently grant the
+    // regular review tool itself.
+    var adminEmails = await loadAdminAccountEmails(env, ctx);
+    var userEmail = String(user.email || '').toLowerCase();
+    if (userEmail && adminEmails[userEmail] && result.grants.indexOf('admin') === -1) {
+        result.grants = result.grants.concat(['admin']);
+    }
 
     var token = await makeToken(env.TOKEN_SECRET, {
         grants: result.grants,
@@ -575,7 +677,7 @@ async function loadPermissionsLive(env) {
     doc.override = doc.override || [];
     doc.blacklist = doc.blacklist || [];
     doc.allow = doc.allow || [];
-    doc.extraGrants = doc.extraGrants || {};
+    doc.extraGrants = doc.extraGrants || []; // array of {conditions[], grants[]} - was a {username: grants[]} map before the condition-based migration
     doc.maximoHosts = doc.maximoHosts || [];
     return { doc: doc, sha: f.sha };
 }
@@ -609,19 +711,24 @@ function findAccountById(doc, accountId) {
     }
     return null;
 }
-function findAccountByUsername(doc, username) {
-    var uname = username.toLowerCase();
-    var root = (doc.rootAccounts || []).find(function(a) { return a.username.toLowerCase() === uname; });
+function findAccountByEmail(doc, email) {
+    var e = email.toLowerCase();
+    var root = (doc.rootAccounts || []).find(function(a) { return a.email.toLowerCase() === e; });
     if (root) return { account: root, group: null };
     for (var i = 0; i < (doc.groups || []).length; i++) {
         var g = doc.groups[i];
-        var m = (g.members || []).find(function(a) { return a.username.toLowerCase() === uname; });
+        var m = (g.members || []).find(function(a) { return a.email.toLowerCase() === e; });
         if (m) return { account: m, group: g };
     }
     return null;
 }
-function usernameTaken(doc, username) {
-    return !!findAccountByUsername(doc, username);
+function emailTaken(doc, email) {
+    return !!findAccountByEmail(doc, email);
+}
+// Deliberately simple (not RFC 5322) - good enough to catch typos/garbage
+// without rejecting a real work email over some obscure edge case.
+function isValidEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 // ── Bucket tree helpers ──
@@ -805,15 +912,17 @@ function validatePermissionsShape(doc) {
     if (!Array.isArray(doc.override)) throw new Error('override must be an array');
     if (!Array.isArray(doc.blacklist)) throw new Error('blacklist must be an array');
     if (!Array.isArray(doc.allow)) throw new Error('allow must be an array');
-    if (!doc.extraGrants || typeof doc.extraGrants !== 'object') throw new Error('extraGrants must be an object');
-    doc.blacklist.forEach(function(entry, i) {
-        if (!entry || !Array.isArray(entry.conditions)) throw new Error('blacklist[' + i + '] missing conditions array');
-    });
-    doc.allow.forEach(function(entry, i) {
-        if (!entry || !Array.isArray(entry.conditions)) throw new Error('allow[' + i + '] missing conditions array');
-    });
-    doc.override.forEach(function(entry, i) {
-        if (!entry || !entry.username) throw new Error('override[' + i + '] missing username');
+    if (!Array.isArray(doc.extraGrants)) throw new Error('extraGrants must be an array');
+    // override/allow/blacklist/extraGrants are all condition-based now (AND
+    // within one entry's conditions[], OR across entries) - every entry in
+    // all four needs a conditions array, no exceptions (override's old
+    // bare-username shape is a v1 concept, not a valid v2 entry).
+    ['override', 'blacklist', 'allow', 'extraGrants'].forEach(function(section) {
+        doc[section].forEach(function(entry, i) {
+            if (!entry || !Array.isArray(entry.conditions) || entry.conditions.length === 0) {
+                throw new Error(section + '[' + i + '] missing/empty conditions array');
+            }
+        });
     });
 }
 
@@ -872,7 +981,7 @@ async function handleAdminGetPermissions(request, env) {
         allow: allow, blacklist: blacklist,
         hidden: {
             override: permsLoad.doc.override.length,
-            extraGrants: Object.keys(permsLoad.doc.extraGrants).length,
+            extraGrants: permsLoad.doc.extraGrants.length,
             maximoHosts: permsLoad.doc.maximoHosts.length,
             allow: permsLoad.doc.allow.length - allow.length,
             blacklist: permsLoad.doc.blacklist.length - blacklist.length,
@@ -884,7 +993,26 @@ function buildEntryConditions(bucketId, ownConditions, byId) {
     return bucketConditionChain(bucketId, byId).concat(ownConditions || []);
 }
 
+var PERMISSION_SECTIONS = ['override', 'blacklist', 'allow', 'extraGrants'];
+// Which sections carry a `grants` field at all.
+var GRANTS_SECTIONS = ['override', 'allow', 'extraGrants'];
+// Grants a non-root admin is allowed to assign at all — everything else
+// (dev, beta_0, beta_N, ...) is root-only, regardless of which section.
+// Applies only where a non-root admin can reach this code path in the
+// first place (allow — override/extraGrants are already root-only via
+// requireRoot below), but enforced generically here rather than only in
+// the one section that currently needs it, so it can't be quietly
+// bypassed if another section ever gains non-root write access later.
+var NON_ROOT_ALLOWED_GRANTS = ['user'];
+
+// override/allow/blacklist/extraGrants are all condition-based now — one
+// upsert path for all four, differing only in: which are root-only
+// (override/extraGrants — nothing to prepend a hardlock onto for a plain
+// username match, so there was never a sound way to confine them to a
+// branch; see PERMISSIONS_GUIDE.md), and which carry a `grants` field
+// (blacklist doesn't grant anything, so it has none).
 async function handleAdminUpsertPermissionEntry(request, env, section) {
+    if (PERMISSION_SECTIONS.indexOf(section) === -1) return notFound('unknown section');
     var identity = await resolveAdminIdentity(request, env);
     requireAdmin(identity);
     if (section === 'override' || section === 'extraGrants') requireRoot(identity);
@@ -898,39 +1026,10 @@ async function handleAdminUpsertPermissionEntry(request, env, section) {
     var level = identityLevel(identity, byId);
     var now = new Date().toISOString();
 
-    if (section === 'extraGrants') {
-        var username = String(body.username || '').trim();
-        if (!username) badRequest('username required');
-        permsLoad.doc.extraGrants[username] = Array.isArray(body.grants) ? body.grants : [];
-        validatePermissionsShape(permsLoad.doc);
-        await writePrivateFile(env, 'permissions.json', JSON.stringify(permsLoad.doc, null, 2), permsLoad.sha,
-            'admin: ' + identity.label + ' set extraGrants for ' + username);
-        return json({ ok: true, username: username, grants: permsLoad.doc.extraGrants[username] });
-    }
-
-    if (section === 'override') {
-        var list = permsLoad.doc.override;
-        var entry = body.id ? list.find(function(e) { return e.id === body.id; }) : null;
-        if (body.id && !entry) return notFound('override entry not found');
-        var newEntry = {
-            id: entry ? entry.id : genId('ovr'),
-            username: String(body.username || '').trim(),
-            grants: Array.isArray(body.grants) ? body.grants : ['user'],
-            bucketId: body.bucketId || null,
-            lastModifiedBy: identity.label, lastModifiedAt: now,
-        };
-        if (!newEntry.username) badRequest('username required');
-        if (entry) { Object.assign(entry, newEntry); } else { list.push(newEntry); }
-        validatePermissionsShape(permsLoad.doc);
-        await writePrivateFile(env, 'permissions.json', JSON.stringify(permsLoad.doc, null, 2), permsLoad.sha,
-            'admin: ' + identity.label + ' ' + (entry ? 'updated' : 'created') + ' override for ' + newEntry.username);
-        return json({ ok: true, entry: newEntry });
-    }
-
-    // section === 'allow' | 'blacklist'
     var bucketId = body.bucketId != null ? body.bucketId : null;
     if (!identity.isRoot && !isAtOrBelow(bucketId, identity.bucketId, byId)) forbid('target bucket outside your scope');
     var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions : [];
+    if (!ownConditions.length) badRequest('at least one condition is required');
     ownConditions.forEach(function(c) {
         if (!canUseField(level, c.field, bucketsLoad.doc.fieldLevels)) forbid('field "' + c.field + '" not permitted at your level');
     });
@@ -944,21 +1043,27 @@ async function handleAdminUpsertPermissionEntry(request, env, section) {
     if (existing && !identity.isRoot && !isAtOrBelow(existing.bucketId, identity.bucketId, byId)) forbid('existing entry outside your scope');
 
     var conditions = buildEntryConditions(bucketId, ownConditions, byId);
-    var newEntry2 = {
-        id: existing ? existing.id : genId(section === 'allow' ? 'alw' : 'blk'),
+    var newEntry = {
+        id: existing ? existing.id : genId(section.slice(0, 3)),
         bucketId: bucketId,
         conditions: conditions,
         lastModifiedBy: identity.label, lastModifiedAt: now,
     };
-    if (section === 'allow') newEntry2.grants = Array.isArray(body.grants) ? body.grants : ['user'];
-    if (existing) { Object.assign(existing, newEntry2); } else { arr.push(newEntry2); }
+    if (GRANTS_SECTIONS.indexOf(section) !== -1) {
+        var grants = Array.isArray(body.grants) && body.grants.length ? body.grants : ['user'];
+        if (!identity.isRoot) grants = grants.filter(function(g) { return NON_ROOT_ALLOWED_GRANTS.indexOf(g) !== -1; });
+        if (!grants.length) grants = ['user'];
+        newEntry.grants = grants;
+    }
+    if (existing) { Object.assign(existing, newEntry); } else { arr.push(newEntry); }
     validatePermissionsShape(permsLoad.doc);
     await writePrivateFile(env, 'permissions.json', JSON.stringify(permsLoad.doc, null, 2), permsLoad.sha,
-        'admin: ' + identity.label + ' ' + (existing ? 'updated' : 'created') + ' ' + section + ' rule (bucket ' + (bucketId || 'root') + ')');
-    return json({ ok: true, entry: newEntry2 });
+        'admin: ' + identity.label + ' ' + (existing ? 'updated' : 'created') + ' ' + section + ' entry (bucket ' + (bucketId || 'root') + ')');
+    return json({ ok: true, entry: newEntry });
 }
 
 async function handleAdminDeletePermissionEntry(request, env, section, id) {
+    if (PERMISSION_SECTIONS.indexOf(section) === -1) return notFound('unknown section');
     var identity = await resolveAdminIdentity(request, env);
     requireAdmin(identity);
     if (section === 'override' || section === 'extraGrants') requireRoot(identity);
@@ -967,20 +1072,11 @@ async function handleAdminDeletePermissionEntry(request, env, section, id) {
     var bucketsLoad = await loadBucketsDoc(env);
     var byId = bucketsById(bucketsLoad.doc.buckets);
 
-    if (section === 'extraGrants') {
-        var username = decodeURIComponent(id);
-        delete permsLoad.doc.extraGrants[username];
-        validatePermissionsShape(permsLoad.doc);
-        await writePrivateFile(env, 'permissions.json', JSON.stringify(permsLoad.doc, null, 2), permsLoad.sha,
-            'admin: ' + identity.label + ' removed extraGrants for ' + username);
-        return json({ ok: true });
-    }
-
     var arr = permsLoad.doc[section];
     var idx = arr.findIndex(function(e) { return e.id === id; });
     if (idx === -1) return notFound(section + ' entry not found');
     var target = arr[idx];
-    if (section !== 'override' && !identity.isRoot && !isAtOrBelow(target.bucketId, identity.bucketId, byId)) forbid('entry outside your scope');
+    if (!identity.isRoot && !isAtOrBelow(target.bucketId, identity.bucketId, byId)) forbid('entry outside your scope');
     arr.splice(idx, 1);
     validatePermissionsShape(permsLoad.doc);
     await writePrivateFile(env, 'permissions.json', JSON.stringify(permsLoad.doc, null, 2), permsLoad.sha,
@@ -996,7 +1092,10 @@ async function handleAdminGetBuckets(request, env) {
     var byId = bucketsById(bucketsLoad.doc.buckets);
     var visible = identity.isRoot ? bucketsLoad.doc.buckets :
         bucketsLoad.doc.buckets.filter(function(b) { return isAtOrBelow(b.id, identity.bucketId, byId); });
-    return json({ buckets: visible, fieldLevels: bucketsLoad.doc.fieldLevels, level: identityLevel(identity, byId) });
+    return json({
+        buckets: visible, fieldLevels: bucketsLoad.doc.fieldLevels, level: identityLevel(identity, byId),
+        canonicalFields: CANONICAL_FIELDS, // known whoami field names, for the admin UI's field picker (§ registered fieldLevels keys cover any custom ones already in use)
+    });
 }
 
 async function handleAdminCreateBucket(request, env) {
@@ -1225,14 +1324,75 @@ async function handleAdminCreateGroup(request, env) {
     return json({ ok: true, group: newGroup });
 }
 
+// ── Email (Resend) — optional. If RESEND_API_KEY/RESEND_FROM_EMAIL aren't
+// configured, account creation/reset falls back to showing a temp password
+// once in the admin UI (the original behavior) instead of failing outright
+// — the system stays fully functional before Resend is set up, and
+// upgrades automatically the moment both are configured. ──
+function isEmailSendingConfigured(env) {
+    return !!(env.RESEND_API_KEY && env.RESEND_FROM_EMAIL);
+}
+async function sendEmail(env, to, subject, html) {
+    var res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + env.RESEND_API_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: env.RESEND_FROM_EMAIL, to: [to], subject: subject, html: html }),
+    });
+    if (!res.ok) {
+        var text = '';
+        try { text = await res.text(); } catch (e) {}
+        throw new Error('Resend send failed: HTTP ' + res.status + (text ? ' ' + text : ''));
+    }
+}
+var PWSET_TOKEN_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours - a one-time action link, shorter-lived than a 12h session
+// kind: 'welcome' (brand-new account) | 'reset'. originBase = the Worker's
+// own origin (derived from the incoming request, not hardcoded — see call
+// sites — so the link is correct whatever hostname it was actually reached
+// through).
+async function sendAccountSetupEmail(env, account, kind, originBase) {
+    var token = await makeToken(env.ADMIN_SESSION_SECRET, { accountId: account.id, type: 'pwset', exp: Date.now() + PWSET_TOKEN_TTL_MS });
+    var link = originBase + '/admin?setToken=' + encodeURIComponent(token);
+    var subject = kind === 'reset' ? 'WO Review Tool admin — reset your password' : 'WO Review Tool admin — set your password';
+    var intro = kind === 'reset' ? 'A password reset was requested for your WO Review Tool admin account.' : 'An admin account was created for you on the WO Review Tool.';
+    var html = '<p>' + intro + '</p><p><a href="' + link + '">Set your password</a></p><p>This link expires in 2 hours and can only be used once. If you didn\'t expect this, you can ignore it.</p>';
+    await sendEmail(env, account.email, subject, html);
+}
+
+// Shared by handleAdminAddGroupMember/handleAdminCreateRootAccount — builds
+// the new account record and either emails a set-password link (Resend
+// configured) or generates a temp password shown once (not configured).
+async function provisionAccount(env, request, email, label, createdByLabel) {
+    var account = {
+        id: genId('acc'), email: email, label: String(label || email),
+        mustChangePassword: true, createdAt: new Date().toISOString(), createdBy: createdByLabel,
+    };
+    var result = { account: account };
+    if (isEmailSendingConfigured(env)) {
+        account.passwordHash = null; // no password until they complete setup via the emailed link
+        var originBase = new URL(request.url).origin;
+        try {
+            await sendAccountSetupEmail(env, account, 'welcome', originBase);
+            result.emailSent = true;
+        } catch (e) {
+            result.emailSent = false;
+            result.emailError = String(e && e.message || e);
+        }
+    } else {
+        var tempPassword = genTempPassword();
+        account.passwordHash = await hashPassword(tempPassword);
+        result.tempPassword = tempPassword;
+    }
+    return result;
+}
+
 async function handleAdminAddGroupMember(request, env, groupId) {
     var identity = await resolveAdminIdentity(request, env);
     requireAdmin(identity);
     var body;
     try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
-    var username = String(body.username || '').trim();
-    if (!username) badRequest('username required');
-    if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username)) badRequest('username must be 3-32 characters (letters, numbers, dot, underscore, hyphen only)');
+    var email = String(body.email || '').trim();
+    if (!email) badRequest('email required');
+    if (!isValidEmail(email)) badRequest('a valid email address is required');
 
     var groupsLoad = await loadAdminGroupsDoc(env);
     var group = groupsLoad.doc.groups.find(function(g) { return g.id === groupId; });
@@ -1243,35 +1403,43 @@ async function handleAdminAddGroupMember(request, env, groupId) {
         if (identity.groupId !== groupId) forbid('you can only add members to your own group');
         if (!identity.allowPeerAdminCreation) forbid('your group is not permitted to create peer admins');
     }
-    if (usernameTaken(groupsLoad.doc, username)) return json({ ok: false, error: 'username already taken' }, 409);
+    if (emailTaken(groupsLoad.doc, email)) return json({ ok: false, error: 'an account with that email already exists' }, 409);
 
-    var tempPassword = genTempPassword();
-    var member = {
-        id: genId('acc'), username: username, passwordHash: await hashPassword(tempPassword),
-        label: String(body.label || username), mustChangePassword: true,
-        createdAt: new Date().toISOString(), createdBy: identity.label,
-    };
+    var provisioned = await provisionAccount(env, request, email, body.label, identity.label);
+    var member = provisioned.account;
     group.members.push(member);
     await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
-        'admin: ' + identity.label + ' added account "' + username + '" to group "' + group.label + '"');
-    return json({ ok: true, member: { id: member.id, username: username, label: member.label }, tempPassword: tempPassword });
+        'admin: ' + identity.label + ' added account "' + email + '" to group "' + group.label + '"');
+    return json(Object.assign({ ok: true, member: { id: member.id, email: email, label: member.label } },
+        provisioned.tempPassword ? { tempPassword: provisioned.tempPassword } : { emailSent: provisioned.emailSent, emailError: provisioned.emailError }));
 }
 
-// ── Login (username/password -> signed session token) ──
+// ── Login (email/password -> signed session token) ──
 async function handleAdminLogin(request, env) {
     var body;
     try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
-    var username = String(body.username || '').trim();
+    var email = String(body.email || '').trim();
     var password = String(body.password || '');
-    if (!username || !password) return badRequest('username and password required');
+    if (!email || !password) return badRequest('email and password required');
 
     var groupsDoc = (await loadAdminGroupsDoc(env)).doc;
-    var found = findAccountByUsername(groupsDoc, username);
-    // Always run a full password derivation, even for a username that
-    // doesn't exist (against a dummy hash) - a login that short-circuits
-    // on "no such user" is a timing side-channel an attacker can use to
-    // enumerate valid usernames without ever guessing a password.
-    var ok = await verifyPassword(password, found ? found.account.passwordHash : DUMMY_PASSWORD_HASH);
+    var found = findAccountByEmail(groupsDoc, email);
+    // Always run a full password derivation, even for an email that doesn't
+    // exist or has no password yet (against a dummy hash) - a login that
+    // short-circuits on "no such account" is a timing side-channel an
+    // attacker can use to enumerate valid admin emails without ever
+    // guessing a password.
+    var hashToCheck = (found && found.account.passwordHash) ? found.account.passwordHash : DUMMY_PASSWORD_HASH;
+    var ok = await verifyPassword(password, hashToCheck);
+
+    if (found && !found.account.passwordHash) {
+        // Deliberately a more specific message than "invalid" here - a
+        // real usability need (an account mid-setup shouldn't look
+        // indistinguishable from a wrong password with no way out), at the
+        // documented cost of a slightly stronger enumeration signal than a
+        // pure timing-normalized login would give. See PERMISSIONS_GUIDE.md.
+        return json({ error: 'account setup not complete — check your email for a setup link, or use "forgot password" to send a new one' }, 403);
+    }
     if (!found || !ok) return json({ error: 'invalid username or password' }, 401);
 
     var isRoot = found.group === null;
@@ -1305,8 +1473,8 @@ async function handleAdminChangeOwnPassword(request, env) {
     var groupsLoad = await loadAdminGroupsDoc(env);
     var found = findAccountById(groupsLoad.doc, identity.accountId);
     if (!found) return notFound('account not found');
-    var ok = await verifyPassword(currentPassword, found.account.passwordHash);
-    if (!ok) return json({ error: 'current password is incorrect' }, 401);
+    var ok = await verifyPassword(currentPassword, found.account.passwordHash || DUMMY_PASSWORD_HASH);
+    if (!found.account.passwordHash || !ok) return json({ error: 'current password is incorrect' }, 401);
 
     found.account.passwordHash = await hashPassword(newPassword);
     found.account.mustChangePassword = false;
@@ -1315,9 +1483,66 @@ async function handleAdminChangeOwnPassword(request, env) {
     return json({ ok: true });
 }
 
-// ── Admin-assisted password reset (no email/SMS in this system - this is
-// the only reset path). Generates a temp password, shown once, and forces
-// a real change on next login via mustChangePassword. ──
+// ── Password setup / reset via emailed link (Resend configured) ──
+async function handleAdminCompleteSignup(request, env) {
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+    var data = await verifyToken(env.ADMIN_SESSION_SECRET, body.token);
+    if (!data || data.type !== 'pwset') return json({ error: 'invalid or expired link — ask for a new one' }, 401);
+    var newPassword = String(body.newPassword || '');
+    if (newPassword.length < 10) badRequest('new password must be at least 10 characters');
+
+    var groupsLoad = await loadAdminGroupsDoc(env);
+    var found = findAccountById(groupsLoad.doc, data.accountId);
+    if (!found) return notFound('account not found');
+    found.account.passwordHash = await hashPassword(newPassword);
+    found.account.mustChangePassword = false;
+    await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
+        'admin: ' + found.account.email + ' completed password setup via emailed link');
+
+    // Log them straight in as a convenience - clicking the emailed link
+    // already proved account ownership once, no reason to make them log in
+    // again immediately after.
+    var isRoot = found.group === null;
+    var bucketId = isRoot ? null : found.group.bucketId;
+    var level = 0;
+    if (!isRoot) {
+        var bucketsLoad = await loadBucketsDoc(env);
+        level = bucketDepth(bucketId, bucketsById(bucketsLoad.doc.buckets));
+    }
+    var sessionToken = await makeToken(env.ADMIN_SESSION_SECRET, { accountId: found.account.id, isRoot: isRoot, exp: Date.now() + ADMIN_SESSION_TTL_MS });
+    return json({ ok: true, token: sessionToken, role: isRoot ? 'root' : 'scoped', label: found.account.label, level: level, bucketId: bucketId });
+}
+
+// Self-service "forgot password" - public, always returns the same
+// generic response regardless of whether the email matched an account,
+// so a caller can't use this to enumerate valid admin emails. A no-op
+// (still returns ok:true) if Resend isn't configured yet - there's no
+// temp-password fallback here since there's no admin present to show it
+// to; use the admin-assisted reset-password endpoint instead.
+async function handleAdminForgotPassword(request, env) {
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+    var email = String(body.email || '').trim();
+    if (email && isEmailSendingConfigured(env)) {
+        var groupsDoc = (await loadAdminGroupsDoc(env)).doc;
+        var found = findAccountByEmail(groupsDoc, email);
+        if (found) {
+            try {
+                var originBase = new URL(request.url).origin;
+                await sendAccountSetupEmail(env, found.account, 'reset', originBase);
+            } catch (e) {} // swallow - response is identical either way
+        }
+    }
+    return json({ ok: true, message: 'If that email has an admin account, a reset link has been sent.' });
+}
+
+// ── Admin-assisted password reset — the fallback when self-service
+// "forgot password" isn't available to someone (or Resend isn't
+// configured yet): someone with authority over the account's bucket (or
+// root) triggers this directly. Same dual-mode as account creation — an
+// emailed link if Resend is configured, a temp password shown once if
+// not. ──
 async function handleAdminResetPassword(request, env, accountId) {
     var identity = await resolveAdminIdentity(request, env);
     requireAdmin(identity);
@@ -1330,15 +1555,28 @@ async function handleAdminResetPassword(request, env, accountId) {
     if (found.group === null && !identity.isRoot) forbid('only root can reset a root account\'s password');
     if (found.group !== null && !identity.isRoot && !isAtOrBelow(targetBucketId, identity.bucketId, byId)) forbid('account outside your scope');
 
+    if (isEmailSendingConfigured(env)) {
+        found.account.passwordHash = null;
+        found.account.mustChangePassword = true;
+        await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
+            'admin: ' + identity.label + ' reset the password for "' + found.account.email + '" (email link sent)');
+        var originBase = new URL(request.url).origin;
+        try {
+            await sendAccountSetupEmail(env, found.account, 'reset', originBase);
+            return json({ ok: true, email: found.account.email, emailSent: true });
+        } catch (e) {
+            return json({ ok: true, email: found.account.email, emailSent: false, emailError: String(e && e.message || e) });
+        }
+    }
     var tempPassword = genTempPassword();
     found.account.passwordHash = await hashPassword(tempPassword);
     found.account.mustChangePassword = true;
     await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
-        'admin: ' + identity.label + ' reset the password for "' + found.account.username + '"');
-    return json({ ok: true, username: found.account.username, tempPassword: tempPassword });
+        'admin: ' + identity.label + ' reset the password for "' + found.account.email + '"');
+    return json({ ok: true, email: found.account.email, tempPassword: tempPassword });
 }
 
-// ── Root accounts (username/password, full/unscoped access - a normal-use
+// ── Root accounts (email/password, full/unscoped access - a normal-use
 // alternative to pasting ROOT_ADMIN_TOKEN every time) ──
 async function handleAdminGetRootAccounts(request, env) {
     var identity = await resolveAdminIdentity(request, env);
@@ -1346,7 +1584,7 @@ async function handleAdminGetRootAccounts(request, env) {
     var groupsLoad = await loadAdminGroupsDoc(env);
     return json({
         accounts: groupsLoad.doc.rootAccounts.map(function(a) {
-            return { id: a.id, username: a.username, label: a.label, mustChangePassword: !!a.mustChangePassword, createdAt: a.createdAt, createdBy: a.createdBy };
+            return { id: a.id, email: a.email, label: a.label, mustChangePassword: !!a.mustChangePassword, createdAt: a.createdAt, createdBy: a.createdBy };
         }),
     });
 }
@@ -1355,23 +1593,20 @@ async function handleAdminCreateRootAccount(request, env) {
     requireRoot(identity);
     var body;
     try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
-    var username = String(body.username || '').trim();
-    if (!username) badRequest('username required');
-    if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username)) badRequest('username must be 3-32 characters (letters, numbers, dot, underscore, hyphen only)');
+    var email = String(body.email || '').trim();
+    if (!email) badRequest('email required');
+    if (!isValidEmail(email)) badRequest('a valid email address is required');
 
     var groupsLoad = await loadAdminGroupsDoc(env);
-    if (usernameTaken(groupsLoad.doc, username)) return json({ ok: false, error: 'username already taken' }, 409);
+    if (emailTaken(groupsLoad.doc, email)) return json({ ok: false, error: 'an account with that email already exists' }, 409);
 
-    var tempPassword = genTempPassword();
-    var account = {
-        id: genId('acc'), username: username, passwordHash: await hashPassword(tempPassword),
-        label: String(body.label || username), mustChangePassword: true,
-        createdAt: new Date().toISOString(), createdBy: identity.label,
-    };
+    var provisioned = await provisionAccount(env, request, email, body.label, identity.label);
+    var account = provisioned.account;
     groupsLoad.doc.rootAccounts.push(account);
     await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
-        'admin: ' + identity.label + ' created root account "' + username + '"');
-    return json({ ok: true, account: { id: account.id, username: username, label: account.label }, tempPassword: tempPassword });
+        'admin: ' + identity.label + ' created root account "' + email + '"');
+    return json(Object.assign({ ok: true, account: { id: account.id, email: email, label: account.label } },
+        provisioned.tempPassword ? { tempPassword: provisioned.tempPassword } : { emailSent: provisioned.emailSent, emailError: provisioned.emailError }));
 }
 async function handleAdminDeleteRootAccount(request, env, accountId) {
     var identity = await resolveAdminIdentity(request, env);
@@ -1465,6 +1700,8 @@ async function routeAdmin(request, env, ctx, pathname) {
     var method = request.method;
     if (pathname === '/admin' && method === 'GET') return handleAdminShell(env, ctx);
     if (pathname === '/admin/login' && method === 'POST') return handleAdminLogin(request, env);
+    if (pathname === '/admin/complete-signup' && method === 'POST') return handleAdminCompleteSignup(request, env);
+    if (pathname === '/admin/forgot-password' && method === 'POST') return handleAdminForgotPassword(request, env);
     if (pathname === '/admin/accounts/me/change-password' && method === 'POST') return handleAdminChangeOwnPassword(request, env);
     var mReset = /^\/admin\/accounts\/([^/]+)\/reset-password$/.exec(pathname);
     if (mReset && method === 'POST') return handleAdminResetPassword(request, env, mReset[1]);

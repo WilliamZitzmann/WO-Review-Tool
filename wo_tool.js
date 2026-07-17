@@ -32,7 +32,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26198.0822z';
+    var BUILD_ID = '26198.1443z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -6894,6 +6894,8 @@
             settings: '<path d="M12.57 6.9L14.24 6.56L14.24 9.44L12.57 9.1L12.01 10.46L13.43 11.39L11.39 13.43L10.46 12.01L9.1 12.57L9.44 14.24L6.56 14.24L6.9 12.57L5.54 12.01L4.61 13.43L2.57 11.39L3.99 10.46L3.43 9.1L1.76 9.44L1.76 6.56L3.43 6.9L3.99 5.54L2.57 4.61L4.61 2.57L5.54 3.99L6.9 3.43L6.56 1.76L9.44 1.76L9.1 3.43L10.46 3.99L11.39 2.57L13.43 4.61L12.01 5.54Z" stroke="currentColor" stroke-width="0.9" stroke-linejoin="round"/><circle cx="8" cy="8" r="2.4" stroke="currentColor" stroke-width="1.2"/>',
             update: '<path d="M12.8 5.2A5 5 0 1 0 13.5 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M12.8 2.5V5.2H10.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
             guide: '<path d="M2.5 3.5C2.5 3 2.9 2.7 3.4 2.8C5 3 6.5 3.6 8 4.6C9.5 3.6 11 3 12.6 2.8C13.1 2.7 13.5 3 13.5 3.5V11.5C13.5 12 13.1 12.3 12.6 12.4C11 12.6 9.5 13.2 8 14.2C6.5 13.2 5 12.6 3.4 12.4C2.9 12.3 2.5 12 2.5 11.5V3.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 4.6V14.2" stroke="currentColor" stroke-width="1.2"/>',
+            // Shield — links out to the Worker-hosted admin management page.
+            admin: '<path d="M8 2.4L13 4.2V7.6C13 10.8 10.9 13 8 13.7C5.1 13 3 10.8 3 7.6V4.2L8 2.4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5.7 8L7.2 9.5L10.3 6.3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>',
             feedback: '<path d="M2.5 3.7C2.5 3.1 3 2.6 3.6 2.6H12.4C13 2.6 13.5 3.1 13.5 3.7V9.3C13.5 9.9 13 10.4 12.4 10.4H6.5L3.8 12.7C3.5 12.9 3 12.7 3 12.3V10.4H3.6C3 10.4 2.5 9.9 2.5 9.3V3.7Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><circle cx="5.8" cy="6.5" r="0.55" fill="none" stroke="currentColor" stroke-width="1.1"/><circle cx="8" cy="6.5" r="0.55" fill="none" stroke="currentColor" stroke-width="1.1"/><circle cx="10.2" cy="6.5" r="0.55" fill="none" stroke="currentColor" stroke-width="1.1"/>',
             // Flask/beaker — conventional "beta/experimental" glyph.
             beta: '<path d="M6.3 2.6H9.7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M6.9 2.6V6.2L3.4 12.1C3 12.8 3.5 13.7 4.3 13.7H11.7C12.5 13.7 13 12.8 12.6 12.1L9.1 6.2V2.6" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5 10.4H11" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>',
@@ -6937,6 +6939,7 @@
             (hasGrant('dev') ? tabBtn('__s_update', 'update', 'Install') : '') +
             '</div>' +
             '<div class="wo-tab-group wo-tab-group-end">' +
+            (hasGrant('admin') ? tabBtn('__s_admin', 'admin', 'Admin', 'wo-tab-btn-ghost') : '') +
             tabBtn('__s_guide', 'guide', 'Guide', 'wo-tab-btn-ghost') +
             tabBtn('__s_feedback', 'feedback', 'Feedback', 'wo-tab-btn-ghost') +
             tabBtn('__s_exp', 'exp', 'Export', 'wo-tab-btn-ghost') +
@@ -6971,10 +6974,10 @@
         attachTooltip(modal.querySelector('#__s_close'), 'Close');
         attachTooltip(modal.querySelector('#__s_formulas'), 'Formula reference');
         modal.querySelectorAll('.wo-tab-btn[data-tab-key]').forEach(function(b) {
-            var isGuideTab = b.getAttribute('data-tab-key') === 'guide';
+            var isLinkOutTab = b.getAttribute('data-tab-key') === 'guide' || b.getAttribute('data-tab-key') === 'admin';
             attachTooltip(b, function() {
                 var label = b.classList.contains('wo-tab-mode-icon') ? b.getAttribute('data-tab-label') : '';
-                if (isGuideTab) return (label ? label + ' — ' : '') + 'Opens in a new browser tab';
+                if (isLinkOutTab) return (label ? label + ' — ' : '') + 'Opens in a new browser tab';
                 return label;
             });
         });
@@ -11190,6 +11193,15 @@
             window.open('https://williamzitzmann.github.io/WO-Review-Tool/', '_blank');
         }
 
+        // ── ADMIN TAB ── Only rendered when the server granted 'admin' (see
+        // loadAdminAccountEmails/handleCheckAccess in worker.js — cross-
+        // references the logged-in whoami email against every admin
+        // account). Just links out to the Worker-hosted admin page; no
+        // admin data is ever fetched or held inside this tool.
+        function adminTab() {
+            window.open(WORKER_BASE_URL + '/admin', '_blank');
+        }
+
         // ── FEEDBACK TAB ── Files a GitHub Issue in the private repo via
         // the Worker's /feedback endpoint (needs a fresh access token, same
         // as fetching the tool itself — that's what keeps this from being
@@ -11503,6 +11515,7 @@
                 content.scrollTop = tabScrollPos[id] || 0;
             };
         }
+        bindTab('__s_admin', adminTab);
         bindTab('__s_guide', guideTab);
         bindTab('__s_feedback', feedbackTab);
         bindTab('__s_rules', rulesTab, function() {

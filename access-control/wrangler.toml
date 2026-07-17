@@ -7,10 +7,18 @@ GITHUB_OWNER = "WilliamZitzmann"
 GITHUB_REPO = "WO-Review-Tool-Private"
 GITHUB_PUBLIC_REPO = "WO-Review-Tool"
 GITHUB_BRANCH = "main"
+# Not sensitive (just an email address) — a var, not a secret. Account-
+# creation/reset emails send FROM this address via Resend. onboarding@
+# resend.dev works immediately with zero domain verification, but only
+# delivers to the email your Resend account itself is registered under —
+# fine for testing, not for emailing other real admins. Swap to a real
+# verified address once you've set one up (config change, no redeploy).
+RESEND_FROM_EMAIL = "onboarding@resend.dev"
 
 # Secrets are NOT set here — set them with:
 #   wrangler secret put GITHUB_PAT
 #   wrangler secret put TOKEN_SECRET
 #   wrangler secret put ROOT_ADMIN_TOKEN
 #   wrangler secret put ADMIN_SESSION_SECRET
+#   wrangler secret put RESEND_API_KEY
 # See README.md for the full deploy walkthrough.

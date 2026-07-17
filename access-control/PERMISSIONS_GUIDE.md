@@ -8,12 +8,14 @@ Reminder of what this actually is: a **governance gate**, not a hard security bo
 
 Four steps, in this exact order, first match wins:
 
-1. **Override** — is this username in the `override` list? → granted immediately, skips everything else, including blacklist.
+1. **Override** — does any `override` entry's conditions fully match? → granted immediately, skips everything else, including blacklist.
 2. **Blacklist** — does any blacklist entry's conditions fully match? → denied, full stop.
 3. **Allow** — does any allow entry's conditions fully match? → granted.
 4. **Otherwise** → denied.
 
-Then, if granted, `extraGrants[username]` can add *extra* flags on top (see below) — it doesn't grant access on its own, only adds to the grants of someone who already got in via `override` or `allow`.
+`override`, `blacklist`, `allow`, and `extraGrants` are now **all the same shape**: a list of entries, each with a `conditions` list (all must match — AND) and, for `override`/`allow`/`extraGrants`, a `grants` list. Multiple entries in the same section are OR'd. `override` used to be a bare `{"username": "...", "grants": [...]}` list — it's now condition-based too, so "override for this one person" is just a single-condition entry: `{"conditions":[{"field":"username","op":"eq","value":"ZITZMWX"}], "grants":["dev"]}`.
+
+Then, if granted, any matching `extraGrants` entry can add *extra* flags on top (see below) — it doesn't grant access on its own, only adds to the grants of someone who already got in via `override` or `allow`.
 
 ## The fields you can write conditions against
 
@@ -46,48 +48,60 @@ A **group of conditions** (an allow entry's `conditions`, or a blacklist entry's
 ## What your current file actually grants
 
 ```json
-"override": [{ "username": "ZITZMWX", "grants": ["dev"] }],
+"override": [
+  { "id": "ove_...", "bucketId": null, "conditions": [{ "field": "username", "op": "eq", "value": "ZITZMWX" }], "grants": ["user"] }
+],
 "blacklist": [],
 "allow": [
-  { "grants": ["user"], "conditions": [{ "field": "insertSite", "op": "eq", "value": "AVWP" }] },
-  { "grants": ["user"], "conditions": [{ "field": "email", "op": "endsWith", "value": "@abbvie.com" }] }
+  { "id": "all_...", "grants": ["user"], "bucketId": null, "conditions": [{ "field": "insertSite", "op": "eq", "value": "AVWP" }] }
 ],
-"extraGrants": { "ZITZMWX": ["dev", "beta_0"] }
+"extraGrants": [
+  { "id": "ext_...", "bucketId": null, "conditions": [{ "field": "username", "op": "eq", "value": "ZITZMWX" }], "grants": ["dev", "beta_0"] }
+]
 ```
 
-Plainly: **you** (`ZITZMWX`) always get in with `dev` (and `beta_0`, from `extraGrants`), no matter what. Separately — and this is the wide-open part — **anyone at the AVWP site, OR anyone with any `@abbvie.com` email address**, gets `user` access. Since you said no one else is using it yet, nothing's actually happened as a result of this being broad, but it *is* effectively "all of AbbVie" as it stands. See "Narrowing this down" below if that's wider than you want before anyone else starts clicking the bookmarklet.
+Plainly: **you** (`ZITZMWX`) always get in (`override`, plain `user`) with `dev`/`beta_0` added on top via `extraGrants`. Separately — and this is the wide-open part — **anyone at the AVWP site** gets `user` access. Since you said no one else is using it yet, nothing's actually happened as a result of this being broad, but see "Narrowing this down" below if that's wider than you want before anyone else starts clicking the bookmarklet. (`id` values are server-generated — the admin tool assigns real ones; the `...` above is just a placeholder for hand-editing.)
+
+**Migrating an older file**: if you're looking at a backup/example from before the admin tool's condition-based rewrite, `override` used to be `{"username": "...", "grants": [...]}` and `extraGrants` used to be a flat `{"username": ["grant", ...]}` map. Convert each to the shapes above — a single-condition entry (`field:"username", op:"eq", value:"<the old username>"`) reproduces the exact old behavior — and give every entry a unique `id` (the admin tool always writes one; only hand-edits risk missing this). **A missing/empty `conditions[]` is treated as a non-match, not a wildcard** — `evalGroup()` explicitly guards against `[].every(...)`'s vacuous `true`, so a mis-migrated entry just silently does nothing rather than accidentally granting everyone, but it also means it does nothing until fixed.
 
 ## Cookbook — common edits
 
 **Add a beta tester** (already has access via `allow`, or give them access + beta in one move):
 ```json
-"extraGrants": { "ZITZMWX": ["dev", "beta_0"], "SOMEUSER": ["beta_0"] }
+"extraGrants": [
+  { "id": "ext_1", "bucketId": null, "conditions": [{ "field": "username", "op": "eq", "value": "ZITZMWX" }], "grants": ["dev", "beta_0"] },
+  { "id": "ext_2", "bucketId": null, "conditions": [{ "field": "username", "op": "eq", "value": "SOMEUSER" }], "grants": ["beta_0"] }
+]
 ```
 If `SOMEUSER` doesn't already match an `allow` rule, add them to `override` too (plain `["user"]` grants is fine — `extraGrants` just adds beta on top):
 ```json
-"override": [{ "username": "ZITZMWX", "grants": ["dev"] }, { "username": "SOMEUSER", "grants": ["user"] }]
+"override": [
+  { "id": "ove_1", "bucketId": null, "conditions": [{ "field": "username", "op": "eq", "value": "ZITZMWX" }], "grants": ["dev"] },
+  { "id": "ove_2", "bucketId": null, "conditions": [{ "field": "username", "op": "eq", "value": "SOMEUSER" }], "grants": ["user"] }
+]
 ```
+Special grants like `dev`/`beta_0` on `override`/`allow`/`extraGrants` are **root-only** — a non-root admin's submitted `grants[]` gets silently filtered down to `["user"]` server-side, and `override`/`extraGrants` themselves reject any non-root write outright (403).
 
-**Add a dev tester** — same idea: `{"username":"SOMEUSER","grants":["dev"]}` directly in `override` if they shouldn't have to also match an allow rule, or add `"dev"` to their `extraGrants` list if they already get in some other way.
+**Add a dev tester** — same idea: an `override` entry conditioned on their `username`, `grants:["dev"]`, if they shouldn't have to also match an allow rule, or a matching `extraGrants` entry adding `"dev"` if they already get in some other way.
 
 **Block one specific person, no matter what else matches:**
 ```json
 "blacklist": [
-  { "bucketId": null, "conditions": [{ "field": "username", "op": "eq", "value": "JAMESXW" }] }
+  { "id": "bla_1", "bucketId": null, "conditions": [{ "field": "username", "op": "eq", "value": "JAMESXW" }] }
 ]
 ```
 
 **Block an entire site:**
 ```json
 "blacklist": [
-  { "bucketId": null, "conditions": [{ "field": "insertSite", "op": "eq", "value": "AVDU" }] }
+  { "id": "bla_2", "bucketId": null, "conditions": [{ "field": "insertSite", "op": "eq", "value": "AVDU" }] }
 ]
 ```
 
-**Narrowing today's wide-open access down to a specific list of people**, instead of "anyone at AVWP or anyone @abbvie.com":
+**Narrowing today's wide-open access down to a specific list of people**, instead of "anyone at AVWP":
 ```json
 "allow": [
-  { "grants": ["user"], "conditions": [{ "field": "username", "op": "in", "value": ["USER1", "USER2", "USER3"] }] }
+  { "id": "all_1", "grants": ["user"], "bucketId": null, "conditions": [{ "field": "username", "op": "in", "value": ["USER1", "USER2", "USER3"] }] }
 ]
 ```
 Remove the `insertSite`/`email` entries entirely once you've moved to an explicit list — otherwise both the list AND the broad rule are still live (allow entries are OR'd, so the broad one would still let everyone else in).
@@ -109,7 +123,7 @@ One Worker and one `permissions.json` can serve multiple companies at once — y
 
 2. **Add an allow rule scoped to them**, so their people don't accidentally also match an AbbVie-specific rule (and vice versa):
    ```json
-   { "grants": ["user"], "conditions": [{ "field": "email", "op": "endsWith", "value": "@othercompany.com" }] }
+   { "id": "all_othercompany", "bucketId": null, "grants": ["user"], "conditions": [{ "field": "email", "op": "endsWith", "value": "@othercompany.com" }] }
    ```
    or by site code if you know it, same pattern as AVWP above.
 
@@ -156,20 +170,26 @@ When a non-root admin creates an `allow`/`blacklist` entry, they only ever submi
 
 A field's level is (by design) the same number as the tree depth it's meant for — `insertSite` at level 3 means "only usable for buckets/rules at depth 3, by admins at depth 3 or more senior." A company-level admin (depth 1) can reference any field, including deep ones; a workgroup-level admin (depth 4) can only use workgroup-appropriate fields, not reach up and reference `email` even in their own rules. This doesn't add security (the hardlock above already makes any field choice safe) — it keeps authoring *intentional*, so a junior admin can't invent a confusing rule that technically only affects their branch but reads like it's about something else entirely. Only root can introduce a brand-new field name into `fieldLevels`; a more senior admin can reassign an existing field's level (move it between levels), but never a peer or junior.
 
+Both the "Create bucket" form (Buckets tab) and the "Register a new field" form (Field Levels tab) offer a **dropdown** of every field already known — the canonical whoami fields (`username`/`email`/`country`/`insertSite`/`langcode`/`displayName`) plus anything already registered in `fieldLevels` — with a "Custom…" option that reveals a free-text box for a genuinely new field name. You don't have to remember/retype exact field names once they exist somewhere in the system.
+
 ### Admin groups & accounts — delegate a permission once, add people to it
 
 Instead of one credential per person carrying its own copy of the same bucket+permissions, an **admin group** defines the permission once (which bucket, and two flags — can this group's members add peers to their own group, and can they create a new child group below them) and holds a list of **accounts**. Adding a fourth person to the same "Maintenance Workgroup Admins" group is just adding an account, not redefining anything.
 
-Each account is a real **username + password** (PBKDF2-hashed, never stored or shown in plaintext after creation) — not a bearer token. Logging in (`POST /admin/login`) exchanges a username/password for a short-lived signed session token, which is what the admin page actually uses for subsequent requests. That session is remembered for the browser tab (`sessionStorage`, cleared on tab close) so signing in once covers the whole visit — but revocation is still immediate: every request re-checks the account/group actually still exist, so deleting an account (or resetting its password) kills any live session on its very next request, not just once the token's 12-hour TTL runs out.
+Each account is keyed by a real **work email + password** (PBKDF2-hashed, never stored or shown in plaintext after creation) — not a bearer token. Logging in (`POST /admin/login`) exchanges an email/password for a short-lived signed session token, which is what the admin page actually uses for subsequent requests. That session is remembered for the browser tab (`sessionStorage`, cleared on tab close) so signing in once covers the whole visit — but revocation is still immediate: every request re-checks the account/group actually still exist, so deleting an account (or resetting its password) kills any live session on its very next request, not just once the token's 12-hour TTL runs out.
+
+If a whoami-matched admin account's email also matches what Maximo reports for that person, they'll additionally see an **Admin tab** appear right inside the WO Review Tool's own Setup modal (next to Guide/Feedback) — it just opens `/admin` in a new tab, a shortcut on top of the normal bookmark/URL, not a separate access path.
 
 **Cookbook — give someone AVWP-only admin access:**
 1. In `/admin`, go to Buckets, find (or create) the `abbvie-ie-avwp` bucket.
 2. Go to Groups, create a new group scoped to that bucket — pick whether its members can add peers to themselves and/or spin up workgroup-level groups beneath them.
-3. Add that person as an account (pick a username) — the admin tool shows a **temporary password once**. Give it to them directly (Slack, in person — whatever channel you'd trust with a password). They use it to log in, and are prompted to set a real password on that first login (`mustChangePassword`).
+3. Add that person as an account (their work email) — what happens next depends on whether Resend is configured (`RESEND_API_KEY`/`RESEND_FROM_EMAIL`, see `README.md`):
+   - **Resend configured**: they're emailed a one-time setup link. They click it, set their own password, and are signed in immediately — nothing to hand off manually.
+   - **Not configured**: the admin tool shows a **temporary password once**. Give it to them directly (Slack, in person — whatever channel you'd trust with a password). They use it to log in, and are prompted to set a real password on that first login (`mustChangePassword`).
 
-They can now open `/admin` from anywhere (no Maximo needed), log in with their own username/password, and manage `allow` rules + sub-buckets + sub-admin-groups within AVWP, and nothing outside it.
+They can now open `/admin` from anywhere (no Maximo needed), log in with their own email/password, and manage `allow` rules + sub-buckets + sub-admin-groups within AVWP, and nothing outside it. Existing entries can be edited in place (an "edit" button next to "delete" on every Override/Allow/Blacklist/extraGrants row) — editing only ever exposes that entry's *own* conditions; the inherited ancestor chain (§ hardlock above) is always re-derived from the chosen bucket on save, never shown as something you can tamper with directly.
 
-**Lost password / locked out**: there's no email/SMS reset in this system — nothing sends anything anywhere. Reset is always admin-assisted: anyone with authority over that account's bucket (or root) hits "reset password" on the Groups tab, which generates a fresh temporary password (shown once, same as creation) and forces a real change on next login. A logged-in account can also change its own password any time via the header's "Change password" button, given the current one.
+**Lost password / locked out**: if Resend is configured, "Forgot password?" on the login screen (and "reset password" on the Groups/Root Accounts tabs) emails a fresh one-time setup link — same enumeration-resistant response either way, so it never reveals whether an email has an account. Without Resend, reset is always admin-assisted: anyone with authority over that account's bucket (or root) hits "reset password," which generates a fresh temporary password (shown once, same as creation) and forces a real change on next login. A logged-in account can also change its own password any time via the header's "Change password" button, given the current one.
 
 ### Root — the one identity everything else is scoped relative to
 
