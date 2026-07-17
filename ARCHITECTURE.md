@@ -284,11 +284,89 @@ cookbook-level detail there.
    "applies to everyone at that bucket," not a vacuous access-control
    match, so there's no equivalent risk to guard against.
 
-**Deferred, not built yet for either mechanism**: the *consuming* side —
-a user's `wo_tool.js` install actually matching their whoami to a bucket
-and fetching/applying that bucket's resolved config at install time. Both
-mechanisms today only exist as admin-side tooling; `wo_tool.js`'s
-installer doesn't call either one.
+**The consuming side (`/admin/configs` only — `configProfileId` remains a
+label with no consumer)**: matching happens against config entries' full
+`conditions[]` (already ancestor-prepended at write time by
+`buildEntryConditions()`), not against `buckets.json` at all — buckets stay
+purely admin-layer metadata, never read on the regular-user hot path.
+
+- `matchesConfigConditions(user, conditions)` — deliberately the OPPOSITE
+  vacuous-match rule from `evalGroup()`: an empty `conditions[]` matches
+  EVERYONE (root/company-wide default), since it's not a security-relevant
+  grant the way an empty override/allow/blacklist condition list would be.
+  `resolveOrgConfigsForUser()` returns **every** matching entry, not a
+  single most-specific winner — the product decision here is "show every
+  config that applies, let the person pick," not auto-resolve one.
+- **`GET /bootstrap`** now also loads `configs/index.json` (cached,
+  fail-open to `{configs:[]}` via `loadConfigsIndexCached()`) and merges
+  every field referenced anywhere in any config's `conditions[]` into
+  `requiredFields` (`computeConfigRequiredFields()`) — otherwise a config
+  targeted purely by e.g. `insertSite` would never get that field sent by
+  loader.js if no `permissions.json` rule happened to reference it too.
+- **`POST /check-access`** resolves matching configs (metadata only —
+  `id`/`name`/`description`, never `bucketId`/`conditions`) and returns them
+  as `configs: [...]`, alongside the existing `granted`/`grants`/`token`.
+  The signed token also gains `configIds` (the matched ids) — this is what
+  authorizes the follow-up content fetch below without re-sending whoami.
+- **`GET /org-config-content?token=...`** (new route) — batch-fetches full
+  content (`configs/<id>.json`) for every id in the token's `configIds`,
+  returning `{configs: [{id, name, description, content}, ...]}`. Only ever
+  serves ids the token itself already carries (issued at check-access time
+  from a real match) — never re-evaluates conditions against fresh input,
+  so it can't be used to probe other configs by guessing ids.
+- **Listing vs. installing are deliberately split into two different
+  freshness tiers**, to avoid two problems at once: (a) a new revoke-risk
+  network trigger reachable just by opening a UI tab, and (b) managing a
+  stale-token window for content fetched well before it's actually used.
+  - **Listing (metadata only — `id`/`name`/`description`, never
+    `bucketId`/`conditions`/content)** rides entirely on check-access calls
+    that were ALREADY happening. `loader.js`'s `cacheOrgConfigsMetadata()`
+    writes `decision.configs` verbatim into `__wo_org_configs` on every
+    granted decision — no first-run gate, no extra round trip (it's already
+    in the response), and naturally rate-limited by the existing 15-min
+    grant cache (`GRANT_CACHE_TTL_MS`) like everything else in that file.
+    `wo_tool.js`'s `getOrgConfigs()` is a plain synchronous read of that
+    key — both `showInstaller()`'s first-run picker and the Setup >
+    Profiles "Organization Configs" card render from it with **zero**
+    network calls, so simply opening either UI can never trigger a revoke
+    check (a real behavior change from an earlier version of this feature
+    that auto-fetched — and could auto-revoke — on tab-open).
+  - **Installing** always fetches content LIVE, at the exact moment of the
+    click — `installOrgConfig(id)` calls `fetchOrgConfigsLive()`, which
+    re-runs the real check-access decision (`runCheckAccess()`, factored
+    out of `getWorkerAccessToken()` — the same function `/feedback` and
+    self-update already use) and then `/org-config-content` with the
+    freshly-minted token. This means there's no stale-token window to
+    manage (content is only ever pulled the instant it's needed) and no
+    bandwidth spent fetching content for configs nobody ends up installing.
+    A rejected fetch (offline, or access no longer granted) surfaces as a
+    normal "Failed — retry" / "Could not install" state, never an unhandled
+    rejection.
+- **`wo_tool.js`** applies installed org configs through the SAME profile
+  pipeline the old GitHub-preset installer uses
+  (`registerProfile`/`applyProfile`/`backupProfileBeforeOverwrite`) —
+  deliberately NOT `applyBackup()`, which would also overwrite
+  `src`/`profiles`/full `settings`. An org config's content
+  (`{rules, scan, fields, state, vars}`) gets flattened into a real profile
+  object (`id: 'org_' + configId`) before it touches the pipeline, so it
+  gets `migrateProfile()`'s version migrations and `applyProfile()`'s
+  settings-subset-merge for free, same as any other profile.
+  - **First run**: `showInstaller()`'s picker shows org configs (from the
+    cached metadata) in an "Available from your organization" section ABOVE
+    the existing "Community presets" list (`fetchProfileIndex()`, the old
+    public-repo system) — both render into separate DOM containers
+    (`#__inst_org_profiles` / `#__inst_public_profiles`) specifically so the
+    slower public-list fetch resolving later never wipes out a selection
+    the user already made in the (already-local, instant) org section. Never
+    auto-applies or auto-skips the picker — every matching config is just
+    another equally-selectable radio option, and selecting one still
+    triggers the live content fetch above on Install.
+  - **Existing users** get the same list, with the same "Import & Switch"
+    UX, in Setup > Profiles > "Organization Configs" — a re-import over an
+    already-installed org profile goes through the exact same
+    confirm-then-backup dialog as re-importing a GitHub preset. Listing is
+    passive/automatic (just a cache read); applying always requires the
+    explicit click + confirm. That's the deliberate safety line.
 
 ---
 

@@ -265,6 +265,22 @@ async function loadPermissions(env, ctx) {
     return JSON.parse(raw);
 }
 
+// Cached, fail-open read of configs/index.json for the REGULAR-user path
+// (bootstrap/check-access) — deliberately separate from the admin-side
+// loadConfigsIndexDoc() (uncached, throws, carries a sha for optimistic-
+// concurrency writes). A hiccup here must never block ordinary tool access,
+// same reasoning as loadAdminAccountEmails() below.
+async function loadConfigsIndexCached(env, ctx) {
+    try {
+        var raw = await cachedFetchPrivateFile(env, ctx, 'configs/index.json', null, PERMISSIONS_CACHE_TTL);
+        var doc = JSON.parse(raw);
+        doc.configs = doc.configs || [];
+        return doc;
+    } catch (e) {
+        return { configs: [] };
+    }
+}
+
 // ── Rule evaluation ──
 function evalCondition(user, cond) {
     var v = String(user[cond.field] || '').toLowerCase();
@@ -372,6 +388,42 @@ function computeRequiredFields(perms) {
     return Object.keys(fields);
 }
 
+// Every field referenced in any config entry's (already ancestor-prepended,
+// see buildEntryConditions) conditions — merged into computeRequiredFields'
+// list so /bootstrap tells loader.js to actually send whoami fields a
+// config's bucket chain depends on, even when nothing in permissions.json
+// happens to reference that field (e.g. access is granted purely by email
+// domain, but site-level config targeting still needs insertSite).
+function computeConfigRequiredFields(configsDoc) {
+    var fields = {};
+    (configsDoc.configs || []).forEach(function(entry) {
+        (entry.conditions || []).forEach(function(c) {
+            if (CANONICAL_FIELDS.indexOf(c.field) !== -1) fields[c.field] = true;
+        });
+    });
+    return Object.keys(fields);
+}
+
+// Which admin-authored configs apply to this whoami — ALL matches are
+// returned (not a single most-specific winner): the user explicitly wants
+// every applicable config to show up as a choice in the installer, not one
+// auto-picked default. Unlike evalGroup() (used for override/allow/
+// blacklist, where empty conditions[] must never vacuously match — that
+// would be an accidental universal access grant), a config's empty
+// conditions[] legitimately means "applies to everyone at that bucket" (or
+// literally everyone, for a root config with no ownConditions) — not a
+// security-relevant match, so Array.prototype.every()'s natural vacuous-
+// true on [] is exactly the wanted behavior here, not a bug to guard
+// against.
+function matchesConfigConditions(user, conditions) {
+    return Array.isArray(conditions) && conditions.every(function(c) { return evalCondition(user, c); });
+}
+function resolveOrgConfigsForUser(user, configsDoc) {
+    return (configsDoc.configs || []).filter(function(entry) {
+        return matchesConfigConditions(user, entry.conditions);
+    });
+}
+
 // ── Stateless short-lived signed tokens (HMAC-SHA256, no KV/storage) ──
 // Used ONLY for the regular-user flow (/check-access -> /tool/-feedback).
 // Admin tokens (adminGroups.json) are a completely different, longer-lived
@@ -421,9 +473,13 @@ async function verifyToken(secret, token) {
 // ── Regular-user handlers (unchanged behavior) ──
 async function handleBootstrap(env, ctx) {
     var perms = await loadPermissions(env, ctx);
+    var configsDoc = await loadConfigsIndexCached(env, ctx);
+    var fields = {};
+    computeRequiredFields(perms).forEach(function(f) { fields[f] = true; });
+    computeConfigRequiredFields(configsDoc).forEach(function(f) { fields[f] = true; });
     return json({
         maximoHosts: perms.maximoHosts || [],
-        requiredFields: computeRequiredFields(perms),
+        requiredFields: Object.keys(fields),
     });
 }
 
@@ -480,11 +536,30 @@ async function handleCheckAccess(request, env, ctx) {
         result.grants = result.grants.concat(['admin']);
     }
 
+    // Org-authored configs (buckets.json/configs/index.json, built via
+    // /admin/configs) that apply to this whoami — ALL matches, not just the
+    // most specific. Metadata only here (id/name/description); content is
+    // fetched separately via /org-config-content using the SAME token below,
+    // right after this response, while it's still fresh — see loader.js.
+    // Never blocks a grant decision: a configs-load hiccup just means an
+    // empty list, exactly like the admin-email cross-reference above.
+    var matchedConfigs = [];
+    try {
+        var configsDoc = await loadConfigsIndexCached(env, ctx);
+        matchedConfigs = resolveOrgConfigsForUser(user, configsDoc);
+    } catch (e) {
+        matchedConfigs = [];
+    }
+
     var token = await makeToken(env.TOKEN_SECRET, {
         grants: result.grants,
         exp: Date.now() + TOKEN_TTL_MS,
+        configIds: matchedConfigs.map(function(c) { return c.id; }),
     });
-    return json({ granted: true, grants: result.grants, token: token });
+    return json({
+        granted: true, grants: result.grants, token: token,
+        configs: matchedConfigs.map(function(c) { return { id: c.id, name: c.name, description: c.description || '' }; }),
+    });
 }
 
 async function createPrivateIssue(env, title, body) {
@@ -552,6 +627,46 @@ async function handleGetTool(request, env, ctx) {
         status: 200,
         headers: Object.assign({ 'Content-Type': 'application/javascript; charset=utf-8' }, corsHeaders()),
     });
+}
+
+// Full content for every org config the caller's /check-access token was
+// found to match (see configIds in handleCheckAccess) — a single batch call
+// rather than one round trip per config, since loader.js fetches this
+// eagerly (once, on a fresh install) right alongside fetchAndRunTool, using
+// the same short-lived token while it's still fresh. Only ever returns
+// configs the token itself already carries — never re-evaluates conditions
+// against fresh input here, so this can't be used to probe other configs by
+// guessing ids.
+async function handleGetOrgConfigContent(request, env, ctx) {
+    var url = new URL(request.url);
+    var token = url.searchParams.get('token');
+    var data = await verifyToken(env.TOKEN_SECRET, token);
+    if (!data) {
+        return json({ error: 'invalid or expired token' }, 403);
+    }
+    var ids = Array.isArray(data.configIds) ? data.configIds : [];
+    if (!ids.length) return json({ configs: [] });
+
+    var indexDoc = await loadConfigsIndexCached(env, ctx);
+    var byId = {};
+    (indexDoc.configs || []).forEach(function(c) { byId[c.id] = c; });
+
+    var results = [];
+    for (var i = 0; i < ids.length; i++) {
+        var id = ids[i];
+        var meta = byId[id];
+        if (!meta) continue; // config was deleted/moved since the token was issued
+        var raw;
+        try {
+            raw = await cachedFetchPrivateFile(env, ctx, 'configs/' + id + '.json', null, PERMISSIONS_CACHE_TTL);
+        } catch (e) {
+            continue; // content missing - skip rather than fail the whole batch
+        }
+        var content;
+        try { content = JSON.parse(raw); } catch (e) { continue; }
+        results.push({ id: id, name: meta.name, description: meta.description || '', content: content });
+    }
+    return json({ configs: results });
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -2058,6 +2173,9 @@ export default {
             }
             if (url.pathname === '/tool' && request.method === 'GET') {
                 return await handleGetTool(request, env, ctx);
+            }
+            if (url.pathname === '/org-config-content' && request.method === 'GET') {
+                return await handleGetOrgConfigContent(request, env, ctx);
             }
             if (url.pathname === '/feedback' && request.method === 'POST') {
                 return await handleFeedback(request, env);

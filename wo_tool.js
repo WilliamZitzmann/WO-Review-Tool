@@ -3,7 +3,8 @@
         RKEY = '__wo_rules_config',
         GSTATE = '__wo_group_state',
         SKEY = '__wo_scan_config',
-        VKEY = '__wo_vars_config';
+        VKEY = '__wo_vars_config',
+        ORG_CONFIGS_KEY = '__wo_org_configs'; // written by loader.js on a fresh install — see fetchOrgConfigsIfFirstRun()
 
     function getVars() {
         try {
@@ -32,7 +33,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26198.1443z';
+    var BUILD_ID = '26198.2151z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -1782,6 +1783,67 @@
         });
     }
 
+    // ── Admin-managed org configs (worker.js /admin/configs, resolved for
+    // this whoami by /check-access and fetched by loader.js) ──
+    // Completely separate system from the GitHub preset fetch above: no
+    // network call here at all — loader.js already fetched full content
+    // (right after check-access, using the same short-lived token) and left
+    // it in ORG_CONFIGS_KEY, so this just reads localStorage. Only ever
+    // populated on a fresh install (see loader.js's fetchOrgConfigsIfFirstRun),
+    // so an empty/missing key here is the normal case, not a failure.
+    function getOrgConfigs() {
+        try {
+            return JSON.parse(localStorage.getItem(ORG_CONFIGS_KEY) || '[]');
+        } catch (e) {
+            return [];
+        }
+    }
+
+    // Installs an org config through the SAME profile pipeline
+    // installProfileFromGitHub uses (backup-before-overwrite, register,
+    // activate, applyProfile's settings-subset-merge + migration) — never
+    // applyBackup, which would also overwrite src/profiles/full settings
+    // from the config blob. Content is always fetched LIVE at this exact
+    // moment (via fetchOrgConfigsLive(), defined below — re-runs the real
+    // check-access decision then /org-config-content with a freshly minted
+    // token) rather than from any earlier cache: the metadata list
+    // (getOrgConfigs()) can be minutes old, but an actual install always
+    // re-verifies eligibility and pulls current content, so there's no
+    // stale-token window to manage. The org config's content shape
+    // ({rules,scan,fields,state,vars}) is the same "Setup > Export" shape a
+    // profile's own body uses, just wrapped one level deeper under
+    // `.content` by the /org-config-content response — flattened here into
+    // a real profile object before it touches the pipeline.
+    function installOrgConfig(id) {
+        return fetchOrgConfigsLive().then(function(list) {
+            var entry = (list || []).filter(function(c) { return c.id === id; })[0];
+            if (!entry || !entry.content) return false;
+            localStorage.setItem(ORG_CONFIGS_KEY, JSON.stringify(list)); // opportunistic metadata refresh
+            var profileId = 'org_' + entry.id;
+            var p = {
+                id: profileId,
+                name: entry.name,
+                description: entry.description || '',
+                configVersion: 1,
+                rules: entry.content.rules,
+                scan: entry.content.scan,
+                fields: entry.content.fields,
+                state: entry.content.state,
+                vars: entry.content.vars,
+                settings: {},
+                savedAt: new Date().toISOString()
+            };
+            var backupId = backupProfileBeforeOverwrite(profileId);
+            registerProfile(p);
+            localStorage.setItem(ACTIVE_PROFILE_KEY, p.id); // before applyProfile's auto-save fires
+            applyProfile(p);
+            return {
+                ok: true,
+                backupId: backupId
+            };
+        });
+    }
+
 
     // ── File missing: clear dead handle and prompt ──
     function handleFileMissing() {
@@ -2710,7 +2772,7 @@
     // an unreachable Worker just rejects this promise, leaving the
     // currently-running tool untouched (caught by whichever self-update
     // path called this).
-    function getWorkerAccessToken() {
+    function runCheckAccess() {
         return xhrGetText(WORKER_BASE_URL + '/bootstrap').then(function(bootText) {
             var boot = JSON.parse(bootText);
             return readWhoamiCanonical().then(function(whoamiData) {
@@ -2723,12 +2785,36 @@
                 });
             });
         }).then(function(decision) {
-            if (decision.granted) {
-                localStorage.setItem(GRANTS_KEY, JSON.stringify(decision.grants || []));
-                return decision.token;
+            if (!decision.granted) {
+                revokeAccessLocally();
+                throw new Error('access revoked');
             }
-            revokeAccessLocally();
-            throw new Error('access revoked');
+            localStorage.setItem(GRANTS_KEY, JSON.stringify(decision.grants || []));
+            return decision;
+        });
+    }
+
+    function getWorkerAccessToken() {
+        return runCheckAccess().then(function(decision) {
+            return decision.token;
+        });
+    }
+
+    // Existing-user, manual-only counterpart to loader.js's first-run-only
+    // eager fetch (ORG_CONFIGS_KEY) — re-runs the live check-access decision
+    // and, if any org configs matched, fetches their full content via
+    // /org-config-content using the freshly-issued token. Never called
+    // automatically; only from the Setup > Profiles "Check for organization
+    // configs" button, so an existing user's config is never silently
+    // touched — see installOrgConfig()'s backup-before-overwrite for what
+    // happens once they actually pick one.
+    function fetchOrgConfigsLive() {
+        return runCheckAccess().then(function(decision) {
+            if (!decision.configs || !decision.configs.length) return [];
+            return xhrGetText(WORKER_BASE_URL + '/org-config-content?token=' + encodeURIComponent(decision.token)).then(function(text) {
+                var data = JSON.parse(text);
+                return data.configs || [];
+            });
         });
     }
 
@@ -6511,7 +6597,10 @@
                 '</div>' +
                 '<div style="border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:12px;">' +
                 '<b>Starting configuration</b>' +
-                '<div id="__inst_profiles" style="margin-top:8px;color:#888;">Loading available presets…</div>' +
+                '<div id="__inst_profiles" style="margin-top:8px;color:#888;">' +
+                '<div id="__inst_org_profiles"></div>' +
+                '<div id="__inst_public_profiles">Loading available presets…</div>' +
+                '</div>' +
                 '</div>' +
                 '<div style="display:flex;gap:8px;align-items:center;">' +
                 '<button id="__inst_go" style="background:#2ecc71;color:#000;font-weight:bold;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;" disabled>Install</button>' +
@@ -6529,27 +6618,60 @@
                 };
             }
 
+            // selectedProfileId is "org:<id>" or "pub:<id>" — the prefix
+            // picks which install pipeline goBtn.onclick uses below. Two
+            // sources, two DOM containers (#__inst_org_profiles never gets
+            // wiped out from under a user's click once the slower public
+            // fetch resolves): org config METADATA is already local (loader.js
+            // cached it from the check-access call that got us here — see
+            // ORG_CONFIGS_KEY) so the list renders immediately with no
+            // network wait, while the community preset list still needs
+            // fetchProfileIndex()'s round trip. Content for whichever one
+            // gets picked is only ever fetched live, at the moment Install
+            // is clicked (installOrgConfig()).
             var selectedProfileId = '';
-            var profilesDiv = modal.querySelector('#__inst_profiles');
             var goBtn = modal.querySelector('#__inst_go');
+            var orgDiv = modal.querySelector('#__inst_org_profiles');
+            var pubDiv = modal.querySelector('#__inst_public_profiles');
+
+            function profileRadioHtml(kind, item) {
+                var value = kind + ':' + item.id;
+                var checked = '';
+                if (!selectedProfileId) {
+                    selectedProfileId = value;
+                    checked = 'checked';
+                }
+                var orgStyle = kind === 'org' ? 'border-color:#2a4a5a;background:rgba(126,200,227,0.06);' : 'border-color:#333;';
+                return '<label style="display:block;padding:6px;border:1px solid;' + orgStyle + 'border-radius:4px;margin-bottom:6px;cursor:pointer;">' +
+                    '<input type="radio" name="__inst_profile" value="' + value + '" ' + checked + '> ' +
+                    '<b>' + item.name + '</b><br>' +
+                    '<span style="color:#888;margin-left:20px;">' + (item.description || '') + '</span>' +
+                    '</label>';
+            }
+
+            var orgConfigs = getOrgConfigs();
+            if (orgConfigs.length) {
+                orgDiv.innerHTML = '<div style="color:#7ec8e3;font-weight:bold;font-size:11px;margin-bottom:4px;">Available from your organization</div>' +
+                    orgConfigs.map(function(c) { return profileRadioHtml('org', c); }).join('');
+                orgDiv.querySelectorAll('input[name="__inst_profile"]').forEach(function(r) {
+                    r.onchange = function(e) { selectedProfileId = e.target.value; };
+                });
+                goBtn.disabled = false;
+            }
 
             fetchProfileIndex().then(function(list) {
                 if (!list || !list.length) {
-                    profilesDiv.innerHTML = '<div style="color:#e74c3c;">Could not load presets (offline?). You can skip and start from basic defaults, or load one later in Setup &gt; Profiles.</div>';
+                    if (!orgConfigs.length) {
+                        pubDiv.innerHTML = '<div style="color:#e74c3c;">Could not load presets (offline?). You can skip and start from basic defaults, or load one later in Setup &gt; Profiles.</div>';
+                    } else {
+                        pubDiv.innerHTML = '';
+                    }
                     return;
                 }
-                profilesDiv.innerHTML = list.map(function(p, i) {
-                    return '<label style="display:block;padding:6px;border:1px solid #333;border-radius:4px;margin-bottom:6px;cursor:pointer;">' +
-                        '<input type="radio" name="__inst_profile" value="' + p.id + '" ' + (i === 0 ? 'checked' : '') + '> ' +
-                        '<b>' + p.name + '</b><br>' +
-                        '<span style="color:#888;margin-left:20px;">' + (p.description || '') + '</span>' +
-                        '</label>';
-                }).join('');
-                selectedProfileId = list[0].id;
-                profilesDiv.querySelectorAll('input[name="__inst_profile"]').forEach(function(r) {
-                    r.onchange = function(e) {
-                        selectedProfileId = e.target.value;
-                    };
+                pubDiv.innerHTML = (orgConfigs.length ? '<div style="color:#aaa;font-weight:bold;font-size:11px;margin:10px 0 4px;">Community presets</div>' : '') +
+                    list.map(function(p) { return profileRadioHtml('pub', p); }).join('');
+                pubDiv.querySelectorAll('input[name="__inst_profile"]').forEach(function(r) {
+                    r.onchange = function(e) { selectedProfileId = e.target.value; };
                 });
                 goBtn.disabled = false;
             });
@@ -6564,10 +6686,20 @@
                 var statusEl = modal.querySelector('#__inst_status');
                 statusEl.textContent = 'Installing...';
                 goBtn.disabled = true;
-                installProfileFromGitHub(selectedProfileId).then(function(result) {
+                var sepIdx = selectedProfileId.indexOf(':');
+                var kind = selectedProfileId.slice(0, sepIdx);
+                var id = selectedProfileId.slice(sepIdx + 1);
+                var installPromise = kind === 'org' ? installOrgConfig(id) : installProfileFromGitHub(id);
+                installPromise.then(function(result) {
                     var ok = !!(result && result.ok);
                     statusEl.textContent = ok ? 'Done!' : 'Could not install — starting with basic defaults.';
                     setTimeout(finish, ok ? 300 : 1200);
+                }).catch(function() {
+                    // installOrgConfig() re-verifies access live and can reject
+                    // (offline, or access no longer granted) — never leave the
+                    // installer stuck on "Installing...".
+                    statusEl.textContent = 'Could not install — starting with basic defaults.';
+                    setTimeout(finish, 1200);
                 });
             };
 
@@ -11436,6 +11568,81 @@
                     });
                 });
             };
+
+            // ── Organization configs (admin-managed, /admin/configs) ──
+            // The list itself is a pure localStorage read (getOrgConfigs(),
+            // metadata only) — cached by loader.js on the tool's last real
+            // check-access call (piggybacked on the existing 15-min grant
+            // cache, no new network trigger from opening this tab). Content
+            // is only ever fetched live, at the exact moment "Import &
+            // Switch" is clicked (installOrgConfig() -> fetchOrgConfigsLive())
+            // — same re-import-with-backup UX as the GitHub presets card
+            // below, but nothing is ever applied without that explicit
+            // click + confirm.
+            var orgCardDiv = document.createElement('div');
+            orgCardDiv.className = 'wo-card';
+            orgCardDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Organization Configs</span></div>' +
+                '<div data-coll-body style="margin-top:7px;"><div id="__pf_org_list" style="color:var(--wo-muted);font-size:11px;"></div></div>';
+            content.appendChild(orgCardDiv);
+            makeCollapsible(orgCardDiv, 'Organization Configs', false);
+
+            (function renderOrgConfigsCard() {
+                var list = getOrgConfigs();
+                var listDiv = orgCardDiv.querySelector('#__pf_org_list');
+                if (!list || !list.length) {
+                    listDiv.innerHTML = '<div style="color:var(--wo-muted);font-size:11px;">No organization configs are currently available to you.</div>';
+                    return;
+                }
+                var byId = {};
+                list.forEach(function(c) { byId[c.id] = c; });
+                listDiv.innerHTML = list.map(function(c) {
+                    var already = !!profiles['org_' + c.id];
+                    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);margin-bottom:6px;background:var(--wo-field);">' +
+                        '<div style="font-size:11px;"><b>' + c.name + '</b><br><span style="color:var(--wo-muted);font-size:10px;">' + (c.description || '') + '</span></div>' +
+                        '<button type="button" class="__pf_org_import wo-btn" data-id="' + c.id + '" style="font-size:11px;padding:4px 9px;">' + (already ? 'Re-import &amp; Switch' : 'Import &amp; Switch') + '</button>' +
+                        '</div>';
+                }).join('');
+                listDiv.querySelectorAll('.__pf_org_import').forEach(function(btn) {
+                    btn.onclick = function() {
+                        var id = btn.getAttribute('data-id');
+                        var name = (byId[id] && byId[id].name) || id;
+                        var profileId = 'org_' + id;
+                        var already = !!profiles[profileId];
+                        function proceed() {
+                            btn.disabled = true;
+                            btn.textContent = 'Importing...';
+                            installOrgConfig(id).then(function(result) {
+                                var ok = !!(result && result.ok);
+                                if (ok) {
+                                    woAlert('Imported and switched.' + (result.backupId ? ' Your previous version was saved as a backup profile — see Local Profiles.' : '')).then(function() {
+                                        modal.remove();
+                                        render();
+                                    });
+                                } else {
+                                    btn.disabled = false;
+                                    btn.textContent = 'Failed — retry';
+                                }
+                            }).catch(function() {
+                                btn.disabled = false;
+                                btn.textContent = 'Failed — retry';
+                            });
+                        }
+                        if (already) {
+                            var isActive = getActiveProfileId() === profileId;
+                            var msg = 'Re-import "' + name + '"?\n\n' +
+                                (isActive ?
+                                    'This is your currently active config — it will be overwritten with the latest organization version.' :
+                                    'Your locally saved "' + name + '" profile will be overwritten with the latest organization version.') +
+                                '\n\nWhatever it currently holds will be saved as a backup profile first, so nothing is lost — but any local edits you made under this profile stop being the "' + name + '" profile once this runs.';
+                            woConfirm(msg).then(function(ok) {
+                                if (ok) proceed();
+                            });
+                        } else {
+                            proceed();
+                        }
+                    };
+                });
+            })();
 
             // ── GitHub presets ──
             var ghDiv = document.createElement('div');

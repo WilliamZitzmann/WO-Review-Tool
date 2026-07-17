@@ -18,6 +18,7 @@
     var TOOL_SRC_KEY = '__wo_tool_src'; // same key the tool itself has always used
     var HOSTS_CACHE_KEY = '__wo_known_hosts';
     var GRANTS_KEY = '__wo_grants'; // same key wo_tool.js's hasGrant()/console unlock commands read
+    var ORG_CONFIGS_KEY = '__wo_org_configs'; // same key wo_tool.js's showInstaller()/Setup > Profiles read
     var CONTACT_EMAIL = 'williamzitzmann@abbvie.com';
 
     function showBanner(text, isError) {
@@ -172,6 +173,20 @@
         }
     }
 
+    // Metadata (id/name/description — never content) for every org-authored
+    // config /check-access matched, so wo_tool.js's Setup > Profiles and the
+    // first-run installer can always show an up-to-date list with zero
+    // network calls of their own. This rides entirely on check-access calls
+    // that were ALREADY happening (gated by the 15-min grant cache, same as
+    // everything else here) — no new round trip, no new revoke-risk trigger
+    // surface. Full config CONTENT is deliberately never fetched here: it's
+    // only ever pulled live, at the exact moment a user clicks Install (see
+    // wo_tool.js's installOrgConfig()), so there's no stale-token window to
+    // manage and no bandwidth spent on configs nobody ends up installing.
+    function cacheOrgConfigsMetadata(matchedConfigs) {
+        localStorage.setItem(ORG_CONFIGS_KEY, JSON.stringify(matchedConfigs || []));
+    }
+
     function fetchAndRunTool(token) {
         return fetch(WORKER_BASE_URL + '/tool?token=' + encodeURIComponent(token)).then(function(r) {
             if (!r.ok) throw new Error('tool fetch HTTP ' + r.status);
@@ -218,6 +233,7 @@
                 localStorage.setItem(GRANTS_KEY, JSON.stringify(decision.grants || []));
                 writeGrantCache(decision.grants);
                 restoreFromRevokedBackupIfAny();
+                cacheOrgConfigsMetadata(decision.configs);
                 return fetchAndRunTool(decision.token);
             }
             // A POSITIVE deny — whoami was read fine, the Worker responded,
