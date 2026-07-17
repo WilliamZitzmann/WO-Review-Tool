@@ -33,7 +33,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26198.2151z';
+    var BUILD_ID = '26198.2242z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -1810,10 +1810,14 @@
     // (getOrgConfigs()) can be minutes old, but an actual install always
     // re-verifies eligibility and pulls current content, so there's no
     // stale-token window to manage. The org config's content shape
-    // ({rules,scan,fields,state,vars}) is the same "Setup > Export" shape a
-    // profile's own body uses, just wrapped one level deeper under
-    // `.content` by the /org-config-content response — flattened here into
-    // a real profile object before it touches the pipeline.
+    // ({rules,scan,fields,state,vars,settings}) is the same "Setup >
+    // Export"/profile shape wo_tool.js already produces, just wrapped one
+    // level deeper under `.content` by the /org-config-content response —
+    // flattened here into a real profile object before it touches the
+    // pipeline. `settings` is optional (an admin config authored by hand
+    // through admin.html may not include it) — when present it still only
+    // ever travels through applyProfile()'s PROFILE_SETTINGS_KEYS
+    // whitelist, same safety guarantee as any other profile.
     function installOrgConfig(id) {
         return fetchOrgConfigsLive().then(function(list) {
             var entry = (list || []).filter(function(c) { return c.id === id; })[0];
@@ -1830,7 +1834,7 @@
                 fields: entry.content.fields,
                 state: entry.content.state,
                 vars: entry.content.vars,
-                settings: {},
+                settings: entry.content.settings || {},
                 savedAt: new Date().toISOString()
             };
             var backupId = backupProfileBeforeOverwrite(profileId);

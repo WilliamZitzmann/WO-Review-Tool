@@ -347,7 +347,7 @@ purely admin-layer metadata, never read on the regular-user hot path.
   (`registerProfile`/`applyProfile`/`backupProfileBeforeOverwrite`) —
   deliberately NOT `applyBackup()`, which would also overwrite
   `src`/`profiles`/full `settings`. An org config's content
-  (`{rules, scan, fields, state, vars}`) gets flattened into a real profile
+  (`{rules, scan, fields, state, vars, settings?}`) gets flattened into a real profile
   object (`id: 'org_' + configId`) before it touches the pipeline, so it
   gets `migrateProfile()`'s version migrations and `applyProfile()`'s
   settings-subset-merge for free, same as any other profile.
