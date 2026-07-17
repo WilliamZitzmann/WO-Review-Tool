@@ -265,27 +265,27 @@ cookbook-level detail there.
   a single Worker environment is the actual trust boundary regardless of
   PAT count.
 
-**Two independent config mechanisms exist today, deliberately not merged:**
-1. `bucket.configProfileId` — a simple free-text label on a bucket,
-   resolved by nearest-ancestor-wins (`resolveConfigForBucket()`,
-   `GET /admin/buckets/:id/resolved-config`). No content storage — just a
-   string an admin can set, meant as a lightweight placeholder.
-2. **`/admin/configs`** (real config management, admin-side only) —
-   `configs/index.json` (lightweight metadata: name, description,
-   `bucketId`+`conditions` targeting) plus `configs/<id>.json` per config
-   (the actual content, same JSON shape as `wo_tool.js`'s Setup > Export/
-   Import). Full CRUD: upload (file or paste), download, duplicate (copy
-   an existing in-scope config's content into a new one — e.g. a site
-   admin duplicating a company-level config down to their own site),
-   rename/re-target/replace-content, delete. Targeting reuses
-   `buildEntryConditions()` — the exact same ancestor-hardlock as
-   permissions entries — except an empty `conditions[]` is allowed here
-   (unlike permissions): a config with no extra conditions just means
-   "applies to everyone at that bucket," not a vacuous access-control
-   match, so there's no equivalent risk to guard against.
+**`/admin/configs`** (the config management system) —
+`configs/index.json` (lightweight metadata: name, description,
+`bucketId`+`conditions` targeting) plus `configs/<id>.json` per config
+(the actual content, same JSON shape as `wo_tool.js`'s Setup > Export/
+Import). Full CRUD: upload (file or paste), download, duplicate (copy
+an existing in-scope config's content into a new one — e.g. a site
+admin duplicating a company-level config down to their own site),
+rename/re-target/replace-content, delete. Targeting reuses
+`buildEntryConditions()` — the exact same ancestor-hardlock as
+permissions entries — except an empty `conditions[]` is allowed here
+(unlike permissions): a config with no extra conditions just means
+"applies to everyone at that bucket," not a vacuous access-control
+match, so there's no equivalent risk to guard against.
 
-**The consuming side (`/admin/configs` only — `configProfileId` remains a
-label with no consumer)**: matching happens against config entries' full
+An earlier, separate `bucket.configProfileId` — a free-text label on a
+bucket, resolved by nearest-ancestor-wins — existed as a placeholder
+before this system was built. It was never wired to anything (no content
+storage, no consumer) and has been removed; buckets no longer carry that
+field.
+
+**The consuming side**: matching happens against config entries' full
 `conditions[]` (already ancestor-prepended at write time by
 `buildEntryConditions()`), not against `buckets.json` at all — buckets stay
 purely admin-layer metadata, never read on the regular-user hot path.

@@ -94,7 +94,6 @@
  *     POST   /admin/buckets
  *     PATCH  /admin/buckets/:id
  *     DELETE /admin/buckets/:id?cascade=true
- *     GET    /admin/buckets/:id/resolved-config
  *     PATCH  /admin/field-levels
  *     DELETE /admin/field-levels/:field       — refuses (409) if still referenced by a
  *                                                bucket or a permission rule's conditions
@@ -956,22 +955,6 @@ function bucketConditionChain(bucketId, byId) {
     return chain;
 }
 
-// Nearest-ancestor-wins config cascade. Pure — no wo_tool.js/configs/
-// index.json wiring here, this only answers "given a bucket, what's the
-// nearest-ancestor-or-self assigned config" for the admin UI's preview.
-function resolveConfigForBucket(bucketId, buckets) {
-    var byId = bucketsById(buckets);
-    var cur = bucketId, guard = 0;
-    while (cur != null) {
-        var node = byId[cur];
-        if (!node) return null;
-        if (node.configProfileId) return node.configProfileId;
-        cur = node.parentId;
-        if (++guard > 1000) return null;
-    }
-    return null;
-}
-
 // ── Field-level governance ──
 // A field's level defaults to 0 (root-only) if never registered — safe by
 // default, consistent with "untagged = full-admin-only" used elsewhere.
@@ -1314,7 +1297,6 @@ async function handleAdminCreateBucket(request, env) {
     var newBucket = {
         id: genId('bkt'), parentId: parentId, label: String(body.label || field),
         field: field, op: String(body.op || 'eq'), value: body.value != null ? body.value : '',
-        configProfileId: body.configProfileId || null,
         createdBy: identity.label, createdAt: new Date().toISOString(),
     };
     bucketsLoad.doc.buckets.push(newBucket);
@@ -1353,7 +1335,6 @@ async function handleAdminPatchBucket(request, env, id) {
     if (body.op !== undefined) bucket.op = String(body.op);
     if (body.value !== undefined) bucket.value = body.value;
     if (body.label !== undefined) bucket.label = String(body.label);
-    if (body.configProfileId !== undefined) bucket.configProfileId = body.configProfileId || null;
     bucket.lastModifiedBy = identity.label;
     bucket.lastModifiedAt = new Date().toISOString();
 
@@ -1419,26 +1400,13 @@ async function handleAdminDeleteBucket(request, env, id) {
     return json({ ok: true, warnings: warnings });
 }
 
-async function handleAdminResolvedConfig(request, env, id) {
-    var identity = await resolveAdminIdentity(request, env);
-    requireAdmin(identity);
-    var bucketsLoad = await loadBucketsDoc(env);
-    var byId = bucketsById(bucketsLoad.doc.buckets);
-    if (!byId[id]) return notFound('bucket not found');
-    if (!identity.isRoot && !isAtOrBelow(id, identity.bucketId, byId)) forbid('bucket outside your scope');
-    var configProfileId = resolveConfigForBucket(id, bucketsLoad.doc.buckets);
-    return json({ bucketId: id, configProfileId: configProfileId });
-}
-
 // ── /admin/configs — admin-managed WO-tool config blobs (same JSON shape
 // as Setup > Export/Import in wo_tool.js), organized/targeted per bucket.
-// Admin-side management ONLY: nothing in wo_tool.js consumes these yet
-// (that's the deferred "consuming side" noted elsewhere) - this just lets
-// admins upload/duplicate/rename/delete configs and record who each one is
-// meant for, ahead of that wiring landing. Independent of (and NOT the
-// same thing as) a bucket's own simple configProfileId label used by
-// resolveConfigForBucket() above - that's an older, simpler placeholder
-// mechanism, left untouched.
+// wo_tool.js consumes these directly (via /check-access + /org-config-
+// content — see handleCheckAccess and resolveOrgConfigsForUser above).
+// An earlier, separate bucket.configProfileId label + nearest-ancestor
+// resolver existed as a placeholder before this system was built; it was
+// never wired to anything and has since been removed.
 //
 // Targeting reuses the exact same {bucketId, conditions} + ancestor-
 // hardlock pattern as permissions.json entries (buildEntryConditions()),
@@ -2124,8 +2092,6 @@ async function routeAdmin(request, env, ctx, pathname) {
 
     if (pathname === '/admin/buckets' && method === 'GET') return handleAdminGetBuckets(request, env);
     if (pathname === '/admin/buckets' && method === 'POST') return handleAdminCreateBucket(request, env);
-    var m3 = /^\/admin\/buckets\/([^/]+)\/resolved-config$/.exec(pathname);
-    if (m3 && method === 'GET') return handleAdminResolvedConfig(request, env, m3[1]);
     var m4 = /^\/admin\/buckets\/([^/]+)$/.exec(pathname);
     if (m4 && method === 'PATCH') return handleAdminPatchBucket(request, env, m4[1]);
     if (m4 && method === 'DELETE') return handleAdminDeleteBucket(request, env, m4[1]);
