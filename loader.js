@@ -70,7 +70,12 @@
                 primaryEmail: d.primaryemail || d.email || '',
                 city: d.city || '',
                 firstName: d.firstname || '',
-                lastName: d.lastname || ''
+                lastName: d.lastname || '',
+                // Not from whoami at all — the browser's own hostname,
+                // which is a more direct "which company/instance" signal
+                // than an incidental email-domain match (see
+                // CANONICAL_FIELDS's comment in worker.js).
+                maximoHost: location.hostname
             };
         });
     }

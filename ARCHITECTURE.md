@@ -224,6 +224,23 @@ cookbook-level detail there.
   `admin.html` can offer a dropdown of known whoami fields (plus a
   "Custom…" fallback) when creating a bucket or registering a field level,
   instead of a blind free-text box.
+- **A bucket, by itself, never grants anything.** `evaluateAccess()` never
+  reads `buckets.json` at all — a bucket only supplies an ancestor
+  condition that gets prepended onto whatever `override`/`allow`/
+  `extraGrants` entry actually references it (`buildEntryConditions()`).
+  Creating/editing a bucket writes only `buckets.json`, never
+  `permissions.json` — so having e.g. `insertSite eq AVWP` in the tree
+  grants nothing on its own; access only exists where a separate, explicit
+  `allow`/`override` entry targets that bucket. A bucket that nothing
+  targets is purely a hierarchy/delegation/config-targeting node.
+- **`maximoHost`** (`CANONICAL_FIELDS`) is synthetic — not part of
+  Maximo's own whoami response, it's the browser's own
+  `location.hostname` (added identically in `loader.js`'s `readWhoami()`
+  and `wo_tool.js`'s `readWhoamiCanonical()`, which must be kept in sync —
+  they're two independent copies). Exists so a company-level bucket can
+  key on "which Maximo instance you're on" directly instead of an
+  incidental email-domain match, freeing the email field to be reassigned
+  and used at a lower tier if a company only ever runs one Maximo host.
 - **The hardlock**: a non-root admin's `allow`/`blacklist` write only ever
   submits their own condition (`ownConditions`); the Worker prepends the
   full ancestor chain (`buildEntryConditions()`/`bucketConditionChain()`)

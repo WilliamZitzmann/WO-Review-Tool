@@ -186,7 +186,14 @@
 
 const TOKEN_TTL_MS = 2 * 60 * 1000; // 2 minutes — used almost immediately after issue
 const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours — bounds a left-open tab; sessionStorage's own tab-close boundary is the more common expiry in practice
-const CANONICAL_FIELDS = ['username', 'email', 'country', 'insertSite', 'langcode', 'displayName', 'defaultSiteDescription', 'primaryEmail', 'city', 'firstName', 'lastName'];
+// maximoHost is synthetic — not part of Maximo's own whoami response at
+// all, it's the browser's own location.hostname (see loader.js's
+// readWhoami() / wo_tool.js's readWhoamiCanonical()), included here so it
+// can be used as an ordinary condition field like any other — most
+// usefully for a company-level bucket, since which Maximo host you're on
+// is a more direct signal than an incidental email-domain match, and
+// (unlike email) isn't already claimed by any other tier.
+const CANONICAL_FIELDS = ['username', 'email', 'country', 'insertSite', 'langcode', 'displayName', 'defaultSiteDescription', 'primaryEmail', 'city', 'firstName', 'lastName', 'maximoHost'];
 
 function corsHeaders() {
     return {

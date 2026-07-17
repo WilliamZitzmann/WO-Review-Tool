@@ -33,7 +33,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26198.2242z';
+    var BUILD_ID = '26198.2331z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -2296,7 +2296,7 @@
 
     // Same whoami-field mapping as loader.js's readWhoami() — duplicated
     // rather than shared since this file and loader.js are fetched/run
-    // completely independently of each other.
+    // completely independently of each other. Keep the two in sync.
     function readWhoamiCanonical() {
         return xhrGetText('/maximo/oslc/whoami').then(function(text) {
             var d = JSON.parse(text);
@@ -2306,7 +2306,14 @@
                 country: d.country || '',
                 insertSite: d.insertSite || d.defaultSite || '',
                 langcode: d.langcode || '',
-                displayName: d.displayName || d.displayname || ''
+                displayName: d.displayName || d.displayname || '',
+                defaultSiteDescription: d.defaultSiteDescription || '',
+                primaryEmail: d.primaryemail || d.email || '',
+                city: d.city || '',
+                firstName: d.firstname || '',
+                lastName: d.lastname || '',
+                // Not from whoami at all — see loader.js's readWhoami().
+                maximoHost: location.hostname
             };
             // Pass through every scalar field the endpoint actually
             // returned too (its real Maximo name, e.g. loginID/personid),
