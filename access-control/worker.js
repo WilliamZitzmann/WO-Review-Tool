@@ -98,6 +98,20 @@
  *     PATCH  /admin/field-levels
  *     DELETE /admin/field-levels/:field       — refuses (409) if still referenced by a
  *                                                bucket or a permission rule's conditions
+ *     GET    /admin/configs                   — metadata only (name/description/bucketId/
+ *                                                conditions), never the heavy content blob
+ *     POST   /admin/configs                   — body {name, description, bucketId,
+ *                                                ownConditions, content} - content is the
+ *                                                same JSON shape as wo_tool.js's Setup >
+ *                                                Export/Import. Admin-side management only;
+ *                                                nothing in wo_tool.js consumes these yet.
+ *     GET    /admin/configs/:id               — download (returns metadata + full content)
+ *     PATCH  /admin/configs/:id                — rename/re-target/replace content
+ *     DELETE /admin/configs/:id
+ *     POST   /admin/configs/:id/duplicate      — body {name, bucketId, ownConditions} -
+ *                                                copies an existing config's content into
+ *                                                a new one (e.g. a site admin duplicating
+ *                                                a company-level config down to their site)
  *     GET    /admin/groups
  *     POST   /admin/groups
  *     POST   /admin/groups/:id/members          — creates an ACCOUNT (email +
@@ -667,8 +681,28 @@ async function writeFile(env, owner, repo, path, contentText, sha, message) {
     return data.content.sha;
 }
 
+async function deleteFile(env, owner, repo, path, sha, message) {
+    var url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+    var res = await fetch(url, {
+        method: 'DELETE',
+        headers: {
+            'Authorization': `Bearer ${env.GITHUB_PAT}`,
+            'Accept': 'application/vnd.github+json',
+            'User-Agent': 'wo-review-tool-worker',
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: message, sha: sha, branch: env.GITHUB_BRANCH }),
+    });
+    if (!res.ok) {
+        var err = new Error(`GitHub delete failed for ${path}: HTTP ${res.status}`);
+        err.status = res.status;
+        throw err;
+    }
+}
+
 function fetchPrivateFileWithSha(env, path) { return fetchFileWithSha(env, env.GITHUB_OWNER, env.GITHUB_REPO, path); }
 function writePrivateFile(env, path, text, sha, message) { return writeFile(env, env.GITHUB_OWNER, env.GITHUB_REPO, path, text, sha, message); }
+function deletePrivateFile(env, path, sha, message) { return deleteFile(env, env.GITHUB_OWNER, env.GITHUB_REPO, path, sha, message); }
 function fetchPublicFileWithSha(env, path) { return fetchFileWithSha(env, env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, path); }
 function writePublicFile(env, path, text, sha, message) { return writeFile(env, env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, path, text, sha, message); }
 
@@ -697,6 +731,18 @@ async function loadAdminGroupsDoc(env) {
     var doc = f.exists ? JSON.parse(f.text) : { rootAccounts: [], groups: [] };
     doc.rootAccounts = doc.rootAccounts || [];
     doc.groups = doc.groups || [];
+    return { doc: doc, sha: f.sha };
+}
+
+// configs/index.json holds lightweight metadata only (id, name,
+// description, bucketId/conditions targeting, timestamps) - the actual
+// heavy WO-tool config blob (same shape as Setup > Export produces) lives
+// in its own configs/<id>.json file, fetched only on demand (download/
+// duplicate), so listing configs never pulls every blob over the wire.
+async function loadConfigsIndexDoc(env) {
+    var f = await fetchPrivateFileWithSha(env, 'configs/index.json');
+    var doc = f.exists ? JSON.parse(f.text) : { configs: [] };
+    doc.configs = doc.configs || [];
     return { doc: doc, sha: f.sha };
 }
 
@@ -1269,6 +1315,205 @@ async function handleAdminResolvedConfig(request, env, id) {
     return json({ bucketId: id, configProfileId: configProfileId });
 }
 
+// ── /admin/configs — admin-managed WO-tool config blobs (same JSON shape
+// as Setup > Export/Import in wo_tool.js), organized/targeted per bucket.
+// Admin-side management ONLY: nothing in wo_tool.js consumes these yet
+// (that's the deferred "consuming side" noted elsewhere) - this just lets
+// admins upload/duplicate/rename/delete configs and record who each one is
+// meant for, ahead of that wiring landing. Independent of (and NOT the
+// same thing as) a bucket's own simple configProfileId label used by
+// resolveConfigForBucket() above - that's an older, simpler placeholder
+// mechanism, left untouched.
+//
+// Targeting reuses the exact same {bucketId, conditions} + ancestor-
+// hardlock pattern as permissions.json entries (buildEntryConditions()),
+// EXCEPT empty conditions[] is allowed here (unlike permissions) - a
+// config with no extra conditions just means "everyone at that bucket",
+// which isn't a security-relevant vacuous match the way it would be for
+// access-control entries.
+function configEntryPublic(doc) {
+    return { id: doc.id, name: doc.name, description: doc.description || '', bucketId: doc.bucketId, conditions: doc.conditions,
+        createdBy: doc.createdBy, createdAt: doc.createdAt, updatedBy: doc.updatedBy, updatedAt: doc.updatedAt, size: doc.size || 0 };
+}
+
+async function handleAdminGetConfigs(request, env) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var indexLoad = await loadConfigsIndexDoc(env);
+    var visible = identity.isRoot ? indexLoad.doc.configs :
+        indexLoad.doc.configs.filter(function(c) { return isAtOrBelow(c.bucketId, identity.bucketId, byId); });
+    return json({ configs: visible.map(configEntryPublic) });
+}
+
+async function handleAdminCreateConfig(request, env) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+    var name = String(body.name || '').trim();
+    if (!name) badRequest('name required');
+    var contentText = typeof body.content === 'string' ? body.content : JSON.stringify(body.content);
+    var parsedContent;
+    try { parsedContent = JSON.parse(contentText); } catch (e) { return badRequest('content must be valid JSON'); }
+
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var level = identityLevel(identity, byId);
+    var bucketId = body.bucketId != null ? body.bucketId : null;
+    if (!identity.isRoot && !isAtOrBelow(bucketId, identity.bucketId, byId)) forbid('target bucket outside your scope');
+    var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions : [];
+    ownConditions.forEach(function(c) {
+        if (!canUseField(level, c.field, bucketsLoad.doc.fieldLevels)) forbid('field "' + c.field + '" not permitted at your level');
+    });
+    var conditions = buildEntryConditions(bucketId, ownConditions, byId);
+
+    var indexLoad = await loadConfigsIndexDoc(env);
+    var now = new Date().toISOString();
+    var entry = {
+        id: genId('cfg'), name: name, description: String(body.description || ''),
+        bucketId: bucketId, conditions: conditions,
+        createdBy: identity.label, createdAt: now, updatedBy: identity.label, updatedAt: now,
+        size: contentText.length,
+    };
+    indexLoad.doc.configs.push(entry);
+    await writePrivateFile(env, 'configs/' + entry.id + '.json', JSON.stringify(parsedContent, null, 2), null,
+        'admin: ' + identity.label + ' uploaded config "' + name + '"');
+    await writePrivateFile(env, 'configs/index.json', JSON.stringify(indexLoad.doc, null, 2), indexLoad.sha,
+        'admin: ' + identity.label + ' created config "' + name + '"');
+    return json({ ok: true, config: configEntryPublic(entry) });
+}
+
+async function handleAdminGetConfigContent(request, env, id) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var indexLoad = await loadConfigsIndexDoc(env);
+    var entry = indexLoad.doc.configs.find(function(c) { return c.id === id; });
+    if (!entry) return notFound('config not found');
+    if (!identity.isRoot && !isAtOrBelow(entry.bucketId, identity.bucketId, byId)) forbid('config outside your scope');
+    var f = await fetchPrivateFileWithSha(env, 'configs/' + id + '.json');
+    if (!f.exists) return notFound('config content missing (index/content out of sync)');
+    return json({ config: configEntryPublic(entry), content: JSON.parse(f.text) });
+}
+
+async function handleAdminDuplicateConfig(request, env, id) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var level = identityLevel(identity, byId);
+    var indexLoad = await loadConfigsIndexDoc(env);
+    var source = indexLoad.doc.configs.find(function(c) { return c.id === id; });
+    if (!source) return notFound('config not found');
+    if (!identity.isRoot && !isAtOrBelow(source.bucketId, identity.bucketId, byId)) forbid('source config outside your scope');
+
+    var name = String(body.name || (source.name + ' (copy)')).trim();
+    var bucketId = body.bucketId !== undefined ? body.bucketId : source.bucketId;
+    if (!identity.isRoot && !isAtOrBelow(bucketId, identity.bucketId, byId)) forbid('target bucket outside your scope');
+    var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions : [];
+    ownConditions.forEach(function(c) {
+        if (!canUseField(level, c.field, bucketsLoad.doc.fieldLevels)) forbid('field "' + c.field + '" not permitted at your level');
+    });
+    var conditions = buildEntryConditions(bucketId, ownConditions, byId);
+
+    var f = await fetchPrivateFileWithSha(env, 'configs/' + id + '.json');
+    if (!f.exists) return notFound('source config content missing (index/content out of sync)');
+
+    var now = new Date().toISOString();
+    var entry = {
+        id: genId('cfg'), name: name, description: String(body.description !== undefined ? body.description : source.description || ''),
+        bucketId: bucketId, conditions: conditions,
+        createdBy: identity.label, createdAt: now, updatedBy: identity.label, updatedAt: now,
+        size: f.text.length,
+    };
+    indexLoad.doc.configs.push(entry);
+    await writePrivateFile(env, 'configs/' + entry.id + '.json', f.text, null,
+        'admin: ' + identity.label + ' duplicated config "' + source.name + '" as "' + name + '"');
+    await writePrivateFile(env, 'configs/index.json', JSON.stringify(indexLoad.doc, null, 2), indexLoad.sha,
+        'admin: ' + identity.label + ' created config "' + name + '" (duplicate of ' + id + ')');
+    return json({ ok: true, config: configEntryPublic(entry) });
+}
+
+async function handleAdminPatchConfig(request, env, id) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var level = identityLevel(identity, byId);
+    var indexLoad = await loadConfigsIndexDoc(env);
+    var entry = indexLoad.doc.configs.find(function(c) { return c.id === id; });
+    if (!entry) return notFound('config not found');
+    if (!identity.isRoot && !isAtOrBelow(entry.bucketId, identity.bucketId, byId)) forbid('config outside your scope');
+
+    if (body.name !== undefined) {
+        var name = String(body.name).trim();
+        if (!name) badRequest('name cannot be empty');
+        entry.name = name;
+    }
+    if (body.description !== undefined) entry.description = String(body.description);
+    if (body.bucketId !== undefined || body.ownConditions !== undefined) {
+        var newBucketId = body.bucketId !== undefined ? body.bucketId : entry.bucketId;
+        if (!identity.isRoot && !isAtOrBelow(newBucketId, identity.bucketId, byId)) forbid('target bucket outside your scope');
+        var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions :
+            entry.conditions.slice(bucketConditionChain(entry.bucketId, byId).length);
+        ownConditions.forEach(function(c) {
+            if (!canUseField(level, c.field, bucketsLoad.doc.fieldLevels)) forbid('field "' + c.field + '" not permitted at your level');
+        });
+        entry.bucketId = newBucketId;
+        entry.conditions = buildEntryConditions(newBucketId, ownConditions, byId);
+    }
+    var contentUpdated = false;
+    if (body.content !== undefined) {
+        var contentText = typeof body.content === 'string' ? body.content : JSON.stringify(body.content);
+        var parsedContent;
+        try { parsedContent = JSON.parse(contentText); } catch (e) { return badRequest('content must be valid JSON'); }
+        var existing = await fetchPrivateFileWithSha(env, 'configs/' + id + '.json');
+        await writePrivateFile(env, 'configs/' + id + '.json', JSON.stringify(parsedContent, null, 2), existing.sha,
+            'admin: ' + identity.label + ' replaced content of config "' + entry.name + '"');
+        entry.size = contentText.length;
+        contentUpdated = true;
+    }
+    entry.updatedBy = identity.label;
+    entry.updatedAt = new Date().toISOString();
+    await writePrivateFile(env, 'configs/index.json', JSON.stringify(indexLoad.doc, null, 2), indexLoad.sha,
+        'admin: ' + identity.label + ' updated config "' + entry.name + '"' + (contentUpdated ? ' (incl. content)' : ''));
+    return json({ ok: true, config: configEntryPublic(entry) });
+}
+
+async function handleAdminDeleteConfig(request, env, id) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var indexLoad = await loadConfigsIndexDoc(env);
+    var idx = indexLoad.doc.configs.findIndex(function(c) { return c.id === id; });
+    if (idx === -1) return notFound('config not found');
+    var entry = indexLoad.doc.configs[idx];
+    if (!identity.isRoot && !isAtOrBelow(entry.bucketId, identity.bucketId, byId)) forbid('config outside your scope');
+
+    indexLoad.doc.configs.splice(idx, 1);
+    await writePrivateFile(env, 'configs/index.json', JSON.stringify(indexLoad.doc, null, 2), indexLoad.sha,
+        'admin: ' + identity.label + ' deleted config "' + entry.name + '"');
+    try {
+        var f = await fetchPrivateFileWithSha(env, 'configs/' + id + '.json');
+        if (f.exists) await deletePrivateFile(env, 'configs/' + id + '.json', f.sha, 'admin: ' + identity.label + ' deleted config content for "' + entry.name + '"');
+    } catch (e) {
+        // index entry is already gone (the part that matters for
+        // listing/scope) - a leftover orphaned content file is harmless
+        // clutter, not a functional problem.
+    }
+    return json({ ok: true });
+}
+
 async function handleAdminPatchFieldLevels(request, env) {
     var identity = await resolveAdminIdentity(request, env);
     requireAdmin(identity);
@@ -1773,6 +2018,15 @@ async function routeAdmin(request, env, ctx, pathname) {
     if (pathname === '/admin/field-levels' && method === 'PATCH') return handleAdminPatchFieldLevels(request, env);
     var mFieldDel = /^\/admin\/field-levels\/([^/]+)$/.exec(pathname);
     if (mFieldDel && method === 'DELETE') return handleAdminDeleteFieldLevel(request, env, decodeURIComponent(mFieldDel[1]));
+
+    if (pathname === '/admin/configs' && method === 'GET') return handleAdminGetConfigs(request, env);
+    if (pathname === '/admin/configs' && method === 'POST') return handleAdminCreateConfig(request, env);
+    var mConfigDup = /^\/admin\/configs\/([^/]+)\/duplicate$/.exec(pathname);
+    if (mConfigDup && method === 'POST') return handleAdminDuplicateConfig(request, env, mConfigDup[1]);
+    var mConfig = /^\/admin\/configs\/([^/]+)$/.exec(pathname);
+    if (mConfig && method === 'GET') return handleAdminGetConfigContent(request, env, mConfig[1]);
+    if (mConfig && method === 'PATCH') return handleAdminPatchConfig(request, env, mConfig[1]);
+    if (mConfig && method === 'DELETE') return handleAdminDeleteConfig(request, env, mConfig[1]);
 
     if (pathname === '/admin/groups' && method === 'GET') return handleAdminGetGroups(request, env);
     if (pathname === '/admin/groups' && method === 'POST') return handleAdminCreateGroup(request, env);
