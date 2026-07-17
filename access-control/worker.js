@@ -1292,7 +1292,7 @@ async function handleAdminGetGroups(request, env) {
                 id: g.id, bucketId: g.bucketId, label: g.label,
                 allowPeerAdminCreation: !!g.allowPeerAdminCreation, allowChildAdminCreation: !!g.allowChildAdminCreation,
                 members: (g.members || []).map(function(m) {
-                    return { id: m.id, username: m.username, label: m.label, mustChangePassword: !!m.mustChangePassword, createdAt: m.createdAt, createdBy: m.createdBy };
+                    return { id: m.id, email: m.email, label: m.label, mustChangePassword: !!m.mustChangePassword, createdAt: m.createdAt, createdBy: m.createdBy };
                 }),
             };
         });
