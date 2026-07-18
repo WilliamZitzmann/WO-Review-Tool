@@ -71,6 +71,9 @@
             return r.json();
         }).then(function(d) {
             return {
+                // === WHOAMI_FIELDS:START === (auto-synced into wo_tool.js's
+                // readWhoamiCanonical() by scripts/sync-whoami-mapping.js on
+                // every commit touching either file — edit here, not there)
                 username: d.loginID || d.userName || d.personId || d.personid || '',
                 email: d.email || d.primaryemail || '',
                 country: d.country || '',
@@ -82,11 +85,12 @@
                 city: d.city || '',
                 firstName: d.firstname || '',
                 lastName: d.lastname || '',
-                // Not from whoami at all — the browser's own hostname,
-                // which is a more direct "which company/instance" signal
-                // than an incidental email-domain match (see
-                // CANONICAL_FIELDS's comment in worker.js).
+                // Not from whoami at all — the browser's own hostname, a
+                // more direct "which company/instance" signal than an
+                // incidental email-domain match (see CANONICAL_FIELDS's
+                // comment in worker.js).
                 maximoHost: location.hostname
+                // === WHOAMI_FIELDS:END ===
             };
         });
     }
@@ -100,8 +104,9 @@
     // while (a real gap, not intentional) — both are re-derived from the
     // next successful check-access, not real user config, so a revoke
     // snapshotting them as if they were worth restoring was just dead
-    // weight in the backup blob.
-    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_grants', '__wo_known_hosts', '__wo_last_scanned_wo', '__wo_grant_cache', '__wo_org_configs', '__wo_contact_email'];
+    // weight in the backup blob. This line is AUTO-SYNCED into wo_tool.js
+    // by scripts/sync-whoami-mapping.js — edit here, not there.
+    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_grants', '__wo_known_hosts', '__wo_last_scanned_wo', '__wo_grant_cache', '__wo_org_configs', '__wo_contact_email']; // === SYNC:EPHEMERAL_KEYS ===
     var REVOKED_BACKUP_KEY = '__wo_revoked_backup';
 
     // Short-lived local cache of the last access decision — a deliberate

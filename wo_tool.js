@@ -38,7 +38,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26199.1538z';
+    var BUILD_ID = '26199.1550z';
     // Ultimate fallback ONLY — same key/contract as loader.js's
     // CONTACT_EMAIL_KEY (kept in sync manually, independent files). Real
     // value comes from /check-access's bucket-resolved contactEmail
@@ -2248,11 +2248,18 @@
 
     // Same whoami-field mapping as loader.js's readWhoami() — duplicated
     // rather than shared since this file and loader.js are fetched/run
-    // completely independently of each other. Keep the two in sync.
+    // completely independently of each other. The block below is AUTO-
+    // SYNCED from loader.js by scripts/sync-whoami-mapping.js (runs from
+    // the pre-commit hook whenever either file changes) — edit it in
+    // loader.js, not here; a manual edit here gets silently overwritten on
+    // the next commit that touches either file.
     function readWhoamiCanonical() {
         return xhrGetText('/maximo/oslc/whoami').then(function(text) {
             var d = JSON.parse(text);
             var canonical = {
+                // === WHOAMI_FIELDS:START === (auto-synced into wo_tool.js's
+                // readWhoamiCanonical() by scripts/sync-whoami-mapping.js on
+                // every commit touching either file — edit here, not there)
                 username: d.loginID || d.userName || d.personId || d.personid || '',
                 email: d.email || d.primaryemail || '',
                 country: d.country || '',
@@ -2264,8 +2271,12 @@
                 city: d.city || '',
                 firstName: d.firstname || '',
                 lastName: d.lastname || '',
-                // Not from whoami at all — see loader.js's readWhoami().
+                // Not from whoami at all — the browser's own hostname, a
+                // more direct "which company/instance" signal than an
+                // incidental email-domain match (see CANONICAL_FIELDS's
+                // comment in worker.js).
                 maximoHost: location.hostname
+                // === WHOAMI_FIELDS:END ===
             };
             // Pass through every scalar field the endpoint actually
             // returned too (its real Maximo name, e.g. loginID/personid),
@@ -2696,12 +2707,11 @@
     // real user config and gets snapshotted before it's cleared, not just
     // deleted, so a later regrant (via loader.js's matching restore, next
     // time the bookmarklet runs) comes back whole. Same exclude-list and
-    // same REVOKED_BACKUP_KEY as loader.js's revokeLocal() — kept in sync
-    // manually since the two files are fetched/run independently.
-    // __wo_org_configs/__wo_contact_email were both missing here for a
-    // while (a real gap, not intentional) — both are re-derived from the
-    // next successful check-access, not real user config.
-    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_grants', '__wo_known_hosts', '__wo_last_scanned_wo', '__wo_grant_cache', '__wo_org_configs', '__wo_contact_email'];
+    // same REVOKED_BACKUP_KEY as loader.js's revokeLocal(). This line is
+    // AUTO-SYNCED from loader.js by scripts/sync-whoami-mapping.js (runs
+    // from the pre-commit hook whenever either file changes) — edit it in
+    // loader.js, not here.
+    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_grants', '__wo_known_hosts', '__wo_last_scanned_wo', '__wo_grant_cache', '__wo_org_configs', '__wo_contact_email']; // === SYNC:EPHEMERAL_KEYS ===
     var REVOKED_BACKUP_KEY = '__wo_revoked_backup';
 
     // contactEmail is optional — passed by loader.js's window.__woForceRevoke

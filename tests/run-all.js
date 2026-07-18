@@ -13,6 +13,7 @@ const FILES = [
     'org_config_harness.js',
     'loader_test.mjs',
     'update_defer_test.js',
+    'sync_whoami_mapping_test.js',
 ];
 
 const fs = require('fs');

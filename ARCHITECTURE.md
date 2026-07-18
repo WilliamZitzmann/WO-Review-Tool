@@ -1625,6 +1625,13 @@ fresh clone anywhere else (a new machine, a CI runner) needs the hook file
 recreated manually before it'll take effect there — see the exact `sed`
 line in the hook file itself if it's ever missing.
 
+The same public-repo hook (v0.26.0+) also runs `scripts/
+sync-whoami-mapping.js` whenever `loader.js` OR `wo_tool.js` is staged —
+see §10's "known rough edges" entry on why. This one is public-repo-only:
+`loader.js` doesn't exist in the private repo, so there's nothing to sync
+against there — the private repo's `wo_tool.js` is always just a mirrored
+copy pushed by `scripts/push-private.sh`, already in sync by construction.
+
 ### 9.4 Auto-update banner: one-click re-enable
 
 `showUpdatePrompt(remote, target, isPatchOnly)` gained a third button
@@ -1690,27 +1697,32 @@ never finishes.
 
 ## 10. Known rough edges (not bugs, just worth knowing)
 
-- `EPHEMERAL_KEYS` (the "don't back this up on revoke" exclude-list) is
-  hand-duplicated between `loader.js` and `wo_tool.js` — any new
-  ephemeral-but-not-real-config key has to be added to both manually. Both
-  copies list the same 8 keys as of v0.26.0 (`__wo_grant_cache` was missing
-  from `wo_tool.js`'s copy until v0.21.2; `__wo_org_configs` and
+- **~~`EPHEMERAL_KEYS`/whoami-mapping hand-duplication~~ — fixed (was a
+  real, twice-bitten rough edge, now automated).** `EPHEMERAL_KEYS` (the
+  "don't back this up on revoke" exclude-list) and the whoami-field mapping
+  (`loader.js`'s `readWhoami()` → `wo_tool.js`'s `readWhoamiCanonical()`)
+  are the two things that MUST stay identical between these
+  independently-fetched files with no shared module system. Both had
+  already drifted for real: `__wo_grant_cache` was missing from
+  `wo_tool.js`'s `EPHEMERAL_KEYS` until v0.21.2; `__wo_org_configs` and
   `__wo_contact_email` were both missing from BOTH copies for a while after
-  their own features shipped — a revoke was snapshotting them as if they
-  were real user config instead of re-derivable metadata). Same underlying
-  risk as `readWhoami()`/`readWhoamiCanonical()` immediately below — see
-  task tracking for a planned automatic-sync fix (a build-time codegen
-  step, mirroring the `BUILD_ID` pre-commit hook) rather than continuing to
-  rely on manual discipline across two independently-fetched files.
-- `loader.js`'s `readWhoami()` and `wo_tool.js`'s `readWhoamiCanonical()`
-  are two independently hand-maintained copies of the same whoami-field
-  mapping — same duplication class as `EPHEMERAL_KEYS` above, same planned
-  fix. Already caused one real drift bug this session: `readWhoamiCanonical()`
-  was missing 5 fields (`defaultSiteDescription`/`primaryEmail`/`city`/
-  `firstName`/`lastName`) that `readWhoami()` had carried since they were
-  added — silently wrong for `wo_tool.js`'s own internal re-checks
-  (self-update, `/feedback`, "Organization Configs") the whole time, caught
-  only by deliberately re-reading both side by side, not by any test.
+  their own features shipped (a revoke was snapshotting them as if they
+  were real user config); `readWhoamiCanonical()` was separately missing 5
+  fields `readWhoami()` had carried since they were added, silently wrong
+  for `wo_tool.js`'s own internal re-checks the whole time — caught only by
+  deliberately re-reading both side by side, not by any test. `scripts/
+  sync-whoami-mapping.js` (v0.26.0+) now keeps both in sync automatically:
+  `loader.js` is the source of truth for both (marked with
+  `// === WHOAMI_FIELDS:START/END ===` and a trailing
+  `// === SYNC:EPHEMERAL_KEYS ===` comment), the script extracts and
+  overwrites the corresponding block/line in `wo_tool.js`, and the
+  pre-commit hook runs it automatically whenever either file is part of a
+  commit — same pattern as the existing `BUILD_ID` auto-bump. A manual edit
+  to either synced spot in `wo_tool.js` now gets silently overwritten on
+  the next commit touching either file — that's intentional; edit
+  `loader.js` instead. Verified by `tests/sync_whoami_mapping_test.js`
+  (deliberately drifts wo_tool.js, runs the real script, confirms the fix —
+  restores the original content afterward regardless of pass/fail).
 - `caches.default` (Worker edge cache) is regional, not global — see §3.1.
 - `version.json` grows unbounded — nothing trims old entries automatically,
   but trimming is a supported, expected admin action (as of v0.24.0). **The
