@@ -706,6 +706,56 @@ seed(env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, 'version.json', {
     var reallyNonRoot = await call('POST', '/admin/root-accounts', { headers: bearerHeaders('not-a-real-token'), body: { email: 'x@example.com' } });
     check('an invalid/non-admin token cannot create a root account', reallyNonRoot.status === 401, reallyNonRoot.body);
 
+    // ── maximoHosts admin UI (POST /admin/maximo-hosts, root-only,
+    // whole-array replace) — previously only editable via a raw GitHub edit.
+    // avwpToken is already revoked by this point (the earlier cascade delete
+    // removed its bucket) - a fresh scoped account at "abbvie-ie" (which
+    // survived the cascade) proves the root-only gate against a genuinely
+    // valid-but-non-root token, not just an expired/garbage one. ──
+    var mkIeGroup = await call('POST', '/admin/groups', {
+        headers: rootHeaders(), body: { bucketId: 'abbvie-ie', label: 'Ireland Admins for hosts test', allowPeerAdminCreation: false, allowChildAdminCreation: false },
+    });
+    var addIeMember = await call('POST', '/admin/groups/' + mkIeGroup.body.group.id + '/members', {
+        headers: rootHeaders(), body: { email: 'ie-scoped-test@abbvie.com', label: 'IE Scoped Test' },
+    });
+    var ieLogin = await login('ie-scoped-test@abbvie.com', addIeMember.body.tempPassword);
+    var ieScopedToken = ieLogin.body.token;
+
+    var scopedSetHosts = await call('POST', '/admin/maximo-hosts', {
+        headers: bearerHeaders(ieScopedToken), body: { hosts: [{ hostname: 'evil.example.com', url: 'https://evil.example.com/login' }] },
+    });
+    check('a scoped (non-root) admin cannot set maximoHosts', scopedSetHosts.status === 403, scopedSetHosts.body);
+
+    var badUrlHosts = await call('POST', '/admin/maximo-hosts', {
+        headers: rootHeaders(), body: { hosts: [{ hostname: 'x.example.com', url: 'not-a-url' }] },
+    });
+    check('an invalid URL is rejected', badUrlHosts.status === 400, badUrlHosts.body);
+
+    var dupeHosts = await call('POST', '/admin/maximo-hosts', {
+        headers: rootHeaders(),
+        body: { hosts: [{ hostname: 'x.example.com', url: 'https://x.example.com/login' }, { hostname: 'X.EXAMPLE.COM', url: 'https://x.example.com/login2' }] },
+    });
+    check('a duplicate hostname (case-insensitive) is rejected', dupeHosts.status === 400, dupeHosts.body);
+
+    var setHostsOk = await call('POST', '/admin/maximo-hosts', {
+        headers: rootHeaders(),
+        body: { hosts: [{ hostname: 'newhost.example.com', url: 'https://newhost.example.com/maximo/login' }] },
+    });
+    check('root can set maximoHosts to a new list', setHostsOk.status === 200 && setHostsOk.body.hosts.length === 1, setHostsOk.body);
+
+    var bootAfterHostsChange = await call('GET', '/bootstrap');
+    check('the regular /bootstrap path immediately reflects the new maximoHosts (no stale cache in this test\'s mock)',
+        bootAfterHostsChange.body.maximoHosts.length === 1 && bootAfterHostsChange.body.maximoHosts[0].hostname === 'newhost.example.com',
+        bootAfterHostsChange.body.maximoHosts);
+
+    var permsAfterHostsChange = await call('GET', '/admin/permissions', { headers: rootHeaders() });
+    check('GET /admin/permissions (root) reflects the new maximoHosts too',
+        permsAfterHostsChange.body.maximoHosts.length === 1 && permsAfterHostsChange.body.maximoHosts[0].hostname === 'newhost.example.com',
+        permsAfterHostsChange.body.maximoHosts);
+
+    var clearHosts = await call('POST', '/admin/maximo-hosts', { headers: rootHeaders(), body: { hosts: [] } });
+    check('root can clear maximoHosts to an empty list', clearHosts.status === 200 && clearHosts.body.hosts.length === 0, clearHosts.body);
+
     // ── Email enumeration resistance: wrong-password and unknown-email
     // responses must be indistinguishable in shape (both a plain 401 with
     // the same generic message) ──

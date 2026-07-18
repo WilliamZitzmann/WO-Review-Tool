@@ -172,6 +172,18 @@ Replaces an earlier single-`tier` design. `permissions.json`:
 }
 ```
 
+**`maximoHosts` is managed via admin.html (v0.26.0+)** — a root-only card
+in the Permissions tab, `POST /admin/maximo-hosts` (`handleAdminSetMaximoHosts`
+in `worker.js`). Previously only editable via a raw GitHub edit to
+`permissions.json`; this is the first admin-UI-reachable way to manage it.
+Deliberately a **whole-array replace**, not per-entry CRUD like
+`allow`/`blacklist`/etc. — `maximoHosts` is a short, rarely-changed list
+(realistically one entry per company using this deployment), so
+admin.html's card always submits every row together (add/remove rows
+locally, nothing hits the API until Save), rather than the heavier
+per-entry create/edit/delete machinery the condition-based sections need.
+Validates each `{hostname, url}` (both required, `url` must parse via
+`new URL()`, hostnames deduped case-insensitively) before writing.
 All four sections (`override`/`blacklist`/`allow`/`extraGrants`) share one uniform shape now: `{id, bucketId, conditions, grants?}`, AND within one entry's `conditions[]`, OR across entries in the same array. `override` and `extraGrants` used to be keyed by bare `username`/a `{username: grants[]}` map respectively — both migrated to this condition-based shape (see `PERMISSIONS_GUIDE.md`'s migration note); the admin UI's "edit" action and the ancestor-condition hardlock (§3.4) both depend on every entry having a real `id` and a real `conditions[]`. **`evalGroup()` treats a missing/empty `conditions[]` as a non-match, never a vacuous match** — `[].every(...)` is `true` in JS, which would otherwise mean "no conditions" silently granted everyone; `evalGroup` explicitly requires `conditions.length > 0` before evaluating. `validatePermissionsShape()` enforces this same non-empty rule on every write, so a hand-edited or partially-migrated entry fails the write instead of landing as a live universal-match.
 
 `bucketId` (admin-delegation metadata — see §3.4) is never read by `evaluateAccess`/`evalGroup`/`computeRequiredFields`; `null`/omitted means root-owned.

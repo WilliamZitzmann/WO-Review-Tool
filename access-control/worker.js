@@ -89,6 +89,8 @@
  *                                                  silently collapse to just ["user"], dev/beta_*
  *                                                  are root-only)
  *     DELETE /admin/permissions/:section/:id
+ *     POST   /admin/maximo-hosts                — root-only, whole-array replace, body
+ *                                                  {hosts:[{hostname,url}]}
  *     GET    /admin/buckets                     — also returns canonicalFields (known whoami
  *                                                  field names) for the admin UI's field picker
  *     POST   /admin/buckets
@@ -1260,6 +1262,40 @@ async function handleAdminGetPermissions(request, env) {
     });
 }
 
+// Root-only, whole-array replace — maximoHosts is a short, rarely-changed
+// list (unlike allow/blacklist, which can have many entries needing
+// individual CRUD), so there's no per-entry POST/DELETE here, just "set
+// the whole list" — admin.html's form always submits every row together.
+// Previously only editable via a raw GitHub edit to permissions.json;
+// this is the first admin-UI-reachable way to manage it.
+async function handleAdminSetMaximoHosts(request, env) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireRoot(identity);
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+    if (!Array.isArray(body.hosts)) badRequest('hosts must be an array');
+
+    var seen = {};
+    var hosts = body.hosts.map(function(h, i) {
+        var hostname = String((h && h.hostname) || '').trim();
+        var url = String((h && h.url) || '').trim();
+        if (!hostname) badRequest('hosts[' + i + ']: hostname required');
+        if (!url) badRequest('hosts[' + i + ']: url required');
+        try { new URL(url); } catch (e) { badRequest('hosts[' + i + ']: "' + url + '" is not a valid URL'); }
+        var key = hostname.toLowerCase();
+        if (seen[key]) badRequest('duplicate hostname: ' + hostname);
+        seen[key] = true;
+        return { hostname: hostname, url: url };
+    });
+
+    var permsLoad = await loadPermissionsLive(env);
+    permsLoad.doc.maximoHosts = hosts;
+    validatePermissionsShape(permsLoad.doc);
+    await writePrivateFile(env, 'permissions.json', JSON.stringify(permsLoad.doc, null, 2), permsLoad.sha,
+        'admin: ' + identity.label + ' updated maximoHosts (' + hosts.length + ' host' + (hosts.length === 1 ? '' : 's') + ')');
+    return json({ ok: true, hosts: hosts });
+}
+
 function buildEntryConditions(bucketId, ownConditions, byId) {
     return bucketConditionChain(bucketId, byId).concat(ownConditions || []);
 }
@@ -2212,6 +2248,8 @@ async function routeAdmin(request, env, ctx, pathname) {
     if (m1 && method === 'POST') return handleAdminUpsertPermissionEntry(request, env, m1[1]);
     var m2 = /^\/admin\/permissions\/([a-zA-Z]+)\/([^/]+)$/.exec(pathname);
     if (m2 && method === 'DELETE') return handleAdminDeletePermissionEntry(request, env, m2[1], m2[2]);
+
+    if (pathname === '/admin/maximo-hosts' && method === 'POST') return handleAdminSetMaximoHosts(request, env);
 
     if (pathname === '/admin/buckets' && method === 'GET') return handleAdminGetBuckets(request, env);
     if (pathname === '/admin/buckets' && method === 'POST') return handleAdminCreateBucket(request, env);
