@@ -394,8 +394,8 @@ purely admin-layer metadata, never read on the regular-user hot path.
     A rejected fetch (offline, or access no longer granted) surfaces as a
     normal "Failed — retry" / "Could not install" state, never an unhandled
     rejection.
-- **`wo_tool.js`** applies installed org configs through the SAME profile
-  pipeline the old GitHub-preset installer uses
+- **`wo_tool.js`** applies installed org configs through the same profile
+  pipeline every profile switch uses
   (`registerProfile`/`applyProfile`/`backupProfileBeforeOverwrite`) —
   deliberately NOT `applyBackup()`, which would also overwrite
   `src`/`profiles`/full `settings`. An org config's content
@@ -403,22 +403,19 @@ purely admin-layer metadata, never read on the regular-user hot path.
   object (`id: 'org_' + configId`) before it touches the pipeline, so it
   gets `migrateProfile()`'s version migrations and `applyProfile()`'s
   settings-subset-merge for free, same as any other profile.
-  - **First run**: `showInstaller()`'s picker shows org configs (from the
-    cached metadata) in an "Available from your organization" section ABOVE
-    the existing "Community presets" list (`fetchProfileIndex()`, the old
-    public-repo system) — both render into separate DOM containers
-    (`#__inst_org_profiles` / `#__inst_public_profiles`) specifically so the
-    slower public-list fetch resolving later never wipes out a selection
-    the user already made in the (already-local, instant) org section. Never
-    auto-applies or auto-skips the picker — every matching config is just
-    another equally-selectable radio option, and selecting one still
-    triggers the live content fetch above on Install.
+  - **First run**: `showInstaller()`'s picker lists org configs (from the
+    cached metadata, `getOrgConfigs()` — a plain synchronous localStorage
+    read, no network wait) as plain radio options; selecting one and
+    clicking Install triggers the live content fetch above. This used to
+    render a SECOND, separate "Community presets" list from the old public-
+    repo shared-presets system alongside this one — see "Archived features"
+    at the end of this doc for why/how that was removed.
   - **Existing users** get the same list, with the same "Import & Switch"
     UX, in Setup > Profiles > "Organization Configs" — a re-import over an
-    already-installed org profile goes through the exact same
-    confirm-then-backup dialog as re-importing a GitHub preset. Listing is
-    passive/automatic (just a cache read); applying always requires the
-    explicit click + confirm. That's the deliberate safety line.
+    already-installed org profile goes through an explicit confirm-then-
+    backup dialog. Listing is passive/automatic (just a cache read);
+    applying always requires the explicit click + confirm. That's the
+    deliberate safety line.
 
 ---
 
@@ -1675,3 +1672,106 @@ considering a promotion done.
   session. Harmless today since `saveSettings` is idempotent (just re-writes
   the same `st` object per keystroke), but worth fixing if it ever stops
   being idempotent.
+
+---
+
+## Archived features
+
+Removed code kept here (not just in git history) because it's a complete,
+working mechanism that could be worth reviving — e.g. if org configs (§ the
+`/admin/configs` section above) ever need a fallback for orgs with no admin
+set up yet, or a genuinely public/community layer gets reintroduced.
+
+### Shared presets (public-repo, unauthenticated GitHub preset fetch)
+
+Removed once `/admin/configs` fully subsumed the use case (per-bucket/
+condition targeting, non-root publishers, private-repo control — none of
+which the flat public list ever had). Was `configs/index.json` +
+`configs/<id>.json` on the **public** repo (`WO-Review-Tool`), fetched
+unauthenticated via `raw.githubusercontent.com` — a completely different
+system from the identically-shaped-but-private `/admin/configs` one
+described earlier in this doc (§3, "the config management system"), which
+briefly coexisted with this one before it was removed. `configs/default.json`/`configs/
+maintenance.json`'s content was reused as the seed for the real org
+configs ("Default"/"Maintenance", now living in the private repo) before
+this file's own copies were deleted — nothing was lost, just relocated.
+
+`REPO_RAW_BASE` (`wo_tool.js`, still present — used by `checkForUpdate()`
+for `version.json`) is what these pointed at.
+
+```js
+// ── GitHub-hosted preset fetch (configs/index.json + configs/<id>.json) ──
+function fetchProfileIndex() {
+    return new Promise(function(resolve) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', REPO_RAW_BASE + '/main/configs/index.json', true);
+        xhr.onload = function() {
+            if (xhr.status !== 200) {
+                resolve([]);
+                return;
+            }
+            try {
+                resolve(JSON.parse(xhr.responseText) || []);
+            } catch (e) {
+                resolve([]);
+            }
+        };
+        xhr.onerror = function() {
+            resolve([]);
+        };
+        xhr.send();
+    });
+}
+
+function fetchProfile(id) {
+    return new Promise(function(resolve) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', REPO_RAW_BASE + '/main/configs/' + id + '.json', true);
+        xhr.onload = function() {
+            if (xhr.status !== 200) {
+                resolve(null);
+                return;
+            }
+            try {
+                resolve(JSON.parse(xhr.responseText));
+            } catch (e) {
+                resolve(null);
+            }
+        };
+        xhr.onerror = function() {
+            resolve(null);
+        };
+        xhr.send();
+    });
+}
+
+// Download a GitHub preset, register it locally, and switch to it. If a
+// profile with this id already exists locally (a RE-import, not a first
+// install), whatever it currently holds is backed up first — see
+// backupProfileBeforeOverwrite().
+function installProfileFromGitHub(id) {
+    return fetchProfile(id).then(function(p) {
+        if (!p) return false;
+        var backupId = backupProfileBeforeOverwrite(id);
+        registerProfile(p);
+        localStorage.setItem(ACTIVE_PROFILE_KEY, p.id); // before applyProfile's auto-save fires
+        applyProfile(p);
+        return {
+            ok: true,
+            backupId: backupId
+        };
+    });
+}
+```
+
+`showInstaller()`'s first-run modal used to render a SECOND list from
+`fetchProfileIndex()` (labeled "Community presets") in a
+`#__inst_public_profiles` container alongside the org-configs one, with
+`selectedProfileId` prefixed `"org:"`/`"pub:"` to pick which install
+pipeline to run. Setup > Profiles had a matching "Import Shared Presets"
+card (`#__pf_gh_list`) with the same Import & Switch / re-import-with-
+backup UX as the "Organization Configs" card that replaced it — same
+structure, just swap `installProfileFromGitHub(id)` back in for
+`installOrgConfig(id)` and drop the id from the metadata list's plain
+strings/objects (`{id, name, description}`, no bucket/conditions) to
+resurrect it.

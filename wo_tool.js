@@ -21,7 +21,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.25.1';
+    var TOOL_VERSION = '0.26.0';
     // Format YYDDD.HHMMz (2-digit year, day-of-year, UTC hour+minute) —
     // computed via `date -u +"%y%j.%H%M"z` and substituted in right before
     // every commit that touches this file, on ANY channel/repo (unlike
@@ -33,7 +33,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26199.0014z';
+    var BUILD_ID = '26199.0037z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -1720,68 +1720,6 @@
         return backupId;
     }
 
-    // ── GitHub-hosted preset fetch (configs/index.json + configs/<id>.json) ──
-    function fetchProfileIndex() {
-        return new Promise(function(resolve) {
-            var xhr = new XMLHttpRequest();
-            xhr.open('GET', REPO_RAW_BASE + '/main/configs/index.json', true);
-            xhr.onload = function() {
-                if (xhr.status !== 200) {
-                    resolve([]);
-                    return;
-                }
-                try {
-                    resolve(JSON.parse(xhr.responseText) || []);
-                } catch (e) {
-                    resolve([]);
-                }
-            };
-            xhr.onerror = function() {
-                resolve([]);
-            };
-            xhr.send();
-        });
-    }
-
-    function fetchProfile(id) {
-        return new Promise(function(resolve) {
-            var xhr = new XMLHttpRequest();
-            xhr.open('GET', REPO_RAW_BASE + '/main/configs/' + id + '.json', true);
-            xhr.onload = function() {
-                if (xhr.status !== 200) {
-                    resolve(null);
-                    return;
-                }
-                try {
-                    resolve(JSON.parse(xhr.responseText));
-                } catch (e) {
-                    resolve(null);
-                }
-            };
-            xhr.onerror = function() {
-                resolve(null);
-            };
-            xhr.send();
-        });
-    }
-
-    // Download a GitHub preset, register it locally, and switch to it. If a
-    // profile with this id already exists locally (a RE-import, not a first
-    // install), whatever it currently holds is backed up first — see
-    // backupProfileBeforeOverwrite().
-    function installProfileFromGitHub(id) {
-        return fetchProfile(id).then(function(p) {
-            if (!p) return false;
-            var backupId = backupProfileBeforeOverwrite(id);
-            registerProfile(p);
-            localStorage.setItem(ACTIVE_PROFILE_KEY, p.id); // before applyProfile's auto-save fires
-            applyProfile(p);
-            return {
-                ok: true,
-                backupId: backupId
-            };
-        });
-    }
 
     // ── Admin-managed org configs (worker.js /admin/configs, resolved for
     // this whoami by /check-access and fetched by loader.js) ──
@@ -1799,9 +1737,9 @@
         }
     }
 
-    // Installs an org config through the SAME profile pipeline
-    // installProfileFromGitHub uses (backup-before-overwrite, register,
-    // activate, applyProfile's settings-subset-merge + migration) — never
+    // Installs an org config through the same profile pipeline every
+    // profile switch uses (backup-before-overwrite, register, activate,
+    // applyProfile's settings-subset-merge + migration) — never
     // applyBackup, which would also overwrite src/profiles/full settings
     // from the config blob. Content is always fetched LIVE at this exact
     // moment (via fetchOrgConfigsLive(), defined below — re-runs the real
@@ -6618,10 +6556,7 @@
                 '</div>' +
                 '<div style="border:1px solid #333;border-radius:6px;padding:10px;margin-bottom:12px;">' +
                 '<b>Starting configuration</b>' +
-                '<div id="__inst_profiles" style="margin-top:8px;color:#888;">' +
-                '<div id="__inst_org_profiles"></div>' +
-                '<div id="__inst_public_profiles">Loading available presets…</div>' +
-                '</div>' +
+                '<div id="__inst_profiles" style="margin-top:8px;color:#888;"></div>' +
                 '</div>' +
                 '<div style="display:flex;gap:8px;align-items:center;">' +
                 '<button id="__inst_go" style="background:#2ecc71;color:#000;font-weight:bold;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;" disabled>Install</button>' +
@@ -6639,63 +6574,32 @@
                 };
             }
 
-            // selectedProfileId is "org:<id>" or "pub:<id>" — the prefix
-            // picks which install pipeline goBtn.onclick uses below. Two
-            // sources, two DOM containers (#__inst_org_profiles never gets
-            // wiped out from under a user's click once the slower public
-            // fetch resolves): org config METADATA is already local (loader.js
-            // cached it from the check-access call that got us here — see
-            // ORG_CONFIGS_KEY) so the list renders immediately with no
-            // network wait, while the community preset list still needs
-            // fetchProfileIndex()'s round trip. Content for whichever one
-            // gets picked is only ever fetched live, at the moment Install
-            // is clicked (installOrgConfig()).
+            // The list itself is a pure localStorage read (getOrgConfigs(),
+            // metadata only — loader.js cached it from the check-access
+            // call that got us here) so it renders immediately with no
+            // network wait. Content is only ever fetched live, at the
+            // moment Install is clicked (installOrgConfig()).
             var selectedProfileId = '';
             var goBtn = modal.querySelector('#__inst_go');
-            var orgDiv = modal.querySelector('#__inst_org_profiles');
-            var pubDiv = modal.querySelector('#__inst_public_profiles');
-
-            function profileRadioHtml(kind, item) {
-                var value = kind + ':' + item.id;
-                var checked = '';
-                if (!selectedProfileId) {
-                    selectedProfileId = value;
-                    checked = 'checked';
-                }
-                var orgStyle = kind === 'org' ? 'border-color:#2a4a5a;background:rgba(126,200,227,0.06);' : 'border-color:#333;';
-                return '<label style="display:block;padding:6px;border:1px solid;' + orgStyle + 'border-radius:4px;margin-bottom:6px;cursor:pointer;">' +
-                    '<input type="radio" name="__inst_profile" value="' + value + '" ' + checked + '> ' +
-                    '<b>' + item.name + '</b><br>' +
-                    '<span style="color:#888;margin-left:20px;">' + (item.description || '') + '</span>' +
-                    '</label>';
-            }
+            var profilesDiv = modal.querySelector('#__inst_profiles');
 
             var orgConfigs = getOrgConfigs();
-            if (orgConfigs.length) {
-                orgDiv.innerHTML = '<div style="color:#7ec8e3;font-weight:bold;font-size:11px;margin-bottom:4px;">Available from your organization</div>' +
-                    orgConfigs.map(function(c) { return profileRadioHtml('org', c); }).join('');
-                orgDiv.querySelectorAll('input[name="__inst_profile"]').forEach(function(r) {
+            if (!orgConfigs.length) {
+                profilesDiv.innerHTML = '<div style="color:#888;">No organization configs are currently available to you. You can skip and start from basic defaults, or load one later in Setup &gt; Profiles once available.</div>';
+            } else {
+                profilesDiv.innerHTML = orgConfigs.map(function(c, i) {
+                    if (i === 0) selectedProfileId = c.id;
+                    return '<label style="display:block;padding:6px;border:1px solid #333;border-radius:4px;margin-bottom:6px;cursor:pointer;">' +
+                        '<input type="radio" name="__inst_profile" value="' + c.id + '" ' + (i === 0 ? 'checked' : '') + '> ' +
+                        '<b>' + c.name + '</b><br>' +
+                        '<span style="color:#888;margin-left:20px;">' + (c.description || '') + '</span>' +
+                        '</label>';
+                }).join('');
+                profilesDiv.querySelectorAll('input[name="__inst_profile"]').forEach(function(r) {
                     r.onchange = function(e) { selectedProfileId = e.target.value; };
                 });
                 goBtn.disabled = false;
             }
-
-            fetchProfileIndex().then(function(list) {
-                if (!list || !list.length) {
-                    if (!orgConfigs.length) {
-                        pubDiv.innerHTML = '<div style="color:#e74c3c;">Could not load presets (offline?). You can skip and start from basic defaults, or load one later in Setup &gt; Profiles.</div>';
-                    } else {
-                        pubDiv.innerHTML = '';
-                    }
-                    return;
-                }
-                pubDiv.innerHTML = (orgConfigs.length ? '<div style="color:#aaa;font-weight:bold;font-size:11px;margin:10px 0 4px;">Community presets</div>' : '') +
-                    list.map(function(p) { return profileRadioHtml('pub', p); }).join('');
-                pubDiv.querySelectorAll('input[name="__inst_profile"]').forEach(function(r) {
-                    r.onchange = function(e) { selectedProfileId = e.target.value; };
-                });
-                goBtn.disabled = false;
-            });
 
             function finish() {
                 modal.remove();
@@ -6707,11 +6611,7 @@
                 var statusEl = modal.querySelector('#__inst_status');
                 statusEl.textContent = 'Installing...';
                 goBtn.disabled = true;
-                var sepIdx = selectedProfileId.indexOf(':');
-                var kind = selectedProfileId.slice(0, sepIdx);
-                var id = selectedProfileId.slice(sepIdx + 1);
-                var installPromise = kind === 'org' ? installOrgConfig(id) : installProfileFromGitHub(id);
-                installPromise.then(function(result) {
+                installOrgConfig(selectedProfileId).then(function(result) {
                     var ok = !!(result && result.ok);
                     statusEl.textContent = ok ? 'Done!' : 'Could not install — starting with basic defaults.';
                     setTimeout(finish, ok ? 300 : 1200);
@@ -11683,62 +11583,6 @@
             })();
 
             // ── GitHub presets ──
-            var ghDiv = document.createElement('div');
-            ghDiv.className = 'wo-card';
-            ghDiv.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Import Shared Presets</span></div>' +
-                '<div data-coll-body style="margin-top:7px;"><div id="__pf_gh_list" style="color:var(--wo-muted);font-size:11px;">Loading…</div></div>';
-            content.appendChild(ghDiv);
-            makeCollapsible(ghDiv, 'Shared Presets', false);
-
-            fetchProfileIndex().then(function(list) {
-                var listDiv = ghDiv.querySelector('#__pf_gh_list');
-                if (!list || !list.length) {
-                    listDiv.innerHTML = '<div style="color:var(--wo-fail);font-size:11px;">Could not load presets (offline?).</div>';
-                    return;
-                }
-                listDiv.innerHTML = list.map(function(p) {
-                    var already = !!profiles[p.id];
-                    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);margin-bottom:6px;background:var(--wo-field);">' +
-                        '<div style="font-size:11px;"><b>' + p.name + '</b><br><span style="color:var(--wo-muted);font-size:10px;">' + (p.description || '') + '</span></div>' +
-                        '<button type="button" class="__pf_import wo-btn" data-id="' + p.id + '" style="font-size:11px;padding:4px 9px;">' + (already ? 'Re-import &amp; Switch' : 'Import &amp; Switch') + '</button>' +
-                        '</div>';
-                }).join('');
-                listDiv.querySelectorAll('.__pf_import').forEach(function(btn) {
-                    btn.onclick = function() {
-                        var id = btn.getAttribute('data-id');
-                        var already = !!profiles[id];
-                        function proceed() {
-                            btn.disabled = true;
-                            btn.textContent = 'Importing...';
-                            installProfileFromGitHub(id).then(function(result) {
-                                var ok = !!(result && result.ok);
-                                if (ok) {
-                                    woAlert('Imported and switched.' + (result.backupId ? ' Your previous version was saved as a backup profile — see Local Profiles.' : '')).then(function() {
-                                        modal.remove();
-                                        render();
-                                    });
-                                } else {
-                                    btn.disabled = false;
-                                    btn.textContent = 'Failed — retry';
-                                }
-                            });
-                        }
-                        if (already) {
-                            var isActive = getActiveProfileId() === id;
-                            var msg = 'Re-import "' + id + '"?\n\n' +
-                                (isActive ?
-                                    'This is your currently active config — it will be overwritten with the latest shared version.' :
-                                    'Your locally saved "' + id + '" profile will be overwritten with the latest shared version.') +
-                                '\n\nWhatever it currently holds will be saved as a backup profile first, so nothing is lost — but any local edits you made under this profile stop being the "' + id + '" profile once this runs.';
-                            woConfirm(msg).then(function(ok) {
-                                if (ok) proceed();
-                            });
-                        } else {
-                            proceed();
-                        }
-                    };
-                });
-            });
         }
 
         var tabFns = {};

@@ -1,14 +1,24 @@
 {
-  "latest": "0.24.0",
+  "latest": "0.26.0",
   "channels": {
-    "stable": "0.24.0",
-    "beta": "0.24.0"
+    "stable": "0.26.0",
+    "beta": "0.26.0"
   },
   "versions": [
     {
+      "version": "0.26.0",
+      "name": "Organization Configs, Instant Launch",
+      "changes": [
+        "New: admins can now publish \"Organization Configs\" - ready-made starting configurations scoped to your specific site/team, matched to your Maximo profile automatically. They show up in the first-run installer and in Setup > Profiles > Organization Configs - install or switch to one any time, through the same safe re-import-with-backup flow as any other profile.",
+        "Removed: the old public \"Shared Presets\" system (a flat, unscoped list anyone with repo write access could publish to) - fully replaced by Organization Configs above, which are scoped per-site/team and published by your organization's own administrator instead of a single maintainer.",
+        "Much faster launch: if you already have a config set up, the tool now opens instantly instead of waiting on a full access re-check every time the 15-minute cache expires - the real check still runs, just in the background after the panel is already open. Access can still be revoked mid-session if that check comes back denied.",
+        "Setup > Tables entries (scanned tables, custom tables, API tables) now collapse/expand individually like Rules/Groups/Variables, instead of always showing everything at once.",
+        "New (visible only to tool administrators): an Admin tab in Setup links to the new hierarchical admin management page for anyone whose Maximo account is also registered as a tool admin."
+      ]
+    },
+    {
       "version": "0.25.1",
       "name": "Table Lookups, Custom Tables, More Formula Helpers",
-      "grant": "dev",
       "changes": [
         "New: lookup(table, keyCol, keyVal, returnCol) formula helper - VLOOKUP-style, finds the first row where keyCol equals keyVal and returns its returnCol value. Works on any scanned table or a custom table.",
         "New: custom tables in the Tables tab - hand-entered lookup data (e.g. part numbers, cost centers) that doesn't come from a Maximo scan, readable by formulas with the exact same T()/col()/has()/lookup() functions as a scanned table.",

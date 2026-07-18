@@ -730,7 +730,7 @@
     <div class="flow-step"><div class="flow-num">1</div><div class="flow-text">Open a work order in Maximo.</div></div>
     <div class="flow-step"><div class="flow-num">2</div><div class="flow-text">Click the bookmarklet. If you're not already on the right Maximo page, it redirects you there first — click it again once you've landed and are logged in.</div></div>
     <div class="flow-step"><div class="flow-num">3</div><div class="flow-text">The tool checks whether you have permission to use it, then loads the panel on the right side of the page.</div></div>
-    <div class="flow-step"><div class="flow-num">4</div><div class="flow-text">First time only: pick a starting configuration (a shared preset, or start blank) in the installer that appears.</div></div>
+    <div class="flow-step"><div class="flow-num">4</div><div class="flow-text">First time only: pick a starting configuration (one your organization has published, or start blank) in the installer that appears.</div></div>
   </div>
 
   <div class="callout callout-tip">
@@ -923,7 +923,7 @@
   </div>
 
   <h3>Add a Field Already Registered</h3>
-  <p>If a field is already registered (from a shared preset, or registered previously) but isn't in any group yet, use the plain "Add a field not yet in any group" dropdown right above the Browse button — pick the field and a target group, click Add.</p>
+  <p>If a field is already registered (from an organization config, or registered previously) but isn't in any group yet, use the plain "Add a field not yet in any group" dropdown right above the Browse button — pick the field and a target group, click Add.</p>
 
   <div class="callout callout-info">
     Once registered, a field is available everywhere as <code>F('Tab :: Label')</code> — in rules, variables, scan actions, and message text. You don't need to re-register it for each new rule.
@@ -1161,8 +1161,8 @@ rows.forEach(<span class="kw">function</span>(r) {
     <li>Delete — removes a saved profile (blocked for the active one, or your last remaining one).</li>
   </ul>
 
-  <h3>Shared Presets</h3>
-  <p>The Profiles tab can also list ready-made presets others have published. Installing one downloads and registers it as a local profile, then switches you to it — your previous configuration isn't lost, just no longer active (switch back any time). See <a href="#s13">Export / Import &amp; Backup</a> for how to publish your own.</p>
+  <h3>Organization Configs</h3>
+  <p>The Profiles tab can also list ready-made configurations your organization's admin has published (matched to your site/team automatically — you'll only ever see the ones meant for you). Installing one downloads and registers it as a local profile, then switches you to it — your previous configuration isn't lost, just no longer active (switch back any time). Ask whoever administers this tool for your organization if you'd like your own setup published this way.</p>
 </section>
 
 <!-- ══════════════════════════════════════════════════ -->
@@ -1244,7 +1244,7 @@ rows.forEach(<span class="kw">function</span>(r) {
   <div class="prop-block">
     <div class="prop-row"><div class="prop-key">Export / Import</div><div class="prop-val">Setup → Export produces a backup file of your full configuration; Import restores from one. Use this to move to a different PC, keep a manual backup, or send your setup to someone else.</div></div>
     <div class="prop-row"><div class="prop-key">Auto-Backup</div><div class="prop-val">Setup → Settings — on Chrome/Edge, link a local file once and the tool keeps it updated automatically every time you save a change. The most reliable option if your browser supports it.</div></div>
-    <div class="prop-row"><div class="prop-key">Shared Presets</div><div class="prop-val">If you want to share your setup with a whole team rather than one person, ask whoever maintains this tool to add your exported configuration to the shared preset list — see <a href="#s10">Profiles &amp; Presets</a>.</div></div>
+    <div class="prop-row"><div class="prop-key">Organization Configs</div><div class="prop-val">If you want to share your setup with a whole team rather than one person, ask whoever administers this tool for your organization to publish your exported configuration for your site/team — see <a href="#s10">Profiles &amp; Presets</a>.</div></div>
   </div>
 
   <div class="callout callout-info">
@@ -1300,7 +1300,7 @@ rows.forEach(<span class="kw">function</span>(r) {
 
   <div class="prop-block">
     <div class="prop-row"><div class="prop-key">Does the tool modify Maximo?</div><div class="prop-val">Only when you tell it to — clicking Return, Approve, or (beta) Fix. Scanning only reads data; it never writes anything on its own.</div></div>
-    <div class="prop-row"><div class="prop-key">Can I share my rules?</div><div class="prop-val">Yes — export a backup file and send it, or ask whoever maintains this tool to publish it as a shared preset. See <a href="#s13">Export / Import &amp; Backup</a>.</div></div>
+    <div class="prop-row"><div class="prop-key">Can I share my rules?</div><div class="prop-val">Yes — export a backup file and send it, or ask whoever administers this tool for your organization to publish it as an organization config. See <a href="#s13">Export / Import &amp; Backup</a>.</div></div>
     <div class="prop-row"><div class="prop-key">Why is a field blank?</div><div class="prop-val">Either it isn't registered yet (see <a href="#s5">Adding Fields</a>), or the Maximo tab it lives on hasn't been visited/scanned this session.</div></div>
     <div class="prop-row"><div class="prop-key">Why didn't Scan find a field?</div><div class="prop-val">The tab it's on may not have loaded in time, its element ID may have changed (Maximo updates can do this), or its scan target's "wait for" marker never appeared.</div></div>
     <div class="prop-row"><div class="prop-key">Does configuration move with me to another computer?</div><div class="prop-val">Not automatically — it's stored in this browser. Use Export/Import or Auto-Backup to carry it over; see <a href="#s13">Export / Import &amp; Backup</a>.</div></div>
