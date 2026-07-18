@@ -4,7 +4,12 @@
         GSTATE = '__wo_group_state',
         SKEY = '__wo_scan_config',
         VKEY = '__wo_vars_config',
-        ORG_CONFIGS_KEY = '__wo_org_configs'; // written by loader.js on a fresh install — see fetchOrgConfigsIfFirstRun()
+        ORG_CONFIGS_KEY = '__wo_org_configs'; // written by loader.js on every granted check-access — see cacheOrgConfigsMetadata()
+    // sessionStorage (not localStorage) — a same-tab, this-instant-only
+    // handoff across an update's teardown()+eval(), never meant to survive
+    // an actual navigation or outlive this one reload. See
+    // applyUpdateNow()/restoreUpdateSnapshotIfAny().
+    var UPDATE_SNAPSHOT_KEY = '__wo_update_scan_snapshot';
 
     function getVars() {
         try {
@@ -33,7 +38,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26199.0149z';
+    var BUILD_ID = '26199.1538z';
     // Ultimate fallback ONLY — same key/contract as loader.js's
     // CONTACT_EMAIL_KEY (kept in sync manually, independent files). Real
     // value comes from /check-access's bucket-resolved contactEmail
@@ -2933,6 +2938,31 @@
         return 'wiped';
     };
 
+    // Dev/test affordance for exercising the update-defer-until-idle path
+    // (applyUpdateWhenIdle/applyUpdateNow) without needing to trigger and
+    // hold open a real, in-progress Maximo scan — `scanning` is otherwise
+    // only ever set by runScan() itself. rawInstall is exposed alongside it
+    // so a test can drive the exact same choke point every real update path
+    // (installUpdate/checkDevUpdate) already goes through, rather than a
+    // hand-copied model of it.
+    window.__woTestHooks = {
+        setScanning: function(v) { scanning = !!v; },
+        isScanning: function() { return scanning; },
+        rawInstall: rawInstall,
+        // For verifying the update-apply snapshot/restore round trip
+        // (applyUpdateNow -> sessionStorage -> restoreUpdateSnapshotIfAny)
+        // without needing to drive a real scan against a mocked Maximo page.
+        setScanState: function(c, hs, log, retMsg) {
+            cache = c;
+            hasScanned = !!hs;
+            if (log !== undefined) scanLog = log;
+            if (retMsg !== undefined) currentReturnMsg = retMsg;
+        },
+        getScanState: function() {
+            return { cache: cache, hasScanned: hasScanned, scanLog: scanLog, currentReturnMsg: currentReturnMsg };
+        }
+    };
+
     // A semver pre-release suffix (e.g. "0.15.1-beta1") marks a beta/dev build.
     // Plain releases ("0.15.0") are available to everyone; pre-releases require unlock.
     function isPrerelease(v) {
@@ -3234,6 +3264,10 @@
     // ── Syntax-check, cache, and switch to a downloaded build ──
     // Failures here must never touch localStorage/eval — the currently
     // running version has to keep working regardless of what went wrong.
+    // The download/cache step (localStorage.setItem('__wo_tool_src', ...))
+    // always happens immediately, regardless of whether a scan is running —
+    // only the actual apply (teardown + eval, the part that's visually
+    // disruptive) waits. See applyUpdateWhenIdle().
     function rawInstall(code, label) {
         try {
             new Function(code);
@@ -3242,8 +3276,53 @@
             return;
         }
         localStorage.setItem('__wo_tool_src', code);
+        applyUpdateWhenIdle(code, label);
+    }
+
+    // Hard ceiling on how long a deferred update will wait for `scanning`
+    // to clear before applying anyway — a stuck/never-resolving scan (a
+    // real bug elsewhere) must not permanently block every future update
+    // check from ever landing. 5 minutes comfortably exceeds any real scan
+    // (routeWorkflow's own worst-case safety net is 180s).
+    var UPDATE_DEFER_MAX_WAIT_MS = 5 * 60 * 1000;
+
+    function applyUpdateWhenIdle(code, label) {
+        if (!scanning) {
+            applyUpdateNow(code, label);
+            return;
+        }
+        setStatus('Update ready (' + label + ') — will apply once the current scan finishes...');
+        var waitedMs = 0;
+        var pollMs = 500;
+        var waitInterval = setInterval(function() {
+            waitedMs += pollMs;
+            if (!scanning || waitedMs >= UPDATE_DEFER_MAX_WAIT_MS) {
+                clearInterval(waitInterval);
+                applyUpdateNow(code, label);
+            }
+        }, pollMs);
+    }
+
+    // The actual apply — unchanged teardown()+eval() mechanism, but now
+    // also snapshots whatever's currently on screen (scan results, the
+    // status log, the current return message) into sessionStorage right
+    // before tearing the panel down, so the freshly-eval'd instance can
+    // restore it before its own first render() — see
+    // restoreUpdateSnapshotIfAny(). Only bothers snapshotting if there's
+    // actually something real to preserve (hasScanned).
+    function applyUpdateNow(code, label) {
         setStatus('Update installed (' + label + ')! Reloading...');
         setTimeout(function() {
+            if (hasScanned) {
+                try {
+                    sessionStorage.setItem(UPDATE_SNAPSHOT_KEY, JSON.stringify({
+                        cache: cache,
+                        scanLog: scanLog,
+                        currentReturnMsg: currentReturnMsg,
+                        scrollTop: bodyEl ? bodyEl.scrollTop : 0
+                    }));
+                } catch (e) {} // best-effort - a failed snapshot just means a normal pre-scan reload, never blocks the update itself
+            }
             // Any open Setup/installer modal must not survive a hot-reload — its
             // handlers close over the OLD instance and go stale/disconnected once
             // a fresh instance boots, which is what made the tool feel "stuck"
@@ -3255,6 +3334,40 @@
             teardown();
             eval(code);
         }, 800);
+    }
+
+    // Consumes (and always deletes, success or not) whatever applyUpdateNow()
+    // left behind — called once, early in boot, before the first render()
+    // so a freshly-eval'd instance shows the SAME scan results the old one
+    // had, instead of a "press Scan to populate values" blank slate. This
+    // is the only reason an update, once applied, is visible ANYWHERE
+    // except the status line.
+    function restoreUpdateSnapshotIfAny() {
+        var raw;
+        try {
+            raw = sessionStorage.getItem(UPDATE_SNAPSHOT_KEY);
+        } catch (e) {
+            return;
+        }
+        if (!raw) return;
+        try {
+            sessionStorage.removeItem(UPDATE_SNAPSHOT_KEY);
+        } catch (e) {}
+        try {
+            var snap = JSON.parse(raw);
+            if (snap.cache) cache = snap.cache;
+            if (snap.scanLog) scanLog = snap.scanLog;
+            if (snap.currentReturnMsg !== undefined) currentReturnMsg = snap.currentReturnMsg;
+            hasScanned = true;
+            // bodyEl doesn't exist yet at this point in boot (buildPanel()
+            // hasn't run) - the actual scroll restore has to happen just
+            // AFTER the first render(), not here. Stashed on window as the
+            // simplest handoff across that gap without threading a new
+            // parameter through render()/the boot sequence.
+            if (snap.scrollTop) {
+                window.__wo_pending_scroll_restore = snap.scrollTop;
+            }
+        } catch (e) {}
     }
 
     // ── Install update from GitHub ──
@@ -11828,7 +11941,18 @@
             });
             if (profilesChanged) saveProfiles(profiles);
         } catch (e) {}
+        // Must run before this first render() — see its own comment for
+        // why (a freshly-applied update should show the SAME scan results
+        // the old instance had, not a blank "press Scan" slate).
+        restoreUpdateSnapshotIfAny();
         render();
+        if (window.__wo_pending_scroll_restore) {
+            // bodyEl only exists after render()'s own buildPanel() call -
+            // this is the other half of restoreUpdateSnapshotIfAny()'s
+            // handoff, see its comment.
+            if (bodyEl) bodyEl.scrollTop = window.__wo_pending_scroll_restore;
+            delete window.__wo_pending_scroll_restore;
+        }
         checkAutoScan();
         startWOWatcher();
         checkForUpdate();

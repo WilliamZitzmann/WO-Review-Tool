@@ -1636,15 +1636,81 @@ then immediately call `installUpdate(target.version)` — it's a reactivation
 shortcut for a setting that already existed, not a new settings surface.
 considering a promotion done.
 
+### 9.5 Update apply: deferred until idle, state-preserving
+
+`rawInstall()` used to teardown-and-reload unconditionally, the instant a
+download finished — including mid-scan, since nothing checked `scanning`
+at all. `runScan()` is async and multi-step (polls tabs/iframes with its
+own timeouts); a reload landing mid-flight would tear the panel's DOM out
+from under it, either throwing (`panel.querySelector` on a now-`null`
+`panel`) or writing into a stale/detached tree — the scan just silently
+never finishes.
+
+- **Downloading and caching is unconditional and immediate** —
+  `rawInstall()` still writes `localStorage.setItem('__wo_tool_src', code)`
+  right away regardless of `scanning`. Only the actual apply (the visually
+  disruptive part) is gated.
+- **`applyUpdateWhenIdle(code, label)`** — applies immediately if
+  `!scanning`; otherwise sets a status line (`'Update ready (...) — will
+  apply once the current scan finishes...'`) and polls every 500ms until
+  `scanning` clears, capped at `UPDATE_DEFER_MAX_WAIT_MS` (5 min) so a
+  stuck/never-resolving scan can't permanently block every future update
+  from landing. Both real install paths (`installUpdate()` → tagged/pinned
+  versions, `checkDevUpdate()` → dev channel) go through this — it lives in
+  `rawInstall()`, the one choke point both already shared.
+- **This does NOT change when the update banner appears** —
+  `checkForUpdate()`'s auto-install-vs-`showUpdatePrompt()` branching
+  (§9.4, unmodified) is a completely separate decision from the defer
+  mechanism above. A minor/major bump with auto-update off still shows the
+  banner exactly as before; only what happens once an install is actually
+  triggered (auto or via the banner's Install button) goes through the new
+  idle-wait.
+- **State snapshot/restore across the reload** — `cache`
+  (fields/tables/tableErrors — the scan-derived state `render()` reads,
+  always purely in-memory, never persisted to localStorage even outside
+  update context) and `scanLog`/`currentReturnMsg`/the panel body's
+  scroll position would otherwise be silently lost on ANY reload, update
+  or not. `applyUpdateNow()` snapshots them into `sessionStorage`
+  (`UPDATE_SNAPSHOT_KEY`, only if `hasScanned` — nothing to preserve on a
+  pre-scan install) immediately before `teardown()`; the freshly-`eval()`d
+  instance's boot sequence calls `restoreUpdateSnapshotIfAny()` before its
+  own first `render()`, so the panel reappears showing the SAME results,
+  not a blank "press Scan" state. `sessionStorage` (not `localStorage`) is
+  deliberate — a same-tab, this-instant-only handoff across one reload,
+  never meant to persist beyond it. This is the one mechanism that makes
+  an applied update invisible except via the status line, per design intent.
+- **`window.__woTestHooks`** (`setScanning`/`isScanning`/`rawInstall`/
+  `setScanState`/`getScanState`) — same "dev/test affordance" convention as
+  `__woShowInstaller`/`__woReset`, added specifically so
+  `tests/update_defer_test.js` could drive this real choke point end-to-end
+  (defer-while-scanning, apply-once-idle, snapshot round-trip, the 5-minute
+  cap) without needing to mock a full in-progress Maximo scan.
+
 ---
 
 ## 10. Known rough edges (not bugs, just worth knowing)
 
 - `EPHEMERAL_KEYS` (the "don't back this up on revoke" exclude-list) is
   hand-duplicated between `loader.js` and `wo_tool.js` — any new
-  ephemeral-but-not-real-config key has to be added to both manually. (Both
-  copies list the same 6 keys as of v0.21.2 — `__wo_grant_cache` was missing
-  from `wo_tool.js`'s copy until then, added for consistency.)
+  ephemeral-but-not-real-config key has to be added to both manually. Both
+  copies list the same 8 keys as of v0.26.0 (`__wo_grant_cache` was missing
+  from `wo_tool.js`'s copy until v0.21.2; `__wo_org_configs` and
+  `__wo_contact_email` were both missing from BOTH copies for a while after
+  their own features shipped — a revoke was snapshotting them as if they
+  were real user config instead of re-derivable metadata). Same underlying
+  risk as `readWhoami()`/`readWhoamiCanonical()` immediately below — see
+  task tracking for a planned automatic-sync fix (a build-time codegen
+  step, mirroring the `BUILD_ID` pre-commit hook) rather than continuing to
+  rely on manual discipline across two independently-fetched files.
+- `loader.js`'s `readWhoami()` and `wo_tool.js`'s `readWhoamiCanonical()`
+  are two independently hand-maintained copies of the same whoami-field
+  mapping — same duplication class as `EPHEMERAL_KEYS` above, same planned
+  fix. Already caused one real drift bug this session: `readWhoamiCanonical()`
+  was missing 5 fields (`defaultSiteDescription`/`primaryEmail`/`city`/
+  `firstName`/`lastName`) that `readWhoami()` had carried since they were
+  added — silently wrong for `wo_tool.js`'s own internal re-checks
+  (self-update, `/feedback`, "Organization Configs") the whole time, caught
+  only by deliberately re-reading both side by side, not by any test.
 - `caches.default` (Worker edge cache) is regional, not global — see §3.1.
 - `version.json` grows unbounded — nothing trims old entries automatically,
   but trimming is a supported, expected admin action (as of v0.24.0). **The

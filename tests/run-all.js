@@ -12,6 +12,7 @@ const FILES = [
     'harness.js',
     'org_config_harness.js',
     'loader_test.mjs',
+    'update_defer_test.js',
 ];
 
 const fs = require('fs');
