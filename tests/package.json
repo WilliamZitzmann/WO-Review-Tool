@@ -1,0 +1,13 @@
+{
+  "name": "wo-review-tool-tests",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Black-box jsdom tests for worker.js/loader.js/wo_tool.js — load the REAL source files, mock only fetch/XHR/caches, drive them with real requests/events. Not reimplementations of the logic under test.",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node run-all.js"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}
