@@ -33,7 +33,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26199.0143z';
+    var BUILD_ID = '26199.0149z';
     // Ultimate fallback ONLY — same key/contract as loader.js's
     // CONTACT_EMAIL_KEY (kept in sync manually, independent files). Real
     // value comes from /check-access's bucket-resolved contactEmail
@@ -2744,6 +2744,14 @@
     // which is all loader.js can do on its own). Same function every
     // other revoke path (self-update, /feedback) already uses.
     window.__woForceRevoke = revokeAccessLocally;
+
+    // Exposed so loader.js can surface its own background access-
+    // verification (optimistic launch — see __woForceRevoke above) in the
+    // docked panel's own status line, instead of leaving it invisible.
+    // setStatus() itself already no-ops safely if the panel hasn't
+    // rendered yet (statusEl still undefined at that point), so this is
+    // safe to call at any point in loader.js's flow.
+    window.__woSetStatus = setStatus;
 
     // Re-runs the same domain-agnostic access check loader.js does on first
     // load, and returns a fresh short-lived token for the Worker's /tool

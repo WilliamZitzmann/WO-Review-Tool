@@ -58,11 +58,15 @@ bookmarklet.js
        │    └─ backgroundVerify() — fires AFTER the tool is already up:
        │         ├─ 15-min grant cache still valid? → skip entirely (rate
        │         │    limit; nothing to re-confirm this soon)
-       │         ├─ otherwise: the full bootstrap → whoami → /check-access
-       │         │    round trip, same as the blocking path below
+       │         ├─ otherwise: window.__woSetStatus('Verifying access…')
+       │         │    (wo_tool.js's own setStatus(), exposed so this is
+       │         │    visible in the panel's status line, not silent), then
+       │         │    the full bootstrap → whoami → /check-access round
+       │         │    trip, same as the blocking path below
        │         ├─ granted → refresh __wo_grants/__wo_grant_cache/
-       │         │    __wo_org_configs quietly; the already-running tool is
-       │         │    untouched
+       │         │    __wo_org_configs/__wo_contact_email quietly, then
+       │         │    window.__woSetStatus('Access verified.'); the
+       │         │    already-running tool is otherwise untouched
        │         └─ REAL positive deny → window.__woForceRevoke() (wo_tool.js's
        │              own revokeAccessLocally(), exposed for exactly this) tears
        │              down the session that's already live — snapshot+wipe
@@ -87,13 +91,16 @@ check (their last real launch); the background re-verify still runs on
 (rate-limited) cadence and can still fully tear down a live session if it
 turns out that decision is now stale-and-wrong.
 
-`window.__woForceRevoke` (wo_tool.js) is the one piece of new cross-file
-coupling this required — `loader.js`'s own `revokeLocal()` can only clear
-localStorage for *next* time; it has no way to reach into an
-already-rendered tool's DOM. If a cached tool predates this export (very
-old `__wo_tool_src`), `backgroundVerify()` falls back to `revokeLocal()`
-alone — storage gets cleared correctly, the live session just won't visibly
-reflect it until the next launch.
+`window.__woForceRevoke`/`window.__woSetStatus` (wo_tool.js) are the new
+cross-file coupling this required — `loader.js`'s own `revokeLocal()` can
+only clear localStorage for *next* time; it has no way to reach into an
+already-rendered tool's DOM or its status line. Both are guarded with
+`typeof window.__wo* === 'function'` checks before use, so a cached tool
+predating either export (very old `__wo_tool_src`) degrades gracefully —
+on a deny, `backgroundVerify()` falls back to `revokeLocal()` alone
+(storage gets cleared correctly, the live session just won't visibly
+reflect it until the next launch); the status-line update is simply
+skipped, never an error.
 
 Two independent things get "verified live" here, on different clocks:
 - **Access itself** (granted/denied) — every launch, via whichever path

@@ -363,6 +363,14 @@
         });
     }
 
+    // Best-effort — the panel may not exist yet (very first paint) or this
+    // may be running against an old cached tool source that predates
+    // window.__woSetStatus; either way, silently doing nothing is fine,
+    // this is a visibility nicety, not something to ever block or error on.
+    function setToolStatus(text) {
+        if (typeof window.__woSetStatus === 'function') window.__woSetStatus(text);
+    }
+
     // Real, live re-verification — runs AFTER the tool is already showing
     // (see runOptimistically()), never blocking anything. Rate-limited by
     // the same grant cache the old fully-blocking flow used, so a burst of
@@ -370,6 +378,7 @@
     // Worker just to re-confirm what was already confirmed minutes ago.
     function backgroundVerify() {
         if (readGrantCache()) return;
+        setToolStatus('Verifying access…');
         getJSON(WORKER_BASE_URL + '/bootstrap').then(function(boot) {
             var hosts = boot.maximoHosts || [];
             if (hosts.length) localStorage.setItem(HOSTS_CACHE_KEY, JSON.stringify(hosts));
@@ -394,6 +403,7 @@
                 localStorage.setItem(GRANTS_KEY, JSON.stringify(decision.grants || []));
                 writeGrantCache(decision.grants);
                 cacheOrgConfigsMetadata(decision.configs);
+                setToolStatus('Access verified.');
                 return;
             }
             // A real, positive deny, discovered only AFTER the tool was
@@ -405,7 +415,9 @@
             // now, not just on the next launch. Both revoke paths wipe
             // __wo_contact_email along with everything else, so the
             // resolved contact goes IN as an argument (re-written after
-            // the wipe), not cached separately beforehand.
+            // the wipe), not cached separately beforehand. No separate
+            // setToolStatus() call needed here — the revoke path already
+            // shows its own much more prominent banner.
             if (typeof window.__woForceRevoke === 'function') {
                 window.__woForceRevoke(decision.contactEmail);
             } else {
