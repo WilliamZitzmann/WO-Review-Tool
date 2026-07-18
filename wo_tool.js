@@ -33,7 +33,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26198.2331z';
+    var BUILD_ID = '26199.0014z';
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
 
     // The main panel header and Setup titlebar are set to this same fixed
@@ -2776,6 +2776,16 @@
         banner.textContent = 'Access no longer granted. Contact ' + SUPPORT_EMAIL + ' for access.';
         document.body.appendChild(banner);
     }
+
+    // Exposed so loader.js can trigger a live teardown of an ALREADY-
+    // RUNNING tool instance — needed for the optimistic-launch flow
+    // (loader.js runs a cached copy instantly on a local-config hit, then
+    // verifies access in the background; if that background check comes
+    // back with a real deny, it needs to actually tear down the session
+    // it already started, not just clear localStorage for next time,
+    // which is all loader.js can do on its own). Same function every
+    // other revoke path (self-update, /feedback) already uses.
+    window.__woForceRevoke = revokeAccessLocally;
 
     // Re-runs the same domain-agnostic access check loader.js does on first
     // load, and returns a fresh short-lived token for the Worker's /tool
@@ -7640,6 +7650,9 @@
         var groupExpandState = {};
         var varExpandState = {};
         var scanExpandState = {};
+        var scannedTableExpandState = {};
+        var customTableExpandState = {};
+        var apiTableExpandState = {};
         // Tab id -> scrollTop of #__s_content, saved just before switching
         // away from a tab and restored right after switching back to it, so
         // returning to a tab doesn't dump you back at the top. Reset only
@@ -10246,16 +10259,22 @@
                 if (u.groups.length) usedInParts.push('Groups: ' + u.groups.join(', '));
                 if (u.scans.length) usedInParts.push('Scan: ' + u.scans.join(', '));
                 var isKnownDefault = !cfg.tableNames[id] && KNOWN_TABLE_NAMES[id];
+                var displayLabel = cfg.tableNames[id] || (isKnownDefault ? KNOWN_TABLE_NAMES[id] : id);
                 box.innerHTML =
-                    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
-                    '<code class="wo-mono" style="font-size:10.5px;color:var(--wo-muted);">' + String(id).replace(/</g, '&lt;') + '</code>' +
+                    '<div data-coll-header class="wo-card-head">' +
+                    '<code class="wo-mono" style="font-size:10.5px;">' + String(displayLabel).replace(/</g, '&lt;') + '</code>' +
                     '</div>' +
-                    '<div style="margin-top:6px;">' +
+                    '<div data-coll-body style="margin-top:7px;">' +
+                    '<div>' +
                     '<label style="color:var(--wo-muted);font-size:11px;">Display name</label><br>' +
                     '<input type="text" data-name value="' + String(cfg.tableNames[id] || '').replace(/"/g, '&quot;') + '" placeholder="' + String(isKnownDefault ? KNOWN_TABLE_NAMES[id] : id).replace(/"/g, '&quot;') + '" style="width:100%;margin-top:2px;">' +
                     '</div>' +
-                    (usedInParts.length ? '<div style="margin-top:6px;color:var(--wo-muted);font-size:10px;">' + usedInParts.join(' · ') + '</div>' : '');
+                    (usedInParts.length ? '<div style="margin-top:6px;color:var(--wo-muted);font-size:10px;">' + usedInParts.join(' · ') + '</div>' : '') +
+                    '</div>';
                 content.appendChild(box);
+                makeCollapsible(box, displayLabel, !scannedTableExpandState[id], function(expandedNow) {
+                    scannedTableExpandState[id] = expandedNow;
+                });
                 box.querySelector('[data-name]').oninput = function(e) {
                     var v = e.target.value.trim();
                     if (v) cfg.tableNames[id] = v;
@@ -10369,9 +10388,9 @@
 
                 var box = document.createElement('div');
                 box.className = 'wo-card';
-                var head = '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
+                var head = '<div data-coll-header class="wo-card-head">' +
                     '<code class="wo-mono" style="font-size:11px;">' + String(id).replace(/</g, '&lt;') + '</code>' +
-                    '<div style="display:flex;gap:6px;">' +
+                    '<div style="display:flex;gap:6px;margin-left:auto;" onclick="event.stopPropagation()">' +
                     '<button type="button" class="__ct_addrow wo-btn-ghost" style="font-size:11px;" title="Add row">+ Row</button>' +
                     '<button type="button" class="__ct_addcol wo-btn-ghost" style="font-size:11px;" title="Add column">+ Col</button>' +
                     '<button type="button" class="__ct_del wo-btn-ghost wo-kebab-item-danger" aria-label="Delete table">' + TRASH_SVG + '</button>' +
@@ -10398,7 +10417,7 @@
                     });
                     tableHtml += '</tr>';
                 });
-                tableHtml += '</tbody></table></div>' +
+                tableHtml = '<div data-coll-body style="margin-top:7px;">' + tableHtml + '</tbody></table></div>' +
                     '<div style="color:var(--wo-muted);font-size:10px;margin-top:5px;">Right-click a cell to add/delete rows, columns, or a cell — or right-click a column header to make/unmake it a formula column.</div>';
 
                 var formulaColKeys = Object.keys(t.columnFormulas || {}).filter(function(c) {
@@ -10417,8 +10436,11 @@
                         '</div>';
                 }
 
-                box.innerHTML = head + tableHtml + formulaSectionHtml;
+                box.innerHTML = head + tableHtml + formulaSectionHtml + '</div>';
                 content.appendChild(box);
+                makeCollapsible(box, id, !customTableExpandState[id], function(expandedNow) {
+                    customTableExpandState[id] = expandedNow;
+                });
 
                 box.querySelector('.__ct_del').onclick = function() {
                     woConfirm('Delete custom table "' + id + '"? Any formula referencing it will start returning empty results.').then(function(ok) {
@@ -10557,11 +10579,12 @@
                 var box = document.createElement('div');
                 box.className = 'wo-card';
                 box.innerHTML =
-                    '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
+                    '<div data-coll-header class="wo-card-head">' +
                     '<code class="wo-mono" style="font-size:11px;">' + String(id).replace(/</g, '&lt;') + '</code>' +
-                    '<button type="button" class="__at_del wo-btn-ghost wo-kebab-item-danger" aria-label="Delete table">' + TRASH_SVG + '</button>' +
+                    '<button type="button" class="__at_del wo-btn-ghost wo-kebab-item-danger" style="margin-left:auto;" aria-label="Delete table" onclick="event.stopPropagation()">' + TRASH_SVG + '</button>' +
                     '</div>' +
-                    '<div style="margin-top:6px;">' +
+                    '<div data-coll-body style="margin-top:7px;">' +
+                    '<div>' +
                     '<label style="color:var(--wo-muted);font-size:11px;">Source</label><br>' +
                     '<select data-at-source style="margin-top:2px;">' +
                     '<option value="assetWO"' + (t.source === 'assetWO' ? ' selected' : '') + '>Asset Work Order History</option>' +
@@ -10586,8 +10609,12 @@
                         (t.source === 'assetWO' ? '<div style="margin-top:6px;">' +
                             '<label style="color:var(--wo-muted);font-size:11px;">Limit</label><br>' +
                             '<input type="number" data-at-limit min="1" value="' + (t.limit || 10) + '" style="width:80px;margin-top:2px;">' +
-                            '</div>' : ''));
+                            '</div>' : '')) +
+                    '</div>';
                 content.appendChild(box);
+                makeCollapsible(box, id, !apiTableExpandState[id], function(expandedNow) {
+                    apiTableExpandState[id] = expandedNow;
+                });
 
                 box.querySelector('.__at_del').onclick = function() {
                     woConfirm('Delete API table "' + id + '"? Any formula referencing it will start returning empty results.').then(function(ok) {

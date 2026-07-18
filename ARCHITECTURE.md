@@ -42,39 +42,74 @@ Real repos:
 
 ## 2. Boot sequence (what happens on every bookmarklet click)
 
+**Returning user (has a cached tool source AND a real local config —
+`__wo_tool_src` + `__wo_rules_config` both present): optimistic, instant,
+never blocks on network.**
+
 ```
 bookmarklet.js
   └─ eval loader.js
-       ├─ 15-min grant cache valid + tool source cached?
-       │    └─ YES → skip ALL network, eval cached tool source immediately
-       │    └─ NO  ↓
-       ├─ GET /bootstrap  (Worker, edge-cached ~30s)  → { maximoHosts, requiredFields }
-       ├─ domain check against maximoHosts
-       │    └─ not on a known host → redirect (single host: automatic;
-       │       multiple hosts: one-time picker, remembered after)
-       ├─ read Maximo's own /maximo/oslc/whoami (client-side, same-origin)
-       ├─ POST /check-access  { fields: <only the required subset> }
-       │    └─ Worker evaluates permissions.json → { granted, grants, token? }
-       ├─ granted? → cache grants (both __wo_grants and the 15-min
-       │    __wo_grant_cache), restore any revoked-backup, then:
-       │    GET /tool?token=...&version=X.Y.Z  (edge-cached: 1 day if
-       │    pinned/tagged, 15s if tracking the branch HEAD)
-       │    → eval the returned wo_tool.js
-       └─ denied? → snapshot-then-wipe local config (revokeLocal), show
-            "contact <email>" banner
+       ├─ TOOL_SRC_KEY + RULES_KEY both present? → runOptimistically():
+       │    ├─ cheap, no-network domain check against the LAST cached host
+       │    │    list (not a fresh /bootstrap fetch) — redirect only if
+       │    │    that cached list is non-empty and disagrees
+       │    ├─ eval the cached tool source IMMEDIATELY — this is the whole
+       │    │    UI, running, before any network call has even started
+       │    └─ backgroundVerify() — fires AFTER the tool is already up:
+       │         ├─ 15-min grant cache still valid? → skip entirely (rate
+       │         │    limit; nothing to re-confirm this soon)
+       │         ├─ otherwise: the full bootstrap → whoami → /check-access
+       │         │    round trip, same as the blocking path below
+       │         ├─ granted → refresh __wo_grants/__wo_grant_cache/
+       │         │    __wo_org_configs quietly; the already-running tool is
+       │         │    untouched
+       │         └─ REAL positive deny → window.__woForceRevoke() (wo_tool.js's
+       │              own revokeAccessLocally(), exposed for exactly this) tears
+       │              down the session that's already live — snapshot+wipe
+       │              local config, close modals, show the "access no longer
+       │              granted" banner. An inconclusive result (network error,
+       │              Worker down) NEVER revokes — same fail-open policy as
+       │              always, just now reachable after the tool already opened
+       │              instead of only before.
+       └─ else (fresh install, or a real revoke cleared everything) → the
+            original fully-blocking flow:
+              GET /bootstrap → domain check/redirect → read whoami →
+              POST /check-access → granted? GET /tool?token=... → eval
+              : denied? revokeLocal(), show "contact <email>" banner
 ```
 
+This exists because the blocking chain (bootstrap → whoami → check-access →
+tool fetch, four sequential round trips) became the visible bottleneck on
+every fresh page load once it stopped being masked by the 15-min cache. The
+fix isn't skipping verification — it's not making the UI wait for it. A
+returning user always gets *some* access decision from a recent-enough
+check (their last real launch); the background re-verify still runs on
+(rate-limited) cadence and can still fully tear down a live session if it
+turns out that decision is now stale-and-wrong.
+
+`window.__woForceRevoke` (wo_tool.js) is the one piece of new cross-file
+coupling this required — `loader.js`'s own `revokeLocal()` can only clear
+localStorage for *next* time; it has no way to reach into an
+already-rendered tool's DOM. If a cached tool predates this export (very
+old `__wo_tool_src`), `backgroundVerify()` falls back to `revokeLocal()`
+alone — storage gets cleared correctly, the live session just won't visibly
+reflect it until the next launch.
+
 Two independent things get "verified live" here, on different clocks:
-- **Access itself** (granted/denied) — live every click, UNLESS the 15-min
-  grant cache is still valid, in which case it's trusted without re-checking.
-  This is a deliberate speed/freshness tradeoff — see §4.
+- **Access itself** (granted/denied) — every launch, via whichever path
+  above applies; rate-limited to once per `GRANT_CACHE_TTL_MS` (15 min) by
+  the grant cache, same as before — that cache now gates whether a
+  background re-verify bothers to run at all, not whether the tool is
+  allowed to open.
 - **wo_tool.js's own self-update check** (`checkForUpdate()`) — runs
   independently once the tool is running, regardless of the grant cache.
 
 `wo_tool.js` has its own internal copy of the same whoami→check-access→token
-dance (`getWorkerAccessToken()`), used only for self-update fetches
-(`fetchToolSourceViaWorker()`). It updates the same `__wo_grants` key as a
-side effect, but it is NOT the primary access gate — `loader.js` is.
+dance (`getWorkerAccessToken()`/`runCheckAccess()`), used for self-update
+fetches (`fetchToolSourceViaWorker()`) and the Setup > Profiles
+"Organization Configs" card (`fetchOrgConfigsLive()`). It updates the same
+`__wo_grants` key as a side effect, but it is NOT the primary access gate —
+`loader.js` is.
 
 ---
 

@@ -19,6 +19,7 @@
     var HOSTS_CACHE_KEY = '__wo_known_hosts';
     var GRANTS_KEY = '__wo_grants'; // same key wo_tool.js's hasGrant()/console unlock commands read
     var ORG_CONFIGS_KEY = '__wo_org_configs'; // same key wo_tool.js's showInstaller()/Setup > Profiles read
+    var RULES_KEY = '__wo_rules_config'; // same key wo_tool.js's startupRestore() checks for its first-run gate
     var CONTACT_EMAIL = 'williamzitzmann@abbvie.com';
 
     function showBanner(text, isError) {
@@ -203,21 +204,11 @@
         });
     }
 
+    // Only ever reached when main() has already determined there's no
+    // usable local copy (missing TOOL_SRC_KEY and/or RULES_KEY) — a
+    // returning user with both always takes the optimistic instant-launch
+    // path below instead (runOptimistically()), never this blocking one.
     function proceedWithAccessCheck(requiredFields) {
-        // Cache hit: skip straight to running the already-cached tool
-        // source with the already-cached grants, no network at all. Only
-        // valid if we actually have a runnable copy cached — a cache hit
-        // with nothing to run would just show an error for no reason, so
-        // fall through to the real check in that case instead.
-        var cached = readGrantCache();
-        if (cached && localStorage.getItem(TOOL_SRC_KEY)) {
-            localStorage.setItem(GRANTS_KEY, JSON.stringify(cached.grants));
-            restoreFromRevokedBackupIfAny();
-            removeBanner();
-            eval(localStorage.getItem(TOOL_SRC_KEY));
-            return;
-        }
-
         showBanner('Checking access...');
         readWhoami().then(function(whoamiData) {
             var fieldsToSend = requiredFields ? fieldsSubset(requiredFields, whoamiData) : whoamiData;
@@ -325,25 +316,94 @@
         });
     }
 
-    function main() {
-        // A valid grant cache is meant to skip ALL network round trips, not
-        // just whoami/check-access/tool-fetch — bootstrap is a real
-        // Worker/GitHub round trip too, so checking the cache has to happen
-        // before that fetch even starts, not just inside
-        // proceedWithAccessCheck (which would still leave every "instant"
-        // run paying for a bootstrap call it doesn't need). Domain-checks
-        // against whatever host list was last cached rather than a fresh
-        // one — identical to the existing bootstrap-failure fallback below,
-        // just taken proactively instead of reactively.
-        var cachedGrant = readGrantCache();
-        if (cachedGrant && localStorage.getItem(TOOL_SRC_KEY)) {
-            var cachedHosts = [];
-            try {
-                cachedHosts = JSON.parse(localStorage.getItem(HOSTS_CACHE_KEY) || '[]');
-            } catch (e) {}
-            checkDomainThenProceed(cachedHosts, null);
+    // Real, live re-verification — runs AFTER the tool is already showing
+    // (see runOptimistically()), never blocking anything. Rate-limited by
+    // the same grant cache the old fully-blocking flow used, so a burst of
+    // bookmarklet clicks within GRANT_CACHE_TTL_MS doesn't hammer the
+    // Worker just to re-confirm what was already confirmed minutes ago.
+    function backgroundVerify() {
+        if (readGrantCache()) return;
+        getJSON(WORKER_BASE_URL + '/bootstrap').then(function(boot) {
+            var hosts = boot.maximoHosts || [];
+            if (hosts.length) localStorage.setItem(HOSTS_CACHE_KEY, JSON.stringify(hosts));
+            return readWhoami().then(function(whoamiData) {
+                var fieldsToSend = boot.requiredFields ? fieldsSubset(boot.requiredFields, whoamiData) : whoamiData;
+                return fetch(WORKER_BASE_URL + '/check-access', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        fields: fieldsToSend
+                    })
+                }).then(function(r) {
+                    if (!r.ok) throw new Error('check-access HTTP ' + r.status);
+                    return r.json();
+                });
+            });
+        }).then(function(decision) {
+            if (decision.granted) {
+                localStorage.setItem(GRANTS_KEY, JSON.stringify(decision.grants || []));
+                writeGrantCache(decision.grants);
+                cacheOrgConfigsMetadata(decision.configs);
+                return;
+            }
+            // A real, positive deny, discovered only AFTER the tool was
+            // already optimistically running. loader.js's own revokeLocal()
+            // can only clear localStorage for next time — it can't touch
+            // the DOM of a session that's already live — so this reaches
+            // into the running tool's own revoke machinery (the same one
+            // self-update/feedback already use) to actually tear it down
+            // now, not just on the next launch.
+            if (typeof window.__woForceRevoke === 'function') {
+                window.__woForceRevoke();
+            } else {
+                revokeLocal();
+            }
+        }).catch(function() {
+            // Inconclusive (offline, Worker down) — never revoke, same
+            // fail-open policy the original blocking flow always had.
+        });
+    }
+
+    // Optimistic launch: a returning user with both a cached tool source
+    // AND a real local config runs INSTANTLY, no network wait at all — the
+    // real access decision is re-verified in the background afterward
+    // (backgroundVerify()) and can still revoke if it comes back denied.
+    // This is the direct fix for auth round trips (bootstrap -> whoami ->
+    // check-access -> tool fetch, all sequential) becoming the visible
+    // bottleneck on every fresh page load: that chain still runs, it just
+    // no longer blocks getting the tool open. Gated on RULES_KEY (not just
+    // TOOL_SRC_KEY) specifically so a genuinely fresh install — nothing to
+    // optimistically show yet — still waits for the real check, per "if no
+    // local config available then they wait for auth."
+    function runOptimistically() {
+        var cachedHosts = [];
+        try {
+            cachedHosts = JSON.parse(localStorage.getItem(HOSTS_CACHE_KEY) || '[]');
+        } catch (e) {}
+        var here = location.hostname;
+        var known = cachedHosts.some(function(h) {
+            return h.hostname === here;
+        });
+        if (cachedHosts.length && !known) {
+            redirectToMaximo(cachedHosts);
             return;
         }
+
+        restoreFromRevokedBackupIfAny();
+        removeBanner();
+        eval(localStorage.getItem(TOOL_SRC_KEY));
+        backgroundVerify();
+    }
+
+    function main() {
+        if (localStorage.getItem(TOOL_SRC_KEY) && localStorage.getItem(RULES_KEY)) {
+            runOptimistically();
+            return;
+        }
+        // No usable local copy yet (fresh install, or a real revoke
+        // cleared everything) — must wait for the real check.
         getJSON(WORKER_BASE_URL + '/bootstrap').then(function(boot) {
             var hosts = boot.maximoHosts || [];
             if (hosts.length) localStorage.setItem(HOSTS_CACHE_KEY, JSON.stringify(hosts));
