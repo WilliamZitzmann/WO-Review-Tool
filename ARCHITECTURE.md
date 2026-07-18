@@ -417,6 +417,59 @@ purely admin-layer metadata, never read on the regular-user hot path.
     applying always requires the explicit click + confirm. That's the
     deliberate safety line.
 
+### 3.3 Bucket-level contact email
+
+Every bucket can carry an optional `contactEmail` (admin.html's bucket
+form; validated with the same `isValidEmail()` account-creation uses).
+Resolved nearest-ancestor-wins — a bucket with none set falls through to
+its parent's, then its parent's, etc. — via `resolveContactForBucket()`,
+exactly the same cascade shape as the old, removed `configProfileId`
+placeholder, now backing a real feature. Replaces `loader.js`'s
+`CONTACT_EMAIL` and `wo_tool.js`'s `SUPPORT_EMAIL`, which used to be single
+hardcoded constants (`williamzitzmann@abbvie.com`) — those constants still
+exist, but only as the ultimate fallback before any real resolution has
+ever been cached.
+
+- **Which bucket does a whoami resolve against?** `resolveBucketForWhoami()`
+  walks the tree top-down from every root bucket, descending into a
+  bucket's children only once the bucket's own condition already matched —
+  same AND-chain semantics `bucketConditionChain()` encodes for permission
+  entries, just computed live instead of pre-baked. Returns the deepest
+  consistently-matching bucket, or `null` if not even a top-level bucket
+  matches. This is **independent of whether any permission rule actually
+  grants anything** — a denied user still needs to know who to ask, so
+  `resolveContactEmailForUser()` runs for both branches of
+  `/check-access`, not just the granted one.
+- **`buckets.json` is now read on the regular-user hot path** —
+  `loadBucketsDocCached()`, same cached/fail-open pattern as
+  `loadConfigsIndexCached()`. This is a deliberate exception to the
+  general "buckets.json is admin-layer only" rule elsewhere in this doc:
+  contact resolution needs the live tree structure itself, not a
+  pre-baked ancestor-chain the way permissions/configs matching works,
+  since there's no way to "bake in" a nearest-ancestor walk ahead of time.
+  `computeBucketRequiredFields()` merges every bucket's own field into
+  `/bootstrap`'s `requiredFields` too, so a mid-tree bucket with no
+  permission rule or config of its own still gets matched correctly.
+- **Client-side caching (`__wo_contact_email`, both `loader.js` and
+  `wo_tool.js`)**: a real resolved value is cached and only ever
+  *overwritten* by another real value — `contactEmail: null` (nothing
+  resolved) is a no-op, never clears a previously-known-good one. This
+  does **not** apply across an actual revoke, though:
+  `revokeLocal()`/`revokeAccessLocally()` wipe every `__wo_` key
+  unconditionally as part of the revoke itself (their own
+  `EPHEMERAL_KEYS` exclusion only controls what's worth *snapshotting*
+  for later restore, not what survives the wipe) — a revoke is a
+  deliberate clean-slate event, so both functions take `contactEmail` as
+  a parameter and re-write it *after* their own wipe, rather than callers
+  caching it beforehand and having it silently deleted a moment later.
+  This exact bug (cache-then-immediately-wipe) shipped and was caught only
+  by a real jsdom execution test, not code review — see `loader_test.mjs`.
+- **`EPHEMERAL_KEYS` gap fixed alongside this**: `__wo_org_configs` had
+  been missing from both files' lists since it was introduced (Phase E) —
+  a revoke was snapshotting it as if it were real user config instead of
+  treating it as disposable, re-derived metadata. Both lists now also
+  exclude `__wo_contact_email` for the same reason.
+
 ---
 
 ## 4. Config model (what lives in localStorage)

@@ -33,8 +33,17 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26199.0037z';
+    var BUILD_ID = '26199.0143z';
+    // Ultimate fallback ONLY — same key/contract as loader.js's
+    // CONTACT_EMAIL_KEY (kept in sync manually, independent files). Real
+    // value comes from /check-access's bucket-resolved contactEmail
+    // (nearest-ancestor-wins — see worker.js's resolveContactForBucket()),
+    // cached here whenever this file's own runCheckAccess() gets one.
     var SUPPORT_EMAIL = 'williamzitzmann@abbvie.com';
+    var CONTACT_EMAIL_KEY = '__wo_contact_email';
+    function getSupportEmail() {
+        return localStorage.getItem(CONTACT_EMAIL_KEY) || SUPPORT_EMAIL;
+    }
 
     // The main panel header and Setup titlebar are set to this same fixed
     // height (instead of just letting padding/content size them) so the two
@@ -2684,10 +2693,20 @@
     // time the bookmarklet runs) comes back whole. Same exclude-list and
     // same REVOKED_BACKUP_KEY as loader.js's revokeLocal() — kept in sync
     // manually since the two files are fetched/run independently.
-    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_grants', '__wo_known_hosts', '__wo_last_scanned_wo', '__wo_grant_cache'];
+    // __wo_org_configs/__wo_contact_email were both missing here for a
+    // while (a real gap, not intentional) — both are re-derived from the
+    // next successful check-access, not real user config.
+    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_grants', '__wo_known_hosts', '__wo_last_scanned_wo', '__wo_grant_cache', '__wo_org_configs', '__wo_contact_email'];
     var REVOKED_BACKUP_KEY = '__wo_revoked_backup';
 
-    function revokeAccessLocally() {
+    // contactEmail is optional — passed by loader.js's window.__woForceRevoke
+    // call (the optimistic-launch background-verify path) with whatever
+    // /check-access just resolved. The wipe below deletes __wo_contact_email
+    // along with everything else regardless of EPHEMERAL_KEYS (that list
+    // only controls what's worth snapshotting, not what survives), so it
+    // has to be re-written AFTER the wipe — same reasoning and same fix
+    // shape as loader.js's revokeLocal(contactEmail).
+    function revokeAccessLocally(contactEmail) {
         var snapshot = {};
         Object.keys(localStorage).forEach(function(k) {
             if (k.indexOf('__wo_') !== 0) return;
@@ -2704,6 +2723,7 @@
         }).forEach(function(k) {
             localStorage.removeItem(k);
         });
+        if (contactEmail) localStorage.setItem(CONTACT_EMAIL_KEY, contactEmail);
         var setupModal = document.getElementById('__wo_setup_modal');
         if (setupModal) setupModal.remove();
         var installerModal = document.getElementById('__wo_installer_modal');
@@ -2711,7 +2731,7 @@
         teardown();
         var banner = document.createElement('div');
         banner.style.cssText = 'position:fixed;top:10px;right:10px;z-index:2147483647;background:#2c2c2c;color:#e74c3c;padding:10px 16px;border-radius:6px;font-family:Arial,sans-serif;font-size:13px;max-width:320px;';
-        banner.textContent = 'Access no longer granted. Contact ' + SUPPORT_EMAIL + ' for access.';
+        banner.textContent = 'Access no longer granted. Contact ' + getSupportEmail() + ' for access.';
         document.body.appendChild(banner);
     }
 
@@ -2745,9 +2765,14 @@
             });
         }).then(function(decision) {
             if (!decision.granted) {
-                revokeAccessLocally();
+                // revokeAccessLocally() wipes __wo_contact_email along with
+                // everything else, so the resolved contact goes IN as its
+                // argument (re-written after the wipe), not cached here
+                // first — caching it here would just get immediately erased.
+                revokeAccessLocally(decision.contactEmail);
                 throw new Error('access revoked');
             }
+            if (decision.contactEmail) localStorage.setItem(CONTACT_EMAIL_KEY, decision.contactEmail);
             localStorage.setItem(GRANTS_KEY, JSON.stringify(decision.grants || []));
             return decision;
         });
@@ -11319,7 +11344,7 @@
                 function fallbackToEmail(fullContext) {
                     var subject = 'WO Review Tool ' + type + ' report';
                     var mailBody = body + '\n\n---\n' + fullContext;
-                    window.location.href = 'mailto:' + SUPPORT_EMAIL +
+                    window.location.href = 'mailto:' + getSupportEmail() +
                         '?subject=' + encodeURIComponent(subject) +
                         '&body=' + encodeURIComponent(mailBody);
                 }

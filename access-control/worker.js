@@ -287,6 +287,25 @@ async function loadConfigsIndexCached(env, ctx) {
     }
 }
 
+// Cached, fail-open read of buckets.json for the REGULAR-user path — same
+// reasoning as loadConfigsIndexCached() above. This is a deliberate
+// exception to the general "buckets.json is admin-layer only, never read
+// on the hot path" rule: contact-email resolution (resolveContactForBucket)
+// needs the real tree structure, not just a pre-baked ancestor-condition
+// chain the way permissions/configs matching does — there's no way to
+// "bake in" a nearest-ancestor walk ahead of time the way
+// buildEntryConditions() does for access rules.
+async function loadBucketsDocCached(env, ctx) {
+    try {
+        var raw = await cachedFetchPrivateFile(env, ctx, 'buckets.json', null, PERMISSIONS_CACHE_TTL);
+        var doc = JSON.parse(raw);
+        doc.buckets = doc.buckets || [];
+        return doc;
+    } catch (e) {
+        return { buckets: [] };
+    }
+}
+
 // ── Rule evaluation ──
 function evalCondition(user, cond) {
     var v = String(user[cond.field] || '').toLowerCase();
@@ -480,13 +499,34 @@ async function verifyToken(secret, token) {
 async function handleBootstrap(env, ctx) {
     var perms = await loadPermissions(env, ctx);
     var configsDoc = await loadConfigsIndexCached(env, ctx);
+    var bucketsDoc = await loadBucketsDocCached(env, ctx);
     var fields = {};
     computeRequiredFields(perms).forEach(function(f) { fields[f] = true; });
     computeConfigRequiredFields(configsDoc).forEach(function(f) { fields[f] = true; });
+    computeBucketRequiredFields(bucketsDoc).forEach(function(f) { fields[f] = true; });
     return json({
         maximoHosts: perms.maximoHosts || [],
         requiredFields: Object.keys(fields),
     });
+}
+
+// Best-effort contact-email resolution — used for BOTH a granted and a
+// denied /check-access result (a denied user still needs to know who to
+// ask for access), so it's factored out and called unconditionally rather
+// than living inside handleCheckAccess's granted-only branch. Never throws
+// and never blocks a grant/deny decision: a buckets.json hiccup just means
+// no contact resolves, same fail-open reasoning as every other regular-
+// path lookup here.
+async function resolveContactEmailForUser(user, env, ctx) {
+    try {
+        var bucketsDoc = await loadBucketsDocCached(env, ctx);
+        var byId = bucketsById(bucketsDoc.buckets);
+        var matchedBucketId = resolveBucketForWhoami(user, bucketsDoc.buckets);
+        if (matchedBucketId == null) return null;
+        return resolveContactForBucket(matchedBucketId, byId);
+    } catch (e) {
+        return null;
+    }
 }
 
 // Set of every admin-account email (root + every group's members),
@@ -527,7 +567,10 @@ async function handleCheckAccess(request, env, ctx) {
     var user = body.fields || {};
     var perms = await loadPermissions(env, ctx);
     var result = evaluateAccess(perms, user);
-    if (!result.granted) return json({ granted: false });
+    if (!result.granted) {
+        var deniedContact = await resolveContactEmailForUser(user, env, ctx);
+        return json({ granted: false, contactEmail: deniedContact });
+    }
 
     // Auto-`admin` grant: a Maximo user whose whoami email matches a real
     // admin-account email gets the `admin` grant on top of whatever they
@@ -557,13 +600,15 @@ async function handleCheckAccess(request, env, ctx) {
         matchedConfigs = [];
     }
 
+    var contactEmail = await resolveContactEmailForUser(user, env, ctx);
+
     var token = await makeToken(env.TOKEN_SECRET, {
         grants: result.grants,
         exp: Date.now() + TOKEN_TTL_MS,
         configIds: matchedConfigs.map(function(c) { return c.id; }),
     });
     return json({
-        granted: true, grants: result.grants, token: token,
+        granted: true, grants: result.grants, token: token, contactEmail: contactEmail,
         configs: matchedConfigs.map(function(c) { return { id: c.id, name: c.name, description: c.description || '' }; }),
     });
 }
@@ -962,6 +1007,68 @@ function bucketConditionChain(bucketId, byId) {
     return chain;
 }
 
+// Which bucket a whoami structurally belongs to, walking top-down from
+// root-level buckets — only descends into a bucket's children once the
+// bucket's OWN condition already matched, so the result is always
+// consistent with what bucketConditionChain() would have prepended for
+// that bucket (every ancestor's condition genuinely holds, not just the
+// deepest one in isolation). Returns the DEEPEST matching bucket id, or
+// null if not even a top-level bucket matches. Used for contact-email
+// resolution — independent of whether any permission rule/config actually
+// grants this whoami anything, since a denied user still needs to know who
+// to ask.
+function resolveBucketForWhoami(user, buckets) {
+    var byParent = {};
+    buckets.forEach(function(b) {
+        var key = b.parentId || 'root';
+        (byParent[key] = byParent[key] || []).push(b);
+    });
+    function deepestMatch(parentKey, guard) {
+        if (guard > 1000) return null; // cycle guard - buckets.json is hand-editable
+        var candidates = byParent[parentKey] || [];
+        for (var i = 0; i < candidates.length; i++) {
+            var b = candidates[i];
+            if (evalCondition(user, { field: b.field, op: b.op, value: b.value })) {
+                return deepestMatch(b.id, guard + 1) || b.id;
+            }
+        }
+        return null;
+    }
+    return deepestMatch('root', 0);
+}
+
+// Nearest-ancestor-wins contact email — walks from bucketId UP toward the
+// root, returning the first bucket (inclusive of bucketId itself) with a
+// non-empty contactEmail set. Same shape as the old, removed
+// resolveConfigForBucket() (nearest-ancestor cascade), now backing a real
+// feature: e.g. an AVWP-level match with no contact set falls through to
+// Ireland's, then AbbVie's.
+function resolveContactForBucket(bucketId, byId) {
+    var cur = bucketId, guard = 0;
+    while (cur != null) {
+        var node = byId[cur];
+        if (!node) return null;
+        if (node.contactEmail) return node.contactEmail;
+        cur = node.parentId;
+        if (++guard > 1000) return null;
+    }
+    return null;
+}
+
+// Every field referenced by any bucket's own condition — merged into
+// /bootstrap's requiredFields alongside computeRequiredFields()/
+// computeConfigRequiredFields() so resolveBucketForWhoami() always has the
+// real field data to match against, even for a bucket that happens to have
+// no permission rule or config directly targeting it (e.g. a mid-tree
+// "Ireland" node with children but nothing of its own).
+function computeBucketRequiredFields(bucketsDoc) {
+    var fields = {};
+    (bucketsDoc.buckets || []).forEach(function(b) {
+        if (b.field && CANONICAL_FIELDS.indexOf(b.field) !== -1) fields[b.field] = true;
+    });
+    return Object.keys(fields);
+}
+
 // ── Field-level governance ──
 // A field's level defaults to 0 (root-only) if never registered — safe by
 // default, consistent with "untagged = full-admin-only" used elsewhere.
@@ -1301,9 +1408,13 @@ async function handleAdminCreateBucket(request, env) {
         if (!canUseField(level, field, fieldLevels)) forbid('field "' + field + '" not permitted at your level');
     }
 
+    var contactEmail = body.contactEmail != null ? String(body.contactEmail).trim() : '';
+    if (contactEmail && !isValidEmail(contactEmail)) badRequest('contact email must be a valid email address');
+
     var newBucket = {
         id: genId('bkt'), parentId: parentId, label: String(body.label || field),
         field: field, op: String(body.op || 'eq'), value: body.value != null ? body.value : '',
+        contactEmail: contactEmail || null,
         createdBy: identity.label, createdAt: new Date().toISOString(),
     };
     bucketsLoad.doc.buckets.push(newBucket);
@@ -1342,6 +1453,11 @@ async function handleAdminPatchBucket(request, env, id) {
     if (body.op !== undefined) bucket.op = String(body.op);
     if (body.value !== undefined) bucket.value = body.value;
     if (body.label !== undefined) bucket.label = String(body.label);
+    if (body.contactEmail !== undefined) {
+        var newContactEmail = String(body.contactEmail || '').trim();
+        if (newContactEmail && !isValidEmail(newContactEmail)) badRequest('contact email must be a valid email address');
+        bucket.contactEmail = newContactEmail || null;
+    }
     bucket.lastModifiedBy = identity.label;
     bucket.lastModifiedAt = new Date().toISOString();
 

@@ -20,7 +20,17 @@
     var GRANTS_KEY = '__wo_grants'; // same key wo_tool.js's hasGrant()/console unlock commands read
     var ORG_CONFIGS_KEY = '__wo_org_configs'; // same key wo_tool.js's showInstaller()/Setup > Profiles read
     var RULES_KEY = '__wo_rules_config'; // same key wo_tool.js's startupRestore() checks for its first-run gate
+    var CONTACT_EMAIL_KEY = '__wo_contact_email'; // same key wo_tool.js reads for its own contact-email display
+    // Ultimate fallback ONLY — used before any /check-access response has
+    // ever supplied a real one (very first load, or a network error before
+    // that ever happened). Every real check-access call returns a
+    // bucket-resolved contactEmail (nearest-ancestor-wins — see worker.js's
+    // resolveContactForBucket()); once cached, that always wins over this.
     var CONTACT_EMAIL = 'williamzitzmann@abbvie.com';
+
+    function getContactEmail() {
+        return localStorage.getItem(CONTACT_EMAIL_KEY) || CONTACT_EMAIL;
+    }
 
     function showBanner(text, isError) {
         var el = document.getElementById('__wo_loader_banner');
@@ -86,7 +96,12 @@
     // before it's cleared, not just deleted. An exclude-list rather than an
     // allow-list on purpose: new config keys wo_tool.js adds later get
     // captured automatically without this file needing to know their names.
-    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_grants', '__wo_known_hosts', '__wo_last_scanned_wo', '__wo_grant_cache'];
+    // __wo_org_configs and __wo_contact_email were both missing here for a
+    // while (a real gap, not intentional) — both are re-derived from the
+    // next successful check-access, not real user config, so a revoke
+    // snapshotting them as if they were worth restoring was just dead
+    // weight in the backup blob.
+    var EPHEMERAL_KEYS = ['__wo_tool_src', '__wo_dev_unlock', '__wo_grants', '__wo_known_hosts', '__wo_last_scanned_wo', '__wo_grant_cache', '__wo_org_configs', '__wo_contact_email'];
     var REVOKED_BACKUP_KEY = '__wo_revoked_backup';
 
     // Short-lived local cache of the last access decision — a deliberate
@@ -126,7 +141,15 @@
     // being cleared, rather than just being deleted outright — a revoke
     // shouldn't cost someone their rules/groups/settings if they regain
     // access later, especially if they never set up a file-linked backup.
-    function revokeLocal() {
+    //
+    // The wipe below deletes EVERY __wo_ key unconditionally, including
+    // ephemeral ones (EPHEMERAL_KEYS only controls what's worth
+    // snapshotting, not what survives) — so a resolved contactEmail has to
+    // be (re-)written AFTER the wipe, via this function's own optional
+    // parameter, not cached separately beforehand. That's the whole reason
+    // this takes contactEmail as an argument instead of callers caching it
+    // themselves first.
+    function revokeLocal(contactEmail) {
         var snapshot = {};
         Object.keys(localStorage).forEach(function(k) {
             if (k.indexOf('__wo_') !== 0) return;
@@ -143,6 +166,7 @@
         }).forEach(function(k) {
             localStorage.removeItem(k);
         });
+        cacheContactEmail(contactEmail);
     }
 
     // Restores whatever a previous revoke snapshotted, if anything's there —
@@ -193,6 +217,25 @@
         localStorage.setItem(ORG_CONFIGS_KEY, JSON.stringify(matchedConfigs || []));
     }
 
+    // Only ever OVERWRITES the cache with a real, resolved value — called
+    // with contactEmail: null/undefined is a no-op, leaving whatever's
+    // already cached alone rather than clearing it, since the fallback
+    // constant above is strictly worse than stale-but-real contact info.
+    // This matters for the granted/inconclusive call sites below, where no
+    // wipe happens at all. It does NOT make a null resolution survive an
+    // actual revoke, though — revokeLocal() below deletes this key
+    // unconditionally as part of its own wipe first, and only calls this
+    // function afterward to (maybe) put a value back; a revoke is a
+    // deliberate clean-slate event, not somewhere stale data should
+    // persist through. Takes the raw email string, not a decision object,
+    // specifically so revokeLocal() can call it with the right value AFTER
+    // its own wipe without needing to reconstruct a fake decision shape.
+    function cacheContactEmail(contactEmail) {
+        if (contactEmail) {
+            localStorage.setItem(CONTACT_EMAIL_KEY, contactEmail);
+        }
+    }
+
     function fetchAndRunTool(token) {
         return fetch(WORKER_BASE_URL + '/tool?token=' + encodeURIComponent(token)).then(function(r) {
             if (!r.ok) throw new Error('tool fetch HTTP ' + r.status);
@@ -226,6 +269,7 @@
             });
         }).then(function(decision) {
             if (decision.granted) {
+                cacheContactEmail(decision.contactEmail);
                 localStorage.setItem(GRANTS_KEY, JSON.stringify(decision.grants || []));
                 writeGrantCache(decision.grants);
                 restoreFromRevokedBackupIfAny();
@@ -235,16 +279,19 @@
             // A POSITIVE deny — whoami was read fine, the Worker responded,
             // and the rules say no. This is the ONLY case that revokes
             // anything, per the "never delete on an inconclusive result"
-            // rule below.
-            revokeLocal();
-            showBanner('Access not granted. Request access via ' + CONTACT_EMAIL, true);
+            // rule below. revokeLocal() wipes __wo_contact_email along with
+            // everything else, so the resolved contact has to go IN as its
+            // argument (re-written after the wipe), not cached separately
+            // beforehand.
+            revokeLocal(decision.contactEmail);
+            showBanner('Access not granted. Request access via ' + getContactEmail(), true);
         }).catch(function() {
             // Inconclusive — network error, whoami unreachable, or the
             // Worker itself is down. NEVER revoke here; fall back to
             // whatever already works, same fail-open policy as the domain
             // list below.
             runCachedToolOrShow('Could not verify access (offline?). Try again once connected' +
-                (localStorage.getItem(TOOL_SRC_KEY) ? '.' : ', or contact ' + CONTACT_EMAIL + ' for first-time access.'));
+                (localStorage.getItem(TOOL_SRC_KEY) ? '.' : ', or contact ' + getContactEmail() + ' for first-time access.'));
         });
     }
 
@@ -343,6 +390,7 @@
             });
         }).then(function(decision) {
             if (decision.granted) {
+                cacheContactEmail(decision.contactEmail);
                 localStorage.setItem(GRANTS_KEY, JSON.stringify(decision.grants || []));
                 writeGrantCache(decision.grants);
                 cacheOrgConfigsMetadata(decision.configs);
@@ -354,11 +402,14 @@
             // the DOM of a session that's already live — so this reaches
             // into the running tool's own revoke machinery (the same one
             // self-update/feedback already use) to actually tear it down
-            // now, not just on the next launch.
+            // now, not just on the next launch. Both revoke paths wipe
+            // __wo_contact_email along with everything else, so the
+            // resolved contact goes IN as an argument (re-written after
+            // the wipe), not cached separately beforehand.
             if (typeof window.__woForceRevoke === 'function') {
-                window.__woForceRevoke();
+                window.__woForceRevoke(decision.contactEmail);
             } else {
-                revokeLocal();
+                revokeLocal(decision.contactEmail);
             }
         }).catch(function() {
             // Inconclusive (offline, Worker down) — never revoke, same
