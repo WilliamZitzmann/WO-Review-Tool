@@ -1723,11 +1723,32 @@ never finishes.
   never meant to persist beyond it. This is the one mechanism that makes
   an applied update invisible except via the status line, per design intent.
 - **`window.__woTestHooks`** (`setScanning`/`isScanning`/`rawInstall`/
-  `setScanState`/`getScanState`) — same "dev/test affordance" convention as
+  `setScanState`/`getScanState`/`applyBackup`/`buildBackupBlob`/
+  `migrateProfile`/`switchProfile`/`saveProfiles`/`getProfiles`/
+  `CURRENT_CONFIG_VERSION`) — same "dev/test affordance" convention as
   `__woShowInstaller`/`__woReset`, added specifically so
-  `tests/update_defer_test.js` could drive this real choke point end-to-end
-  (defer-while-scanning, apply-once-idle, snapshot round-trip, the 5-minute
-  cap) without needing to mock a full in-progress Maximo scan.
+  `tests/update_defer_test.js` and `tests/config_version_test.js` could
+  drive these real choke points end-to-end (defer-while-scanning,
+  apply-once-idle, snapshot round-trip, the 5-minute cap; the configVersion
+  forward-compat gate and backup/import shape validation) without needing
+  to mock a full in-progress Maximo scan or reimplement the logic under test.
+
+### 9.6 Local sandbox — running the tool with no Maximo access at all
+
+`sandbox.html` (repo root, git-tracked, never deployed/served by the
+Worker) is a plain static host page: it seeds `localStorage` with dev+beta
+grants and a minimal starter rules config (skips the first-run installer,
+which needs a live Worker round trip this has nothing to talk to), then
+loads the real `wo_tool.js` via a relative `<script src="wo_tool.js">`.
+Open it directly in a browser (or `node -e "require('http')..."`/any
+static server if `file://` localStorage misbehaves) to interactively
+exercise Setup's Rules/Groups/Variables/Tables/Profiles/Settings/Beta
+tabs, the Formula Reference and autocomplete, and the Table Editor — none
+of which need a real Maximo work order. Live-scanning a real WO, `whoami()`
+formulas, and the beta_2 REST helpers (`domain()`/`assetWOHistory()`/etc.)
+won't work here by design — there's no Maximo backend for them to reach.
+Verified end-to-end in a real Chrome tab (not just jsdom) — panel renders
+docked, Setup opens, tab switching works.
 
 ---
 

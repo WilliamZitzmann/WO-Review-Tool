@@ -1,0 +1,77 @@
+<!doctype html>
+<!--
+  Local sandbox — NOT part of the deployed tool, NOT served by the Worker.
+  Lets you run the real wo_tool.js in an ordinary browser on a machine with
+  no Maximo access, to test anything that doesn't depend on live Maximo
+  data: Setup > Rules editor, Formula Reference/editor + autocomplete,
+  Table Editor, Variables tab, Settings, Beta toggles.
+
+  What WON'T work here (by design, not a bug): scanning a real work order
+  (there's no Maximo tracking table on this page to scan), whoami()-based
+  formulas, live domain()/assetWOHistory()/assetDowntimeHistory() calls
+  (beta_2 REST helpers) — all of these need an actual Maximo backend and
+  will just come back empty/no-op.
+
+  Usage: open this file directly in Chrome/Edge (double-click, or
+  File > Open). If localStorage doesn't seem to persist between reloads
+  (some browsers restrict it for file:// origins), serve the folder instead:
+      python -m http.server 8000
+  then visit http://localhost:8000/sandbox.html.
+
+  Everything below only ever touches THIS page's own localStorage — it's
+  seeded fresh by the script tag each load, so reloading always gets you
+  back to a known state. Delete/edit the seed below to try different
+  starting configs.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>WO Tool — Local Sandbox</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #1e1e1e; color: #ddd; padding: 24px; }
+  h1 { font-size: 18px; }
+  code { background: #2a2a2a; padding: 2px 6px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<h1>WO Tool — Local Sandbox</h1>
+<p>No Maximo page here — this is just a blank host page for the tool's own panel.
+The panel should appear automatically. Use <code>Setup</code> to explore Rules,
+Formulas, Tables, and Variables without needing a real work order to scan.</p>
+
+<script>
+    // Grants: dev + beta_0 (every beta feature unlocked) so nothing in
+    // Setup/Beta is hidden behind an access check the sandbox can't satisfy.
+    localStorage.setItem('__wo_grants', JSON.stringify(['user', 'dev', 'beta_0']));
+    localStorage.setItem('__wo_grant_cache', JSON.stringify({ grants: ['user', 'dev', 'beta_0'], cachedAt: Date.now() }));
+
+    // Settings tuned to stay quiet: no auto-update/auto-backup nags, since
+    // neither the update-channel worker nor a real backup file exists here.
+    localStorage.setItem('__wo_settings', JSON.stringify({
+        autoUpdate: false,
+        autoUpdatePatch: false,
+        autoBackup: false,
+        backupPromptDismissed: true,
+        betaEnabled: { beta_2: true }
+    }));
+
+    // A minimal but non-empty rules config so the first-run installer is
+    // skipped (it needs a live Worker round trip that has nothing to talk
+    // to here) and you land straight in the normal panel.
+    localStorage.setItem('__wo_rules_config', JSON.stringify({
+        groups: [{
+            id: 'g_sandbox',
+            title: 'Sandbox',
+            layout: 'vertical',
+            fields: [],
+            tables: [],
+            ruleRefs: [],
+            defaultCollapsed: false
+        }],
+        rules: []
+    }));
+    localStorage.setItem('__wo_scan_config', JSON.stringify({ targets: [] }));
+</script>
+<script src="wo_tool.js"></script>
+</body>
+</html>
