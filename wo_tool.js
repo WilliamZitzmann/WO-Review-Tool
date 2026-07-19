@@ -38,7 +38,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26200.1019z';
+    var BUILD_ID = '26200.1045z';
     // Ultimate fallback ONLY — same key/contract as loader.js's
     // CONTACT_EMAIL_KEY (kept in sync manually, independent files). Real
     // value comes from /check-access's bucket-resolved contactEmail
@@ -11555,6 +11555,7 @@
                 '<div style="margin-bottom:6px;">Type: <select id="__fb_type">' +
                 '<option value="Bug">Bug</option>' +
                 '<option value="Suggestion">Suggestion</option>' +
+                '<option value="Admin">Question for my admin</option>' +
                 '</select></div>' +
                 '<textarea id="__fb_body" placeholder="What happened, or what would help?" style="width:100%;height:140px;"></textarea>' +
                 '<label style="display:block;margin-top:6px;font-size:11px;color:var(--wo-muted);"><input type="checkbox" id="__fb_pii"> Include name and personal identifying details</label>' +
@@ -11573,7 +11574,7 @@
                 var statusSpan = div.querySelector('#__fb_status');
                 var sendBtn = div.querySelector('#__fb_send');
                 if (!body) {
-                    woAlert('Describe the bug or suggestion first.');
+                    woAlert('Describe the bug, suggestion, or question first.');
                     return;
                 }
                 var stCtx = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
@@ -11584,10 +11585,9 @@
                     '\nBrowser: ' + navigator.userAgent +
                     '\nURL: ' + location.href;
 
-                function fallbackToEmail(fullContext) {
-                    var subject = 'WO Review Tool ' + type + ' report';
+                function openEmailDraft(recipient, subject, fullContext) {
                     var mailBody = body + '\n\n---\n' + fullContext;
-                    window.location.href = 'mailto:' + getSupportEmail() +
+                    window.location.href = 'mailto:' + recipient +
                         '?subject=' + encodeURIComponent(subject) +
                         '&body=' + encodeURIComponent(mailBody);
                 }
@@ -11609,6 +11609,25 @@
                             (who.insertSite ? ' — site ' + who.insertSite : '') +
                             (who.country ? ', ' + who.country : '');
                     }
+
+                    if (type === 'Admin') {
+                        // Routes to the bucket-resolved admin contact
+                        // (getSupportEmail() — nearest-ancestor-wins
+                        // contactEmail, the same one an access-denied
+                        // banner shows) instead of Bug/Suggestion's
+                        // /feedback -> GitHub issue path, which always
+                        // lands in the TOOL MAINTAINER's repo — the wrong
+                        // destination for a question about this specific
+                        // site's setup. No server round trip needed here;
+                        // it's a plain mailto draft the user reviews
+                        // before sending.
+                        sendBtn.disabled = false;
+                        statusSpan.textContent = 'Opening email draft to ' + getSupportEmail() + '...';
+                        openEmailDraft(getSupportEmail(), 'WO Review Tool — question from a user', fullContext);
+                        div.querySelector('#__fb_body').value = '';
+                        return;
+                    }
+
                     getWorkerAccessToken().then(function(token) {
                         return xhrPostJSON(WORKER_BASE_URL + '/feedback', {
                             token: token,
@@ -11623,12 +11642,12 @@
                             div.querySelector('#__fb_body').value = '';
                         } else {
                             statusSpan.textContent = 'Could not file report — opening an email draft instead.';
-                            fallbackToEmail(fullContext);
+                            openEmailDraft(getSupportEmail(), 'WO Review Tool ' + type + ' report', fullContext);
                         }
                     }).catch(function() {
                         sendBtn.disabled = false;
                         statusSpan.textContent = 'Could not reach the report system — opening an email draft instead.';
-                        fallbackToEmail(fullContext);
+                        openEmailDraft(getSupportEmail(), 'WO Review Tool ' + type + ' report', fullContext);
                     });
                 });
             };

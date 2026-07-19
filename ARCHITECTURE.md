@@ -156,7 +156,13 @@ which already get replaced/removed by the normal flow). Covered by
   token as `/tool` (not a separate identity check — just stops the endpoint
   being an open unauthenticated relay). Files a GitHub Issue on the private
   repo via the same PAT (needs `Issues: Read and write` in addition to
-  `Contents: Read-only`).
+  `Contents: Read-only`). **Only for `type` "Bug"/"Suggestion"** — the
+  Feedback tab's third category ("Question for my admin") never calls this
+  endpoint at all. `/feedback` always files into the tool maintainer's own
+  repo, the wrong destination for a question about one site's setup; that
+  category instead opens a plain `mailto:` draft addressed to
+  `getSupportEmail()` (the same bucket-resolved `contactEmail` an
+  access-denied banner shows) client-side, with zero server round trip.
 
 Tokens are stateless, HMAC-SHA256 signed, 2-minute TTL, no KV/session
 storage (`makeToken`/`verifyToken`).

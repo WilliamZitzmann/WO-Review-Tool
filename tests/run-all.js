@@ -16,6 +16,7 @@ const FILES = [
     'sync_whoami_mapping_test.js',
     'config_version_test.js',
     'revoke_banner_test.js',
+    'feedback_tab_test.js',
 ];
 
 const fs = require('fs');
