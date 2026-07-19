@@ -289,15 +289,36 @@ cookbook-level detail there.
   whether or not the email matches an account) that only does anything if
   Resend is configured.
 - **`buckets.json`** — a parent-pointer tree (company → country → site →
-  workgroup, depth varies per branch) plus a `fieldLevels` map (which
-  whoami field is usable at which depth). Never read by the live
+  workgroup, depth varies per branch). Never read by the live
   `/bootstrap`/`/check-access` path. `isAtOrBelow()`/`isBelow()` are the
   two containment primitives everything else is built on (inclusive vs.
   strict — see the function comments in `worker.js`). `GET /admin/buckets`
   also returns `canonicalFields` (`CANONICAL_FIELDS` in worker.js) so
-  `admin.html` can offer a dropdown of known whoami fields (plus a
-  "Custom…" fallback) when creating a bucket or registering a field level,
-  instead of a blind free-text box.
+  `admin.html` can offer a checklist of known whoami fields (plus a
+  "Custom…" fallback) when creating a bucket or editing its field
+  checklist, instead of a blind free-text box.
+- **Per-bucket `allowedFields` checklist replaced the old global
+  `fieldLevels` map** — instead of one field→depth map shared by every
+  branch at that depth, each bucket now carries its own `allowedFields`
+  (string array) governing what THAT bucket's own admin tier may
+  reference when authoring conditions (a new child bucket's `field`, or
+  an `ownConditions` entry on a permission/config rule). The checklist
+  that's checked is always the ACTING IDENTITY's own bucket
+  (`identity.bucketId`), never the target/parent bucket —
+  `canUseFieldForIdentity(identity, field, byId)` in worker.js. `null`/
+  absent = every field allowed (the default — existing buckets with no
+  checklist set keep working unchanged); an explicit `[]` is a deliberate
+  lockdown to no fields. Set via the existing `PATCH /admin/buckets/:id`
+  (no separate endpoint) — since bucket edits are strictly-below the
+  acting admin's own node (never AT it), only a strictly-senior admin (an
+  ancestor, or root) can narrow/widen a given tier's checklist, so a
+  scoped admin can never self-escalate their own. Different
+  companies/branches at the same depth can now allow different fields,
+  which a single global per-depth map couldn't express. The old
+  `PATCH`/`DELETE /admin/field-levels` endpoints, `canUseField()`/
+  `canReassignField()`/`canRegisterNewField()`, and admin.html's Field
+  Levels tab are gone entirely — see the git history around
+  2026-07 if the old level-based model is ever needed for reference.
 - **`GET /admin/buckets` returns the FULL tree to every admin, scoped or
   root** — visibility and authorization were deliberately split apart: a
   scoped admin needs their own branch's ancestors for orientation ("where
@@ -345,12 +366,11 @@ cookbook-level detail there.
   stay as words. `<select>` options now carry an explicit `value=` distinct
   from their display label, so the symbol swap never changes what's
   actually submitted. Groups got the same kebab-menu (`menuHtml()`)
-  treatment as Buckets/Field Levels — Reset password/Revoke per member,
+  treatment as Buckets — Reset password/Revoke per member,
   Rename/Delete per group (new `PATCH /admin/groups/:id`, label-only,
   same `isAtOrBelow` containment as every other group endpoint) — and
-  "Add account"/"Create admin group" are hidden behind a `+`-button toggle
-  matching Field Levels' "Register new field" pattern, instead of
-  always-visible forms.
+  "Add account"/"Create admin group" are hidden behind a `+`-button toggle,
+  instead of always-visible forms.
 - **`maximoHost`** (`CANONICAL_FIELDS`) is synthetic — not part of
   Maximo's own whoami response, it's the browser's own
   `location.hostname` (added identically in `loader.js`'s `readWhoami()`

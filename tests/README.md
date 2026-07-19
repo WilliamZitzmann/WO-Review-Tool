@@ -17,8 +17,8 @@ npm test
 ## Files
 
 - **`worker_test.mjs`** — `access-control/worker.js`. Routing, auth
-  (root token + hashed email/password accounts), bucket containment, field-
-  level governance, the ancestor-prepend hardlock, org-config resolution
+  (root token + hashed email/password accounts), bucket containment, the
+  per-bucket allowedFields checklist, the ancestor-prepend hardlock, org-config resolution
   (`/check-access`, `/org-config-content`), bucket-level contact-email
   resolution, the dual-mode Resend/temp-password admin account flow.
 - **`harness.js`** — `wo_tool.js`'s Setup UI: custom tables, formula

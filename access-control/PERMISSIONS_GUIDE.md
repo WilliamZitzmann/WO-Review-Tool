@@ -146,7 +146,7 @@ Everything above still works exactly as described — hand-editing `permissions.
 
 | File | Holds |
 |---|---|
-| `buckets.json` | The delegation hierarchy (a tree, e.g. company → country → site → workgroup) plus `fieldLevels` (which whoami field is allowed at which depth of that tree). |
+| `buckets.json` | The delegation hierarchy (a tree, e.g. company → country → site → workgroup) — each bucket optionally carries its own `allowedFields` checklist (which whoami fields THAT bucket's own admin tier may use when authoring conditions). |
 | `adminGroups.json` | Admin identities — hashed bearer tokens grouped by who controls the same bucket with the same delegation rights. |
 | `admin.html` | The admin page itself, served through the Worker at `/admin` (same private-repo-gated pattern as `wo_tool.js`). |
 
@@ -158,11 +158,10 @@ A bucket is one node: a parent (or none, for a top-level branch) plus one whoami
 
 ```json
 {
-  "fieldLevels": { "email": 1, "country": 2, "insertSite": 3, "workgroup": 4 },
   "buckets": [
     { "id": "abbvie", "parentId": null, "label": "AbbVie", "field": "email", "op": "endsWith", "value": "@abbvie.com" },
     { "id": "abbvie-ie", "parentId": "abbvie", "label": "Ireland", "field": "country", "op": "eq", "value": "IE" },
-    { "id": "abbvie-ie-avwp", "parentId": "abbvie-ie", "label": "AVWP", "field": "insertSite", "op": "eq", "value": "AVWP" }
+    { "id": "abbvie-ie-avwp", "parentId": "abbvie-ie", "label": "AVWP", "field": "insertSite", "op": "eq", "value": "AVWP", "allowedFields": ["insertSite", "workgroup"] }
   ]
 }
 ```
@@ -173,11 +172,13 @@ An admin assigned to a bucket automatically controls that bucket **and everythin
 
 When a non-root admin creates an `allow`/`blacklist` entry, they only ever submit their *own* condition (e.g. "workgroup = Maintenance"). The Worker automatically prepends every ancestor condition on top — company, then country, then site — before storing it. **This isn't optional and isn't something the admin can turn off**: no matter what field they pick for their own condition (even something unrelated, like `email`), the stored rule can never match anyone outside their branch, because the ancestor conditions are always ANDed in underneath it. `override` and `extraGrants` don't get this treatment (they're username-keyed, nothing to prepend onto) — which is why they're **root-only**, always. Delegated admins grant access exclusively through `allow`.
 
-### Field levels — governing which whoami field can be used where
+### Per-bucket field checklists — governing which whoami field can be used where
 
-A field's level is (by design) the same number as the tree depth it's meant for — `insertSite` at level 3 means "only usable for buckets/rules at depth 3, by admins at depth 3 or more senior." A company-level admin (depth 1) can reference any field, including deep ones; a workgroup-level admin (depth 4) can only use workgroup-appropriate fields, not reach up and reference `email` even in their own rules. This doesn't add security (the hardlock above already makes any field choice safe) — it keeps authoring *intentional*, so a junior admin can't invent a confusing rule that technically only affects their branch but reads like it's about something else entirely. Only root can introduce a brand-new field name into `fieldLevels`; a more senior admin can reassign an existing field's level (move it between levels), but never a peer or junior.
+Instead of one global field→level map (every branch at the same depth sharing identical field permissions), **each bucket carries its own `allowedFields` checklist** governing what *that bucket's own admin tier* may reference when authoring conditions — whether that's the `field` of a new child bucket, or an `ownConditions` entry on an `allow`/`blacklist`/config rule. This matters once more than one company/branch shares the same tool: AbbVie's country-level admins might be allowed to use `country` + `insertSite`, while a different company's country-level admins want a different set — a global per-depth map can't express that, a per-bucket checklist can.
 
-Both the "Create bucket" form (Buckets tab) and the "Register a new field" form (Field Levels tab) offer a **dropdown** of every field already known — the canonical whoami fields (`username`/`email`/`country`/`insertSite`/`langcode`/`displayName`) plus anything already registered in `fieldLevels` — with a "Custom…" option that reveals a free-text box for a genuinely new field name. You don't have to remember/retype exact field names once they exist somewhere in the system.
+The checklist that governs an action is always the **acting admin's own bucket** (never the bucket they're targeting) — root has no bucket and always bypasses. `allowedFields` absent or `null` means every field is allowed (the default — existing buckets with no checklist set keep working unchanged); an explicit `[]` is a deliberate lockdown to no fields at all. Because bucket edits are strictly-below the acting admin's own node (never *at* it — see the hardlock section above), only a **strictly-senior admin** (an ancestor, or root) can narrow or widen a given tier's checklist — a scoped admin can never self-escalate their own.
+
+The "Create bucket" form and each bucket row's expandable field-checklist panel (Buckets tab) both offer every known field — the canonical whoami fields (`username`/`email`/`country`/`insertSite`/`langcode`/`displayName`) plus anything already referenced elsewhere in the tree — as checkboxes, plus a "Custom…" box for a genuinely new field name. You don't have to remember/retype exact field names once they exist somewhere in the system.
 
 ### Admin groups & accounts — delegate a permission once, add people to it
 
@@ -200,4 +201,4 @@ They can now open `/admin` from anywhere (no Maximo needed), log in with their o
 
 ### Root — the one identity everything else is scoped relative to
 
-`ROOT_ADMIN_TOKEN` (a Wrangler secret, see `README.md`) always grants full, unscoped access — it bypasses `adminGroups.json` entirely, so it keeps working even if that file is empty, missing, or corrupted. Treat it like a master password, and use it sparingly — for day-to-day work, create yourself a **root account** instead (Root Accounts tab, root-only) so you're not retyping a 64-character secret. Root (via either credential) is the only identity that can: create top-level buckets, touch `override`/`extraGrants`, manage `version.json`, register brand-new fields into `fieldLevels`, and manage root accounts.
+`ROOT_ADMIN_TOKEN` (a Wrangler secret, see `README.md`) always grants full, unscoped access — it bypasses `adminGroups.json` entirely, so it keeps working even if that file is empty, missing, or corrupted. Treat it like a master password, and use it sparingly — for day-to-day work, create yourself a **root account** instead (Root Accounts tab, root-only) so you're not retyping a 64-character secret. Root (via either credential) is the only identity that can: create top-level buckets, touch `override`/`extraGrants`, manage `version.json`, and manage root accounts.

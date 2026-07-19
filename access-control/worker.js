@@ -94,11 +94,10 @@
  *     GET    /admin/buckets                     — also returns canonicalFields (known whoami
  *                                                  field names) for the admin UI's field picker
  *     POST   /admin/buckets
- *     PATCH  /admin/buckets/:id
+ *     PATCH  /admin/buckets/:id                 — incl. allowedFields ([] = no fields usable by
+ *                                                  this bucket's own admin tier, null/absent =
+ *                                                  all fields usable — see canUseFieldForIdentity)
  *     DELETE /admin/buckets/:id?cascade=true
- *     PATCH  /admin/field-levels
- *     DELETE /admin/field-levels/:field       — refuses (409) if still referenced by a
- *                                                bucket or a permission rule's conditions
  *     GET    /admin/configs                   — metadata only (name/description/bucketId/
  *                                                conditions), never the heavy content blob
  *     POST   /admin/configs                   — body {name, description, bucketId,
@@ -919,9 +918,9 @@ async function loadPermissionsLive(env) {
 
 async function loadBucketsDoc(env) {
     var f = await fetchPrivateFileWithSha(env, 'buckets.json');
-    var doc = f.exists ? JSON.parse(f.text) : { fieldLevels: {}, buckets: [] };
-    doc.fieldLevels = doc.fieldLevels || {};
+    var doc = f.exists ? JSON.parse(f.text) : { buckets: [] };
     doc.buckets = doc.buckets || [];
+    delete doc.fieldLevels; // migrated away — see bucket.allowedFields / canUseFieldForIdentity
     return { doc: doc, sha: f.sha };
 }
 
@@ -1102,46 +1101,26 @@ function computeBucketRequiredFields(bucketsDoc) {
     return Object.keys(fields);
 }
 
-// ── Field-level governance ──
-// A field's level defaults to 0 (root-only) if never registered — safe by
-// default, consistent with "untagged = full-admin-only" used elsewhere.
-function effectiveFieldLevel(field, fieldLevels) {
-    return fieldLevels.hasOwnProperty(field) ? fieldLevels[field] : 0;
-}
-// Usable by that level and above (more senior) — adminLevel 0 (root) can
-// use anything; a level-4 (most junior) identity can only use fields
-// registered at level 4 or deeper.
-function canUseField(adminLevel, field, fieldLevels) {
-    return adminLevel <= effectiveFieldLevel(field, fieldLevels);
-}
-// Reassigning a field's level requires being strictly more senior than its
-// CURRENT level — root always allowed regardless.
-function canReassignField(adminLevel, field, fieldLevels) {
-    if (adminLevel === 0) return true;
-    return adminLevel < effectiveFieldLevel(field, fieldLevels);
-}
-// Only root can introduce a field name that doesn't exist in fieldLevels
-// yet — keeps the field vocabulary centrally governed.
-function canRegisterNewField(adminLevel) {
-    return adminLevel === 0;
-}
-function fieldInUseAtDepths(field, buckets, byId) {
-    var depths = {};
-    buckets.forEach(function(b) {
-        if (b.field === field) depths[bucketDepth(b.id, byId)] = true;
-    });
-    return Object.keys(depths).map(Number);
-}
-// A field can be unreferenced by any bucket but still live inside a
-// permission rule's conditions (e.g. an ad-hoc allow rule keyed on it
-// without ever backing a bucket) - "in use" for delete-safety purposes
-// must check both, not just bucket definitions.
-function fieldUsedInPermissionConditions(field, permsDoc) {
-    return ['override', 'blacklist', 'allow', 'extraGrants'].some(function(section) {
-        return (permsDoc[section] || []).some(function(entry) {
-            return (entry.conditions || []).some(function(c) { return c.field === field; });
-        });
-    });
+// ── Field governance ──
+// Instead of one global field→level map (every bucket at the same depth
+// shared identical field permissions), each bucket carries its own
+// allowedFields checklist governing what ITS OWN admin tier may reference
+// when authoring conditions — different companies/branches at the same
+// depth can allow different fields. Checked against the ACTING IDENTITY's
+// own bucket (identity.bucketId), not the target/parent bucket, since the
+// question is always "can THIS ADMIN use this field", and an identity's own
+// bucket is only editable by a strictly-senior admin (isBelow — see
+// handleAdminPatchBucket), so a scoped admin can never self-escalate their
+// own checklist. Root has no bucket and always bypasses.
+// bucket.allowedFields absent/null = every field allowed (backward-
+// compatible default — existing buckets keep working unchanged); an
+// explicit [] = no fields allowed (deliberate lockdown).
+function canUseFieldForIdentity(identity, field, byId) {
+    if (identity.isRoot) return true;
+    var bucket = byId[identity.bucketId];
+    if (!bucket) return false; // dangling own-bucket id - fail closed
+    if (!Array.isArray(bucket.allowedFields)) return true;
+    return bucket.allowedFields.indexOf(field) !== -1;
 }
 
 // ── Admin identity resolution ──
@@ -1361,7 +1340,6 @@ async function handleAdminUpsertPermissionEntry(request, env, section) {
     var permsLoad = await loadPermissionsLive(env);
     var bucketsLoad = await loadBucketsDoc(env);
     var byId = bucketsById(bucketsLoad.doc.buckets);
-    var level = identityLevel(identity, byId);
     var now = new Date().toISOString();
 
     var bucketId = body.bucketId != null ? body.bucketId : null;
@@ -1369,7 +1347,7 @@ async function handleAdminUpsertPermissionEntry(request, env, section) {
     var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions : [];
     if (!ownConditions.length) badRequest('at least one condition is required');
     ownConditions.forEach(function(c) {
-        if (!canUseField(level, c.field, bucketsLoad.doc.fieldLevels)) forbid('field "' + c.field + '" not permitted at your level');
+        if (!canUseFieldForIdentity(identity, c.field, byId)) forbid('field "' + c.field + '" not permitted for your admin tier');
     });
 
     var arr = permsLoad.doc[section];
@@ -1438,19 +1416,9 @@ async function handleAdminGetBuckets(request, env) {
     // the same identity.bucketId this response's containing /admin/permissions
     // call already returned.
     var visible = bucketsLoad.doc.buckets;
-    // fieldUsage lets the Field Levels tab grey out "delete" without a
-    // separate round-trip per field - checks both bucket definitions AND
-    // permission-rule conditions (a field can be referenced by one without
-    // the other).
-    var permsLoad = await loadPermissionsLive(env);
-    var fieldUsage = {};
-    Object.keys(bucketsLoad.doc.fieldLevels).forEach(function(f) {
-        fieldUsage[f] = fieldInUseAtDepths(f, bucketsLoad.doc.buckets, byId).length > 0 || fieldUsedInPermissionConditions(f, permsLoad.doc);
-    });
     return json({
-        buckets: visible, fieldLevels: bucketsLoad.doc.fieldLevels, level: identityLevel(identity, byId),
-        canonicalFields: CANONICAL_FIELDS, // known whoami field names, for the admin UI's field picker (§ registered fieldLevels keys cover any custom ones already in use)
-        fieldUsage: fieldUsage,
+        buckets: visible, level: identityLevel(identity, byId),
+        canonicalFields: CANONICAL_FIELDS, // known whoami field names, for the admin UI's per-bucket field checklist
     });
 }
 
@@ -1462,7 +1430,6 @@ async function handleAdminCreateBucket(request, env) {
 
     var bucketsLoad = await loadBucketsDoc(env);
     var byId = bucketsById(bucketsLoad.doc.buckets);
-    var level = identityLevel(identity, byId);
     var parentId = body.parentId != null ? body.parentId : null;
 
     if (!identity.isRoot && !isAtOrBelow(parentId, identity.bucketId, byId)) forbid('parent bucket outside your scope');
@@ -1471,17 +1438,7 @@ async function handleAdminCreateBucket(request, env) {
 
     var field = String(body.field || '').trim();
     if (!field) badRequest('field required');
-    var newDepth = parentId == null ? 1 : bucketDepth(parentId, byId) + 1;
-    var fieldLevels = bucketsLoad.doc.fieldLevels;
-    var fieldKnown = fieldLevels.hasOwnProperty(field);
-
-    if (!fieldKnown) {
-        if (!canRegisterNewField(level)) forbid('field "' + field + '" is not registered — only root can introduce a new field');
-        fieldLevels[field] = newDepth;
-    } else {
-        if (fieldLevels[field] !== newDepth) badRequest('field "' + field + '" is registered at level ' + fieldLevels[field] + ', not ' + newDepth);
-        if (!canUseField(level, field, fieldLevels)) forbid('field "' + field + '" not permitted at your level');
-    }
+    if (!canUseFieldForIdentity(identity, field, byId)) forbid('field "' + field + '" not permitted for your admin tier');
 
     var contactEmail = body.contactEmail != null ? String(body.contactEmail).trim() : '';
     if (contactEmail && !isValidEmail(contactEmail)) badRequest('contact email must be a valid email address');
@@ -1506,23 +1463,13 @@ async function handleAdminPatchBucket(request, env, id) {
 
     var bucketsLoad = await loadBucketsDoc(env);
     var byId = bucketsById(bucketsLoad.doc.buckets);
-    var level = identityLevel(identity, byId);
     var bucket = byId[id];
     if (!bucket) return notFound('bucket not found');
     if (!isBelow(id, identity.bucketId, byId)) forbid('bucket outside your scope (or is your own node — bucket CRUD is strictly below, not at, your own node)');
 
     if (body.field !== undefined && body.field !== bucket.field) {
         var newField = String(body.field).trim();
-        var depth = bucketDepth(id, byId);
-        var fieldLevels = bucketsLoad.doc.fieldLevels;
-        if (!fieldLevels.hasOwnProperty(newField)) {
-            if (!canRegisterNewField(level)) forbid('field "' + newField + '" is not registered — only root can introduce a new field');
-            fieldLevels[newField] = depth;
-        } else if (fieldLevels[newField] !== depth) {
-            badRequest('field "' + newField + '" is registered at level ' + fieldLevels[newField] + ', not ' + depth);
-        } else if (!canUseField(level, newField, fieldLevels)) {
-            forbid('field "' + newField + '" not permitted at your level');
-        }
+        if (!canUseFieldForIdentity(identity, newField, byId)) forbid('field "' + newField + '" not permitted for your admin tier');
         bucket.field = newField;
     }
     if (body.op !== undefined) bucket.op = String(body.op);
@@ -1532,6 +1479,17 @@ async function handleAdminPatchBucket(request, env, id) {
         var newContactEmail = String(body.contactEmail || '').trim();
         if (newContactEmail && !isValidEmail(newContactEmail)) badRequest('contact email must be a valid email address');
         bucket.contactEmail = newContactEmail || null;
+    }
+    // allowedFields governs what THIS bucket's own admin tier may reference
+    // when authoring conditions (see canUseFieldForIdentity) — only a
+    // strictly-senior admin can edit it (bucket CRUD is isBelow, never at
+    // their own node), so a scoped admin can never widen their own
+    // checklist. null/absent clears it back to "every field allowed";
+    // [] is a deliberate lockdown to no fields.
+    if (body.allowedFields !== undefined) {
+        bucket.allowedFields = Array.isArray(body.allowedFields)
+            ? body.allowedFields.map(function(f) { return String(f); })
+            : null;
     }
     bucket.lastModifiedBy = identity.label;
     bucket.lastModifiedAt = new Date().toISOString();
@@ -1641,12 +1599,11 @@ async function handleAdminCreateConfig(request, env) {
 
     var bucketsLoad = await loadBucketsDoc(env);
     var byId = bucketsById(bucketsLoad.doc.buckets);
-    var level = identityLevel(identity, byId);
     var bucketId = body.bucketId != null ? body.bucketId : null;
     if (!identity.isRoot && !isAtOrBelow(bucketId, identity.bucketId, byId)) forbid('target bucket outside your scope');
     var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions : [];
     ownConditions.forEach(function(c) {
-        if (!canUseField(level, c.field, bucketsLoad.doc.fieldLevels)) forbid('field "' + c.field + '" not permitted at your level');
+        if (!canUseFieldForIdentity(identity, c.field, byId)) forbid('field "' + c.field + '" not permitted for your admin tier');
     });
     var conditions = buildEntryConditions(bucketId, ownConditions, byId);
 
@@ -1688,7 +1645,6 @@ async function handleAdminDuplicateConfig(request, env, id) {
 
     var bucketsLoad = await loadBucketsDoc(env);
     var byId = bucketsById(bucketsLoad.doc.buckets);
-    var level = identityLevel(identity, byId);
     var indexLoad = await loadConfigsIndexDoc(env);
     var source = indexLoad.doc.configs.find(function(c) { return c.id === id; });
     if (!source) return notFound('config not found');
@@ -1699,7 +1655,7 @@ async function handleAdminDuplicateConfig(request, env, id) {
     if (!identity.isRoot && !isAtOrBelow(bucketId, identity.bucketId, byId)) forbid('target bucket outside your scope');
     var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions : [];
     ownConditions.forEach(function(c) {
-        if (!canUseField(level, c.field, bucketsLoad.doc.fieldLevels)) forbid('field "' + c.field + '" not permitted at your level');
+        if (!canUseFieldForIdentity(identity, c.field, byId)) forbid('field "' + c.field + '" not permitted for your admin tier');
     });
     var conditions = buildEntryConditions(bucketId, ownConditions, byId);
 
@@ -1729,7 +1685,6 @@ async function handleAdminPatchConfig(request, env, id) {
 
     var bucketsLoad = await loadBucketsDoc(env);
     var byId = bucketsById(bucketsLoad.doc.buckets);
-    var level = identityLevel(identity, byId);
     var indexLoad = await loadConfigsIndexDoc(env);
     var entry = indexLoad.doc.configs.find(function(c) { return c.id === id; });
     if (!entry) return notFound('config not found');
@@ -1747,7 +1702,7 @@ async function handleAdminPatchConfig(request, env, id) {
         var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions :
             entry.conditions.slice(bucketConditionChain(entry.bucketId, byId).length);
         ownConditions.forEach(function(c) {
-            if (!canUseField(level, c.field, bucketsLoad.doc.fieldLevels)) forbid('field "' + c.field + '" not permitted at your level');
+            if (!canUseFieldForIdentity(identity, c.field, byId)) forbid('field "' + c.field + '" not permitted for your admin tier');
         });
         entry.bucketId = newBucketId;
         entry.conditions = buildEntryConditions(newBucketId, ownConditions, byId);
@@ -1795,59 +1750,6 @@ async function handleAdminDeleteConfig(request, env, id) {
     return json({ ok: true });
 }
 
-async function handleAdminPatchFieldLevels(request, env) {
-    var identity = await resolveAdminIdentity(request, env);
-    requireAdmin(identity);
-    var body;
-    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
-    var field = String(body.field || '').trim();
-    var newLevel = Number(body.level);
-    if (!field) badRequest('field required');
-    if (!Number.isInteger(newLevel) || newLevel < 1) badRequest('level must be a positive integer');
-
-    var bucketsLoad = await loadBucketsDoc(env);
-    var byId = bucketsById(bucketsLoad.doc.buckets);
-    var level = identityLevel(identity, byId);
-    var fieldLevels = bucketsLoad.doc.fieldLevels;
-    var isNew = !fieldLevels.hasOwnProperty(field);
-
-    if (isNew) {
-        if (!canRegisterNewField(level)) forbid('only root can register a new field');
-    } else if (!canReassignField(level, field, fieldLevels)) {
-        forbid('must be strictly more senior than this field\'s current level to reassign it');
-    }
-    var inUseDepths = fieldInUseAtDepths(field, bucketsLoad.doc.buckets, byId);
-    if (inUseDepths.some(function(d) { return d !== newLevel; })) {
-        badRequest('existing bucket(s) at a different depth already use field "' + field + '" — cannot reassign without breaking them');
-    }
-
-    fieldLevels[field] = newLevel;
-    await writePrivateFile(env, 'buckets.json', JSON.stringify(bucketsLoad.doc, null, 2), bucketsLoad.sha,
-        'admin: ' + identity.label + ' set field "' + field + '" to level ' + newLevel);
-    return json({ ok: true, field: field, level: newLevel });
-}
-
-async function handleAdminDeleteFieldLevel(request, env, field) {
-    var identity = await resolveAdminIdentity(request, env);
-    requireAdmin(identity);
-    var bucketsLoad = await loadBucketsDoc(env);
-    var byId = bucketsById(bucketsLoad.doc.buckets);
-    var level = identityLevel(identity, byId);
-    var fieldLevels = bucketsLoad.doc.fieldLevels;
-    if (!fieldLevels.hasOwnProperty(field)) return notFound('field not registered');
-    if (!canReassignField(level, field, fieldLevels)) forbid('must be strictly more senior than this field\'s current level to delete it');
-    if (fieldInUseAtDepths(field, bucketsLoad.doc.buckets, byId).length > 0) {
-        return json({ ok: false, error: 'field "' + field + '" is used by one or more buckets — cannot delete while in use' }, 409);
-    }
-    var permsLoad = await loadPermissionsLive(env);
-    if (fieldUsedInPermissionConditions(field, permsLoad.doc)) {
-        return json({ ok: false, error: 'field "' + field + '" is referenced by one or more permission rule conditions — cannot delete while in use' }, 409);
-    }
-    delete fieldLevels[field];
-    await writePrivateFile(env, 'buckets.json', JSON.stringify(bucketsLoad.doc, null, 2), bucketsLoad.sha,
-        'admin: ' + identity.label + ' deleted field level "' + field + '"');
-    return json({ ok: true });
-}
 
 // ── /admin/groups ──
 async function handleAdminGetGroups(request, env) {
@@ -2323,10 +2225,6 @@ async function routeAdmin(request, env, ctx, pathname) {
     var m4 = /^\/admin\/buckets\/([^/]+)$/.exec(pathname);
     if (m4 && method === 'PATCH') return handleAdminPatchBucket(request, env, m4[1]);
     if (m4 && method === 'DELETE') return handleAdminDeleteBucket(request, env, m4[1]);
-
-    if (pathname === '/admin/field-levels' && method === 'PATCH') return handleAdminPatchFieldLevels(request, env);
-    var mFieldDel = /^\/admin\/field-levels\/([^/]+)$/.exec(pathname);
-    if (mFieldDel && method === 'DELETE') return handleAdminDeleteFieldLevel(request, env, decodeURIComponent(mFieldDel[1]));
 
     if (pathname === '/admin/configs' && method === 'GET') return handleAdminGetConfigs(request, env);
     if (pathname === '/admin/configs' && method === 'POST') return handleAdminCreateConfig(request, env);

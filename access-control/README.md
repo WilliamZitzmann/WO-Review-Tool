@@ -109,7 +109,7 @@ The admin tool (`permissions.json`/`buckets.json`/`adminGroups.json`/`version.js
 
 1. In the private repo, create two empty seed files (the admin tool bootstraps everything else from here via `/admin`):
    ```
-   buckets.json      → {"fieldLevels": {}, "buckets": []}
+   buckets.json      → {"buckets": []}
    adminGroups.json  → {"rootAccounts": [], "groups": []}
    ```
 2. Also commit `admin.html` to the private repo (the admin page itself — served through the Worker at `/admin`, same pattern as `wo_tool.js`).

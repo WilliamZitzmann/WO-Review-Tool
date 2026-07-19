@@ -2,7 +2,7 @@
 // mocks global.fetch (GitHub Contents API + Resend) and global.caches
 // (Cloudflare edge cache) with an in-memory store, then drives the actual
 // exported `fetch` handler with real Request objects — routing, auth,
-// containment, field levels, the ancestor-prepend hardlock, the
+// containment, per-bucket field checklists, the ancestor-prepend hardlock, the
 // condition-based override/blacklist/allow/extraGrants shape, email-based
 // accounts, the dual-mode Resend/temp-password flow, and the auto-admin-grant
 // cross-reference all go through the genuine code, not a hand-copied model.
@@ -148,7 +148,6 @@ seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'permissions.json', {
     extraGrants: [{ id: 'ext_seed', bucketId: null, conditions: [{ field: 'username', op: 'eq', value: 'ZITZMWX' }], grants: ['dev', 'beta_0'] }],
 });
 seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'buckets.json', {
-    fieldLevels: { email: 1, country: 2, insertSite: 3 },
     buckets: [
         { id: 'abbvie', parentId: null, label: 'AbbVie', field: 'email', op: 'endsWith', value: '@abbvie.com' },
         // Contact set here (mid-tree, not company or site) specifically to
@@ -342,14 +341,8 @@ seed(env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, 'version.json', {
         headers: rootHeaders(),
         body: { parentId: 'abbvie-ie-avwp', label: 'Maintenance', field: 'workgroup', op: 'eq', value: 'Maintenance' },
     });
-    check('root creates workgroup bucket, registers new field', mkWorkgroup.status === 200 && mkWorkgroup.body.bucket.id, mkWorkgroup.body);
+    check('root creates workgroup bucket', mkWorkgroup.status === 200 && mkWorkgroup.body.bucket.id, mkWorkgroup.body);
     var workgroupId = mkWorkgroup.body.bucket && mkWorkgroup.body.bucket.id;
-
-    var wrongDepth = await call('POST', '/admin/buckets', {
-        headers: rootHeaders(),
-        body: { parentId: 'abbvie', label: 'Bad', field: 'workgroup', op: 'eq', value: 'X' },
-    });
-    check('field registered at wrong depth is rejected', wrongDepth.status === 400, wrongDepth.body);
 
     // ── Bucket contactEmail: create/patch validation + nearest-ancestor
     // resolution actually preferring the CLOSEST set contact, not always
@@ -375,11 +368,6 @@ seed(env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, 'version.json', {
     });
     check('a whoami matching the workgroup bucket gets ITS OWN contact, not Ireland\'s (nearest match wins, not always the topmost with one set)',
         workgroupUser.body.contactEmail === 'maint-lead@abbvie.com', workgroupUser.body.contactEmail);
-
-    var registerBadge = await call('PATCH', '/admin/field-levels', {
-        headers: rootHeaders(), body: { field: 'badgeType', level: 4 },
-    });
-    check('root registers a new level-4 field (badgeType) for workgroup-level rule authoring', registerBadge.status === 200, registerBadge.body);
 
     // ── Admin groups: root creates an AVWP-scoped group + member (email-based) ──
     var mkGroup = await call('POST', '/admin/groups', {
@@ -526,17 +514,54 @@ seed(env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, 'version.json', {
     check('a user matching the FULL ancestor chain + the scoped condition IS granted',
         insideBranchUser.body.granted === true, insideBranchUser.body);
 
-    // ── Field-level enforcement ──
+    // ── Per-bucket field checklist (allowedFields) ──
+    // Absent/null allowedFields = every field usable by that bucket's own
+    // admin tier (backward-compatible default, so existing buckets keep
+    // working unchanged on deploy) - the AVWP bucket has no checklist set
+    // yet, so the scoped admin can freely author with ANY field, including
+    // one that would have been "senior-only" under the old global
+    // fieldLevels model.
+    var fieldDefaultOpen = await call('POST', '/admin/permissions/allow', {
+        headers: bearerHeaders(avwpToken),
+        body: { bucketId: workgroupId, ownConditions: [{ field: 'country', op: 'eq', value: 'IE' }], grants: ['user'] },
+    });
+    check('with no allowedFields checklist set, scoped admin can author a rule using any field (permissive default)', fieldDefaultOpen.status === 200, fieldDefaultOpen.body);
+    await call('DELETE', '/admin/permissions/allow/' + (fieldDefaultOpen.body.entry && fieldDefaultOpen.body.entry.id), { headers: rootHeaders() });
+
+    // Bucket CRUD (incl. its own field checklist) is strictly-below, never
+    // AT, the acting admin's own node - so only a strictly-senior admin
+    // (an ancestor, or root) can narrow/widen what a given tier may use;
+    // a scoped admin can never self-escalate their own checklist.
+    var restrictAvwpFields = await call('PATCH', '/admin/buckets/abbvie-ie-avwp', {
+        headers: rootHeaders(), body: { allowedFields: ['insertSite', 'workgroup', 'badgeType'] },
+    });
+    check('root restricts the AVWP bucket\'s field checklist (country deliberately excluded)',
+        restrictAvwpFields.status === 200 && Array.isArray(restrictAvwpFields.body.bucket.allowedFields), restrictAvwpFields.body);
+
     var fieldViolation = await call('POST', '/admin/permissions/allow', {
         headers: bearerHeaders(avwpToken),
         body: { bucketId: workgroupId, ownConditions: [{ field: 'country', op: 'eq', value: 'IE' }], grants: ['user'] },
     });
-    check('scoped (workgroup-level) admin cannot author a rule using a senior field (country)', fieldViolation.status === 403, fieldViolation.body);
+    check('scoped admin cannot author a rule using a field NOT in their own bucket\'s checklist', fieldViolation.status === 403, fieldViolation.body);
 
-    var reassignAsScoped = await call('PATCH', '/admin/field-levels', {
-        headers: bearerHeaders(avwpToken), body: { field: 'insertSite', level: 5 },
+    var fieldStillAllowed = await call('POST', '/admin/permissions/allow', {
+        headers: bearerHeaders(avwpToken),
+        body: { bucketId: workgroupId, ownConditions: [{ field: 'badgeType', op: 'eq', value: 'contractor2' }], grants: ['user'] },
     });
-    check('scoped admin cannot reassign a field senior to (or at) their own level', reassignAsScoped.status === 403, reassignAsScoped.body);
+    check('...but a field that IS in the checklist still works', fieldStillAllowed.status === 200, fieldStillAllowed.body);
+    await call('DELETE', '/admin/permissions/allow/' + (fieldStillAllowed.body.entry && fieldStillAllowed.body.entry.id), { headers: rootHeaders() });
+
+    var scopedRestrictsOwnBucket = await call('PATCH', '/admin/buckets/abbvie-ie-avwp', {
+        headers: bearerHeaders(avwpToken), body: { allowedFields: [] },
+    });
+    check('scoped admin cannot edit their OWN bucket (incl. its field checklist) - bucket CRUD is strictly below, not at, their own node',
+        scopedRestrictsOwnBucket.status === 403, scopedRestrictsOwnBucket.body);
+
+    var clearAvwpFields = await call('PATCH', '/admin/buckets/abbvie-ie-avwp', {
+        headers: rootHeaders(), body: { allowedFields: null },
+    });
+    check('root clears the checklist back to "all fields allowed"',
+        clearAvwpFields.status === 200 && clearAvwpFields.body.bucket.allowedFields === null, clearAvwpFields.body);
 
     // ── Delegation: peer vs child creation ──
     var mkChildGroup = await call('POST', '/admin/groups', {
