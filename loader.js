@@ -32,6 +32,57 @@
         return localStorage.getItem(CONTACT_EMAIL_KEY) || CONTACT_EMAIL;
     }
 
+    // One shared <style> tag (injected once, idempotent) instead of long
+    // repeated cssText strings — also the only way to get a real transition/
+    // keyframe animation without a stylesheet. Palette matches wo_tool.js's
+    // own panel theme (--wo-bg/--wo-accent/etc in its injected CSS) so the
+    // banner and the tool panel that follows it feel like one continuous
+    // piece of UI, not two different visual languages stitched together.
+    var BANNER_STYLE_ID = '__wo_loader_banner_style';
+    function ensureBannerStyles() {
+        if (document.getElementById(BANNER_STYLE_ID)) return;
+        var style = document.createElement('style');
+        style.id = BANNER_STYLE_ID;
+        style.textContent =
+            '#__wo_loader_banner{position:fixed;top:10px;right:10px;z-index:2147483647;' +
+            'display:flex;align-items:flex-start;gap:10px;box-sizing:border-box;' +
+            'background:#161b22;color:#f0f3f6;padding:12px 14px;border-radius:8px;' +
+            'font-family:"Segoe UI",Arial,sans-serif;font-size:13px;line-height:1.45;max-width:320px;' +
+            'border:1px solid #30363d;box-shadow:0 6px 20px rgba(0,0,0,.45);' +
+            'opacity:0;transform:translateY(-6px);transition:opacity .16s ease,transform .16s ease;}' +
+            '#__wo_loader_banner.__wo_show{opacity:1;transform:translateY(0);}' +
+            '#__wo_loader_banner.__wo_error{border-color:rgba(248,81,73,.45);}' +
+            '#__wo_loader_banner .__wo_spinner{flex:0 0 auto;width:14px;height:14px;margin-top:2px;' +
+            'border-radius:50%;border:2px solid #30363d;border-top-color:#58a6ff;' +
+            'animation:__wo_spin .7s linear infinite;}' +
+            '@keyframes __wo_spin{to{transform:rotate(360deg);}}' +
+            '#__wo_loader_banner .__wo_icon{flex:0 0 auto;width:14px;line-height:14px;margin-top:1px;font-size:14px;color:#f85149;}' +
+            '#__wo_loader_banner .__wo_text{flex:1 1 auto;min-width:0;}' +
+            '#__wo_loader_banner .__wo_close{flex:0 0 auto;cursor:pointer;color:#9aa4af;font-size:16px;line-height:1;margin:-2px -2px 0 4px;}' +
+            '#__wo_loader_banner .__wo_close:hover{color:#f0f3f6;}' +
+            '#__wo_loader_banner button{font-family:inherit;}';
+        document.head.appendChild(style);
+    }
+
+    function ensureBannerEl() {
+        var el = document.getElementById('__wo_loader_banner');
+        if (!el) {
+            ensureBannerStyles();
+            el = document.createElement('div');
+            el.id = '__wo_loader_banner';
+            document.body.appendChild(el);
+        }
+        return el;
+    }
+
+    // Kicks the entrance transition off on the next frame — adding the
+    // class in the same tick the element/styles are created would skip the
+    // transition entirely (nothing to animate FROM yet).
+    function showBannerEl(el) {
+        requestAnimationFrame(function() { el.classList.add('__wo_show'); });
+        return el;
+    }
+
     // isError banners (access denied, offline-with-no-cached-tool) are dead
     // ends for THIS bookmarklet click — nothing in loader.js ever calls
     // removeBanner() for them on its own (there's no cached tool to fall
@@ -39,26 +90,20 @@
     // on the page indefinitely, even after the underlying issue is fixed,
     // until the next full page reload. A close button is the only way out
     // that doesn't require rechecking access on some ambient timer.
+    // Non-error calls get a small spinner instead — every non-error message
+    // this file ever shows ("Checking access...", "Redirecting to
+    // Maximo...") is a transient in-progress state, never a final one (a
+    // successful outcome just removes the banner and launches the tool),
+    // so "not an error" and "still working" are the same thing here.
     function showBanner(text, isError) {
-        var el = document.getElementById('__wo_loader_banner');
-        if (!el) {
-            el = document.createElement('div');
-            el.id = '__wo_loader_banner';
-            el.style.cssText = 'position:fixed;top:10px;right:10px;z-index:2147483647;background:#2c2c2c;color:#ff8;padding:10px 16px;border-radius:6px;font-family:Arial,sans-serif;font-size:13px;max-width:320px;';
-            document.body.appendChild(el);
-        }
-        el.style.color = isError ? '#e74c3c' : '#ff8';
-        el.textContent = text;
-        if (isError) {
-            el.style.paddingRight = '26px';
-            var closeBtn = document.createElement('span');
-            closeBtn.textContent = '×';
-            closeBtn.title = 'Dismiss';
-            closeBtn.style.cssText = 'position:absolute;top:6px;right:8px;cursor:pointer;color:#ccc;font-size:15px;line-height:1;';
-            closeBtn.onclick = removeBanner;
-            el.appendChild(closeBtn);
-        }
-        return el;
+        var el = ensureBannerEl();
+        el.className = isError ? '__wo_error' : '';
+        el.innerHTML = (isError ? '<div class="__wo_icon">&#9888;</div>' : '<div class="__wo_spinner"></div>') +
+            '<div class="__wo_text"></div>' +
+            (isError ? '<div class="__wo_close" title="Dismiss">&times;</div>' : '');
+        el.querySelector('.__wo_text').textContent = text;
+        if (isError) el.querySelector('.__wo_close').onclick = removeBanner;
+        return showBannerEl(el);
     }
 
     function removeBanner() {
@@ -367,21 +412,22 @@
     }
 
     function showHostPicker(hosts) {
-        var old = document.getElementById('__wo_loader_banner');
-        if (old) old.remove();
-        var box = document.createElement('div');
-        box.id = '__wo_loader_banner';
-        box.style.cssText = 'position:fixed;top:10px;right:10px;z-index:2147483647;background:#2c2c2c;color:#fff;padding:12px 16px;border-radius:6px;font-family:Arial,sans-serif;font-size:13px;max-width:320px;';
-        box.innerHTML = '<div style="margin-bottom:8px;">Which Maximo instance is this for?</div>' +
+        var box = ensureBannerEl();
+        box.className = '';
+        box.innerHTML = '<div style="flex:1 1 auto;min-width:0;">' +
+            '<div style="margin-bottom:8px;">Which Maximo instance is this for?</div>' +
             hosts.map(function(h, i) {
-                return '<button type="button" data-host-idx="' + i + '" style="display:block;width:100%;margin-bottom:4px;padding:6px 10px;background:#3a3a3a;color:#fff;border:1px solid #555;border-radius:4px;cursor:pointer;text-align:left;">' + h.hostname + '</button>';
-            }).join('');
-        document.body.appendChild(box);
+                return '<button type="button" data-host-idx="' + i + '" style="display:block;width:100%;margin-bottom:4px;padding:7px 10px;background:#1f2630;color:#f0f3f6;border:1px solid #30363d;border-radius:6px;cursor:pointer;text-align:left;font-size:13px;transition:border-color .12s ease;">' + h.hostname + '</button>';
+            }).join('') +
+            '</div>';
         Array.prototype.forEach.call(box.querySelectorAll('[data-host-idx]'), function(btn) {
+            btn.onmouseenter = function() { btn.style.borderColor = '#58a6ff'; };
+            btn.onmouseleave = function() { btn.style.borderColor = '#30363d'; };
             btn.onclick = function() {
                 doRedirect(hosts[parseInt(btn.getAttribute('data-host-idx'), 10)]);
             };
         });
+        showBannerEl(box);
     }
 
     // Best-effort — the panel may not exist yet (very first paint) or this
