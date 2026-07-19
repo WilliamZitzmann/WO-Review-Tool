@@ -268,6 +268,16 @@ async function testDeniedContactEmailResolved() {
         !!banner && banner.textContent.indexOf('ie-help@abbvie.com') !== -1, banner && banner.textContent);
     check('[denied] the resolved contact email was cached for next time',
         w.localStorage.getItem('__wo_contact_email') === 'ie-help@abbvie.com', w.localStorage.getItem('__wo_contact_email'));
+
+    // A denial banner is a dead end for this bookmarklet click - nothing
+    // else in loader.js will ever call removeBanner() for it, so it needs
+    // its own dismiss control or it sits on the page forever (the bug this
+    // covers - see the "message sticks" fix in showBanner()).
+    var closeBtn = banner && banner.querySelector('span[title="Dismiss"]');
+    check('[denied] banner has a dismiss control', !!closeBtn);
+    if (closeBtn) closeBtn.onclick();
+    check('[denied] clicking dismiss removes the banner',
+        !w.document.getElementById('__wo_loader_banner'));
 }
 
 // ── Test 7: contactEmail: null does NOT clobber a previously-cached real

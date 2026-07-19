@@ -32,6 +32,13 @@
         return localStorage.getItem(CONTACT_EMAIL_KEY) || CONTACT_EMAIL;
     }
 
+    // isError banners (access denied, offline-with-no-cached-tool) are dead
+    // ends for THIS bookmarklet click — nothing in loader.js ever calls
+    // removeBanner() for them on its own (there's no cached tool to fall
+    // back into and re-verify from), so without a manual dismiss they sit
+    // on the page indefinitely, even after the underlying issue is fixed,
+    // until the next full page reload. A close button is the only way out
+    // that doesn't require rechecking access on some ambient timer.
     function showBanner(text, isError) {
         var el = document.getElementById('__wo_loader_banner');
         if (!el) {
@@ -42,6 +49,15 @@
         }
         el.style.color = isError ? '#e74c3c' : '#ff8';
         el.textContent = text;
+        if (isError) {
+            el.style.paddingRight = '26px';
+            var closeBtn = document.createElement('span');
+            closeBtn.textContent = '×';
+            closeBtn.title = 'Dismiss';
+            closeBtn.style.cssText = 'position:absolute;top:6px;right:8px;cursor:pointer;color:#ccc;font-size:15px;line-height:1;';
+            closeBtn.onclick = removeBanner;
+            el.appendChild(closeBtn);
+        }
         return el;
     }
 

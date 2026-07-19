@@ -38,7 +38,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26200.1000z';
+    var BUILD_ID = '26200.1019z';
     // Ultimate fallback ONLY — same key/contract as loader.js's
     // CONTACT_EMAIL_KEY (kept in sync manually, independent files). Real
     // value comes from /check-access's bucket-resolved contactEmail
@@ -2825,10 +2825,28 @@
         var installerModal = document.getElementById('__wo_installer_modal');
         if (installerModal) installerModal.remove();
         teardown();
-        var banner = document.createElement('div');
-        banner.style.cssText = 'position:fixed;top:10px;right:10px;z-index:2147483647;background:#2c2c2c;color:#e74c3c;padding:10px 16px;border-radius:6px;font-family:Arial,sans-serif;font-size:13px;max-width:320px;';
+        // Nothing re-checks access after this (the running session is
+        // already torn down) and no cached tool is left to fall back into
+        // on a later page load, so this banner is a dead end for the
+        // current page the same way loader.js's own denial banner is —
+        // needs its own dismiss, not just a page reload, to go away. Keyed
+        // by id so a second revoke in the same page life (shouldn't happen,
+        // but teardown() doesn't remove this element) reuses it instead of
+        // stacking duplicates.
+        var banner = document.getElementById('__wo_revoked_banner');
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = '__wo_revoked_banner';
+            banner.style.cssText = 'position:fixed;top:10px;right:10px;z-index:2147483647;background:#2c2c2c;color:#e74c3c;padding:10px 16px;padding-right:26px;border-radius:6px;font-family:Arial,sans-serif;font-size:13px;max-width:320px;';
+            document.body.appendChild(banner);
+        }
         banner.textContent = 'Access no longer granted. Contact ' + getSupportEmail() + ' for access.';
-        document.body.appendChild(banner);
+        var closeBtn = document.createElement('span');
+        closeBtn.textContent = '×';
+        closeBtn.title = 'Dismiss';
+        closeBtn.style.cssText = 'position:absolute;top:6px;right:8px;cursor:pointer;color:#ccc;font-size:15px;line-height:1;';
+        closeBtn.onclick = function() { banner.remove(); };
+        banner.appendChild(closeBtn);
     }
 
     // Exposed so loader.js can trigger a live teardown of an ALREADY-

@@ -15,6 +15,7 @@ const FILES = [
     'update_defer_test.js',
     'sync_whoami_mapping_test.js',
     'config_version_test.js',
+    'revoke_banner_test.js',
 ];
 
 const fs = require('fs');

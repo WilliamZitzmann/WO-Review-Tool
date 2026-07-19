@@ -118,6 +118,20 @@ fetches (`fetchToolSourceViaWorker()`) and the Setup > Profiles
 `__wo_grants` key as a side effect, but it is NOT the primary access gate —
 `loader.js` is.
 
+**Both denial/revoke banners are dead ends that need a manual dismiss.**
+`loader.js`'s "Access not granted..." banner (blocking-path deny, or the
+offline-with-no-cached-tool fallback) and `wo_tool.js`'s
+`revokeAccessLocally()` "Access no longer granted..." banner (a live
+session torn down by `backgroundVerify()`'s deny) are both genuinely
+nothing-left-to-do states for the current page load — no code path ever
+calls `removeBanner()`/removes them afterward, so without a close control
+they sat on the page indefinitely (even after the underlying issue was
+fixed) until a full reload. Both now render a small "×" (only on the error
+styling, not the transient "Checking access..."/"Redirecting..." states,
+which already get replaced/removed by the normal flow). Covered by
+`tests/loader_test.mjs`'s `[denied]` dismiss checks and
+`tests/revoke_banner_test.js`.
+
 ---
 
 ## 3. Access control (Worker + permissions.json)
