@@ -332,6 +332,25 @@ cookbook-level detail there.
   grants nothing on its own; access only exists where a separate, explicit
   `allow`/`override` entry targets that bucket. A bucket that nothing
   targets is purely a hierarchy/delegation/config-targeting node.
+- **`admin.html`'s Permissions tab (`condSummary()`) and Groups tab got a
+  UI pass**: condition chips show only an entry's OWN condition(s) by
+  default (the server-prepended ancestor chain is real and enforced, but
+  showing it on every row is mostly noise); hovering reveals the full
+  ancestor+own chain "/"-joined like a folder path, using the SAME
+  `bucketConditionChainLength()` split that already drove the
+  inherited/own visual distinction — just newly also used to decide what's
+  hidden, not only how it's colored. `eq`/`neq` display as `=`/`≠`
+  (`OP_OPTIONS`/`opDisplay()`/`opOptionsHtml()`); the other four ops
+  (`endsWith`/`startsWith`/`in`/`notIn`) have no unambiguous symbol and
+  stay as words. `<select>` options now carry an explicit `value=` distinct
+  from their display label, so the symbol swap never changes what's
+  actually submitted. Groups got the same kebab-menu (`menuHtml()`)
+  treatment as Buckets/Field Levels — Reset password/Revoke per member,
+  Rename/Delete per group (new `PATCH /admin/groups/:id`, label-only,
+  same `isAtOrBelow` containment as every other group endpoint) — and
+  "Add account"/"Create admin group" are hidden behind a `+`-button toggle
+  matching Field Levels' "Register new field" pattern, instead of
+  always-visible forms.
 - **`maximoHost`** (`CANONICAL_FIELDS`) is synthetic — not part of
   Maximo's own whoami response, it's the browser's own
   `location.hostname` (added identically in `loader.js`'s `readWhoami()`
@@ -1618,6 +1637,27 @@ held.
   instead — a single button that opens a `.wo-kebab-menu`-styled list; each
   item just calls `.click()` on the real (hidden) tab button rather than
   duplicating its `bindTab()`-wired switch logic.
+- **Local Profiles row actions** (Setup > Profiles) now use the same
+  `.wo-kebab-menu`/`openRuleMenu`/`closeRuleMenu()` convention as
+  Variables/Rules, instead of separate always-visible Switch/Delete
+  buttons — Switch/Duplicate/Delete, positioned via `getBoundingClientRect`
+  off the kebab button (`position:fixed`, flips above if it would overflow
+  the viewport bottom, same as every other kebab menu). Duplicate deep-
+  copies the profile under a new id; if duplicating the *active* profile it
+  re-snapshots from live state (`snapshotProfile()`) first, since the
+  active profile's stored blob can lag behind unsaved Setup edits until
+  Save is clicked — a non-active profile's stored blob is already
+  authoritative and copied as-is.
+- **Scan log minimize** (`setScanLogMinimized()`) — a "−"/"+" toggle in the
+  status area's top-right (a `position:relative` wrapper around
+  `#__wo_status` with the button absolutely positioned in its corner, so
+  `statusEl` itself is untouched and every existing `statusEl.textContent
+  = ...` call site needed no changes) hides just `#__wo_scanlog` (the
+  step-by-step "Reading WO tab...", "Scanning: X..." lines) to reclaim
+  space. `#__wo_status` (e.g. "Scan Complete 11:02") and `#__wo_summary`
+  (rule output) are separate siblings, untouched either way. Persisted via
+  `__wo_settings.scanLogMinimized`, same convention as `panelCollapsed`,
+  applied on `buildPanel()` before the panel is first shown.
 
 ---
 
