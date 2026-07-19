@@ -572,6 +572,13 @@ async function loadAdminAccountEmails(env, ctx) {
     }
     var set = {};
     (doc.rootAccounts || []).forEach(function(a) { if (a.email) set[a.email.toLowerCase()] = true; });
+    // Current shape - accounts live independently, referenced by id from
+    // one or more groups (see loadAdminGroupsDoc's migration comment).
+    (doc.accounts || []).forEach(function(a) { if (a.email) set[a.email.toLowerCase()] = true; });
+    // Old shape fallback - this is a raw, uncached-through-loadAdminGroupsDoc
+    // read, so it never triggers that function's self-healing migration; a
+    // file that hasn't been written since the migration shipped can still
+    // be in the old shape on disk.
     (doc.groups || []).forEach(function(g) {
         (g.members || []).forEach(function(m) { if (m.email) set[m.email.toLowerCase()] = true; });
     });
@@ -926,9 +933,28 @@ async function loadBucketsDoc(env) {
 
 async function loadAdminGroupsDoc(env) {
     var f = await fetchPrivateFileWithSha(env, 'adminGroups.json');
-    var doc = f.exists ? JSON.parse(f.text) : { rootAccounts: [], groups: [] };
+    var doc = f.exists ? JSON.parse(f.text) : { rootAccounts: [], accounts: [], groups: [] };
     doc.rootAccounts = doc.rootAccounts || [];
+    doc.accounts = doc.accounts || [];
     doc.groups = doc.groups || [];
+    // Migrate the old shape (each account embedded inline in exactly one
+    // group's `members[]`, so an account could only ever belong to one
+    // group) into the new shape (accounts live independently in doc.accounts;
+    // groups just reference member ids) - this is what lets one account
+    // belong to more than one group. Self-healing: every load normalizes to
+    // the new shape in memory; the next WRITE persists it, so this only
+    // actually does anything against genuinely old data.
+    doc.groups.forEach(function(g) {
+        if (Array.isArray(g.members)) {
+            g.members.forEach(function(m) {
+                if (!doc.accounts.some(function(a) { return a.id === m.id; })) doc.accounts.push(m);
+            });
+            g.memberIds = (g.memberIds || []).concat(g.members.map(function(m) { return m.id; }))
+                .filter(function(id, i, arr) { return arr.indexOf(id) === i; });
+            delete g.members;
+        }
+        g.memberIds = g.memberIds || [];
+    });
     return { doc: doc, sha: f.sha };
 }
 
@@ -944,29 +970,29 @@ async function loadConfigsIndexDoc(env) {
     return { doc: doc, sha: f.sha };
 }
 
-// Finds an account by id, searching root accounts first, then every
-// group's members. Returns { account, group } - group is null for a root
-// account (it doesn't belong to one).
+// Finds an account by id: root accounts first, then doc.accounts. Returns
+// { account, isRootAccount, groups } - groups is every group this account
+// is a member of (via g.memberIds), which can now be more than one. Root
+// accounts always get groups: [] (they aren't scoped to any bucket) -
+// isRootAccount is what distinguishes that from a genuinely orphaned
+// scoped account (0 memberships, e.g. fully revoked) rather than
+// overloading an empty groups array to mean two different things.
 function findAccountById(doc, accountId) {
     var root = (doc.rootAccounts || []).find(function(a) { return a.id === accountId; });
-    if (root) return { account: root, group: null };
-    for (var i = 0; i < (doc.groups || []).length; i++) {
-        var g = doc.groups[i];
-        var m = (g.members || []).find(function(a) { return a.id === accountId; });
-        if (m) return { account: m, group: g };
-    }
-    return null;
+    if (root) return { account: root, isRootAccount: true, groups: [] };
+    var account = (doc.accounts || []).find(function(a) { return a.id === accountId; });
+    if (!account) return null;
+    var groups = (doc.groups || []).filter(function(g) { return (g.memberIds || []).indexOf(accountId) !== -1; });
+    return { account: account, isRootAccount: false, groups: groups };
 }
 function findAccountByEmail(doc, email) {
     var e = email.toLowerCase();
     var root = (doc.rootAccounts || []).find(function(a) { return a.email.toLowerCase() === e; });
-    if (root) return { account: root, group: null };
-    for (var i = 0; i < (doc.groups || []).length; i++) {
-        var g = doc.groups[i];
-        var m = (g.members || []).find(function(a) { return a.email.toLowerCase() === e; });
-        if (m) return { account: m, group: g };
-    }
-    return null;
+    if (root) return { account: root, isRootAccount: true, groups: [] };
+    var account = (doc.accounts || []).find(function(a) { return a.email.toLowerCase() === e; });
+    if (!account) return null;
+    var groups = (doc.groups || []).filter(function(g) { return (g.memberIds || []).indexOf(account.id) !== -1; });
+    return { account: account, isRootAccount: false, groups: groups };
 }
 function emailTaken(doc, email) {
     return !!findAccountByEmail(doc, email);
@@ -985,8 +1011,17 @@ function bucketsById(buckets) {
 }
 
 // Inclusive of ancestorId itself — used for grant/group-membership
-// containment ("their own node or any descendant").
-function isAtOrBelow(candidateId, ancestorId, byId) {
+// containment ("their own node or any descendant"). ancestorIdOrIds may be
+// a single bucket id, an ARRAY of them (a multi-group identity's
+// bucketIds — true if candidateId is at-or-below ANY of them, i.e. union
+// semantics), or null (root - contains everything). An empty array
+// contains nothing (fail closed - an account with zero group memberships
+// has no scope).
+function isAtOrBelow(candidateId, ancestorIdOrIds, byId) {
+    if (Array.isArray(ancestorIdOrIds)) {
+        return ancestorIdOrIds.some(function(a) { return isAtOrBelow(candidateId, a, byId); });
+    }
+    var ancestorId = ancestorIdOrIds;
     if (ancestorId == null) return true; // root contains everything
     if (candidateId == null) return false; // "everything" is never at-or-below one node
     var cur = candidateId, guard = 0;
@@ -1001,8 +1036,13 @@ function isAtOrBelow(candidateId, ancestorId, byId) {
 }
 
 // Strict — excludes ancestorId itself. Used for bucket CRUD and new-child-
-// group creation ("beneath their own node", not the node itself).
-function isBelow(candidateId, ancestorId, byId) {
+// group creation ("beneath their own node", not the node itself). Same
+// array/union handling as isAtOrBelow above.
+function isBelow(candidateId, ancestorIdOrIds, byId) {
+    if (Array.isArray(ancestorIdOrIds)) {
+        return ancestorIdOrIds.some(function(a) { return isBelow(candidateId, a, byId); });
+    }
+    var ancestorId = ancestorIdOrIds;
     if (candidateId == null) return false;
     if (ancestorId == null) return true; // every real bucket is beneath the implicit apex
     return candidateId !== ancestorId && isAtOrBelow(candidateId, ancestorId, byId);
@@ -1107,20 +1147,24 @@ function computeBucketRequiredFields(bucketsDoc) {
 // allowedFields checklist governing what ITS OWN admin tier may reference
 // when authoring conditions — different companies/branches at the same
 // depth can allow different fields. Checked against the ACTING IDENTITY's
-// own bucket (identity.bucketId), not the target/parent bucket, since the
-// question is always "can THIS ADMIN use this field", and an identity's own
-// bucket is only editable by a strictly-senior admin (isBelow — see
-// handleAdminPatchBucket), so a scoped admin can never self-escalate their
-// own checklist. Root has no bucket and always bypasses.
+// own bucket(s) (identity.bucketIds — an admin can now belong to more than
+// one group, hence more than one bucket), not the target/parent bucket,
+// since the question is always "can THIS ADMIN use this field". Union
+// semantics: allowed if ANY of the identity's own buckets permits it. Each
+// of those buckets is only editable by a strictly-senior admin (isBelow —
+// see handleAdminPatchBucket), so a scoped admin can never self-escalate
+// their own checklist. Root has no bucket and always bypasses.
 // bucket.allowedFields absent/null = every field allowed (backward-
 // compatible default — existing buckets keep working unchanged); an
 // explicit [] = no fields allowed (deliberate lockdown).
 function canUseFieldForIdentity(identity, field, byId) {
     if (identity.isRoot) return true;
-    var bucket = byId[identity.bucketId];
-    if (!bucket) return false; // dangling own-bucket id - fail closed
-    if (!Array.isArray(bucket.allowedFields)) return true;
-    return bucket.allowedFields.indexOf(field) !== -1;
+    return (identity.bucketIds || []).some(function(bucketId) {
+        var bucket = byId[bucketId];
+        if (!bucket) return false; // dangling own-bucket id - fail closed
+        if (!Array.isArray(bucket.allowedFields)) return true;
+        return bucket.allowedFields.indexOf(field) !== -1;
+    });
 }
 
 // ── Admin identity resolution ──
@@ -1147,10 +1191,15 @@ async function resolveAdminIdentity(request, env) {
     var presented = m[1].trim();
     if (!presented) return null;
     if (env.ROOT_ADMIN_TOKEN && presented === env.ROOT_ADMIN_TOKEN) {
-        return {
-            isRoot: true, bucketId: null, label: 'root (break-glass)', groupId: null, accountId: null,
-            allowPeerAdminCreation: true, allowChildAdminCreation: true,
-        };
+        // bucketIds: null (not []) for root, deliberately - isAtOrBelow/
+        // isBelow treat a null ancestor as "contains everything", which is
+        // what lets a handful of handlers (e.g. handleAdminPatchBucket,
+        // handleAdminDeleteBucket) skip an explicit `identity.isRoot`
+        // check and just call isBelow(id, identity.bucketIds, byId)
+        // directly. An empty ARRAY means the opposite (contains nothing -
+        // used for a genuinely scoped-but-orphaned account), so root must
+        // never be represented as [].
+        return { isRoot: true, bucketIds: null, label: 'root (break-glass)', groupIds: [], accountId: null, groups: [] };
     }
     var session = await verifyToken(env.ADMIN_SESSION_SECRET, presented);
     if (!session) return null;
@@ -1163,26 +1212,54 @@ async function resolveAdminIdentity(request, env) {
     }
     var found = findAccountById(groupsDoc, session.accountId);
     if (!found) return null; // account deleted/revoked since the session token was issued
-    if (found.group === null) {
+    if (found.isRootAccount) {
         // Root account — confirmed session.isRoot already implied this at
         // login time, but re-derive from the CURRENT doc rather than
         // trusting the token's own claim, so a root account demoted (were
         // that ever added) can't keep asserting root via an old token.
-        return {
-            isRoot: true, bucketId: null, label: found.account.label, groupId: null, accountId: found.account.id,
-            allowPeerAdminCreation: true, allowChildAdminCreation: true,
-        };
+        return { isRoot: true, bucketIds: null, label: found.account.label, groupIds: [], accountId: found.account.id, groups: [] }; // bucketIds: null, not [] - see the break-glass branch above
     }
+    // An account can now belong to more than one group (see
+    // loadAdminGroupsDoc's migration comment) - bucketIds/groupIds carry
+    // EVERY membership, and every scope check downstream (isAtOrBelow/
+    // isBelow/canUseFieldForIdentity) uses union semantics: permitted if
+    // ANY one of them qualifies. `groups` (the full objects, not just ids)
+    // is kept too because allowPeerAdminCreation/allowChildAdminCreation
+    // are PER-GROUP flags, not a single identity-wide flag - a group-scoped
+    // action always checks the flag on the SPECIFIC group being acted on
+    // (see handleAdminAddGroupMember/canCreateChildGroupAt), never an
+    // aggregate across every group the identity happens to belong to.
     return {
-        isRoot: false, bucketId: found.group.bucketId, label: found.account.label,
-        groupId: found.group.id, accountId: found.account.id,
-        allowPeerAdminCreation: !!found.group.allowPeerAdminCreation,
-        allowChildAdminCreation: !!found.group.allowChildAdminCreation,
+        isRoot: false,
+        bucketIds: found.groups.map(function(g) { return g.bucketId; }),
+        label: found.account.label,
+        groupIds: found.groups.map(function(g) { return g.id; }),
+        accountId: found.account.id,
+        groups: found.groups,
     };
 }
 
+// Purely informational (shown in admin.html, never a security boundary) -
+// the MOST SENIOR (shallowest) depth across every bucket the identity
+// belongs to, since that's the closest single-number analogue to what
+// "level" meant before multi-group existed. -1 (unknown) if the identity
+// has zero resolvable buckets (e.g. every group membership was revoked).
 function identityLevel(identity, byId) {
-    return identity.isRoot ? 0 : bucketDepth(identity.bucketId, byId);
+    if (identity.isRoot) return 0;
+    var depths = (identity.bucketIds || []).map(function(id) { return bucketDepth(id, byId); }).filter(function(d) { return d >= 0; });
+    return depths.length ? Math.min.apply(null, depths) : -1;
+}
+
+// Child-group creation is governed by a SPECIFIC group's own
+// allowChildAdminCreation flag, combined with THAT SAME group's own scope
+// (isBelow) - not "any group has the flag" OR'd with "any group is in
+// scope" independently, which would let a flagged-but-out-of-scope group
+// authorize reaching a bucket it has no actual authority over.
+function canCreateChildGroupAt(identity, targetBucketId, byId) {
+    if (identity.isRoot) return true;
+    return (identity.groups || []).some(function(g) {
+        return !!g.allowChildAdminCreation && isBelow(targetBucketId, g.bucketId, byId);
+    });
 }
 
 // Defense-in-depth before any permissions.json write — a malformed write
@@ -1251,16 +1328,16 @@ async function handleAdminGetPermissions(request, env) {
 
     if (identity.isRoot) {
         return json({
-            role: 'root', label: identity.label, level: level, bucketId: null,
+            role: 'root', label: identity.label, level: level, bucketIds: [],
             override: permsLoad.doc.override, blacklist: permsLoad.doc.blacklist,
             allow: permsLoad.doc.allow, extraGrants: permsLoad.doc.extraGrants,
             maximoHosts: permsLoad.doc.maximoHosts,
         });
     }
-    var allow = permsLoad.doc.allow.filter(function(e) { return isAtOrBelow(e.bucketId, identity.bucketId, byId); });
-    var blacklist = permsLoad.doc.blacklist.filter(function(e) { return isAtOrBelow(e.bucketId, identity.bucketId, byId); });
+    var allow = permsLoad.doc.allow.filter(function(e) { return isAtOrBelow(e.bucketId, identity.bucketIds, byId); });
+    var blacklist = permsLoad.doc.blacklist.filter(function(e) { return isAtOrBelow(e.bucketId, identity.bucketIds, byId); });
     return json({
-        role: 'scoped', label: identity.label, level: level, bucketId: identity.bucketId,
+        role: 'scoped', label: identity.label, level: level, bucketIds: identity.bucketIds,
         allow: allow, blacklist: blacklist,
         hidden: {
             override: permsLoad.doc.override.length,
@@ -1343,7 +1420,7 @@ async function handleAdminUpsertPermissionEntry(request, env, section) {
     var now = new Date().toISOString();
 
     var bucketId = body.bucketId != null ? body.bucketId : null;
-    if (!identity.isRoot && !isAtOrBelow(bucketId, identity.bucketId, byId)) forbid('target bucket outside your scope');
+    if (!identity.isRoot && !isAtOrBelow(bucketId, identity.bucketIds, byId)) forbid('target bucket outside your scope');
     var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions : [];
     if (!ownConditions.length) badRequest('at least one condition is required');
     ownConditions.forEach(function(c) {
@@ -1356,7 +1433,7 @@ async function handleAdminUpsertPermissionEntry(request, env, section) {
     // Editing an entry's bucketId requires containment on BOTH the entry's
     // current bucket and its new one — otherwise a scoped admin could
     // retarget a rule they don't control into their own branch.
-    if (existing && !identity.isRoot && !isAtOrBelow(existing.bucketId, identity.bucketId, byId)) forbid('existing entry outside your scope');
+    if (existing && !identity.isRoot && !isAtOrBelow(existing.bucketId, identity.bucketIds, byId)) forbid('existing entry outside your scope');
 
     var conditions = buildEntryConditions(bucketId, ownConditions, byId);
     var newEntry = {
@@ -1392,7 +1469,7 @@ async function handleAdminDeletePermissionEntry(request, env, section, id) {
     var idx = arr.findIndex(function(e) { return e.id === id; });
     if (idx === -1) return notFound(section + ' entry not found');
     var target = arr[idx];
-    if (!identity.isRoot && !isAtOrBelow(target.bucketId, identity.bucketId, byId)) forbid('entry outside your scope');
+    if (!identity.isRoot && !isAtOrBelow(target.bucketId, identity.bucketIds, byId)) forbid('entry outside your scope');
     arr.splice(idx, 1);
     validatePermissionsShape(permsLoad.doc);
     await writePrivateFile(env, 'permissions.json', JSON.stringify(permsLoad.doc, null, 2), permsLoad.sha,
@@ -1410,10 +1487,10 @@ async function handleAdminGetBuckets(request, env) {
     // admins need the ancestors/siblings above them for orientation (where
     // does my branch sit in the company?). This is read-only visibility;
     // every write endpoint below still independently enforces
-    // isAtOrBelow/isBelow against identity.bucketId, so nothing here
+    // isAtOrBelow/isBelow against identity.bucketIds, so nothing here
     // widens what a scoped admin can actually DO — admin.html is expected
     // to grey out/hide edit/delete controls for out-of-scope nodes using
-    // the same identity.bucketId this response's containing /admin/permissions
+    // the same identity.bucketIds this response's containing /admin/permissions
     // call already returned.
     var visible = bucketsLoad.doc.buckets;
     return json({
@@ -1432,7 +1509,7 @@ async function handleAdminCreateBucket(request, env) {
     var byId = bucketsById(bucketsLoad.doc.buckets);
     var parentId = body.parentId != null ? body.parentId : null;
 
-    if (!identity.isRoot && !isAtOrBelow(parentId, identity.bucketId, byId)) forbid('parent bucket outside your scope');
+    if (!identity.isRoot && !isAtOrBelow(parentId, identity.bucketIds, byId)) forbid('parent bucket outside your scope');
     if (parentId == null && !identity.isRoot) forbid('only root can create a new top-level branch');
     if (parentId != null && !byId[parentId]) notFound('parent bucket not found');
 
@@ -1465,7 +1542,7 @@ async function handleAdminPatchBucket(request, env, id) {
     var byId = bucketsById(bucketsLoad.doc.buckets);
     var bucket = byId[id];
     if (!bucket) return notFound('bucket not found');
-    if (!isBelow(id, identity.bucketId, byId)) forbid('bucket outside your scope (or is your own node — bucket CRUD is strictly below, not at, your own node)');
+    if (!isBelow(id, identity.bucketIds, byId)) forbid('bucket outside your scope (or is your own node — bucket CRUD is strictly below, not at, your own node)');
 
     if (body.field !== undefined && body.field !== bucket.field) {
         var newField = String(body.field).trim();
@@ -1508,7 +1585,7 @@ async function handleAdminDeleteBucket(request, env, id) {
     var bucketsLoad = await loadBucketsDoc(env);
     var byId = bucketsById(bucketsLoad.doc.buckets);
     if (!byId[id]) return notFound('bucket not found');
-    if (!isBelow(id, identity.bucketId, byId)) forbid('bucket outside your scope');
+    if (!isBelow(id, identity.bucketIds, byId)) forbid('bucket outside your scope');
 
     var descendantIds = bucketsLoad.doc.buckets.filter(function(b) { return isAtOrBelow(b.id, id, byId); }).map(function(b) { return b.id; });
     var hasChildren = descendantIds.length > 1;
@@ -1582,7 +1659,7 @@ async function handleAdminGetConfigs(request, env) {
     var byId = bucketsById(bucketsLoad.doc.buckets);
     var indexLoad = await loadConfigsIndexDoc(env);
     var visible = identity.isRoot ? indexLoad.doc.configs :
-        indexLoad.doc.configs.filter(function(c) { return isAtOrBelow(c.bucketId, identity.bucketId, byId); });
+        indexLoad.doc.configs.filter(function(c) { return isAtOrBelow(c.bucketId, identity.bucketIds, byId); });
     return json({ configs: visible.map(configEntryPublic) });
 }
 
@@ -1600,7 +1677,7 @@ async function handleAdminCreateConfig(request, env) {
     var bucketsLoad = await loadBucketsDoc(env);
     var byId = bucketsById(bucketsLoad.doc.buckets);
     var bucketId = body.bucketId != null ? body.bucketId : null;
-    if (!identity.isRoot && !isAtOrBelow(bucketId, identity.bucketId, byId)) forbid('target bucket outside your scope');
+    if (!identity.isRoot && !isAtOrBelow(bucketId, identity.bucketIds, byId)) forbid('target bucket outside your scope');
     var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions : [];
     ownConditions.forEach(function(c) {
         if (!canUseFieldForIdentity(identity, c.field, byId)) forbid('field "' + c.field + '" not permitted for your admin tier');
@@ -1631,7 +1708,7 @@ async function handleAdminGetConfigContent(request, env, id) {
     var indexLoad = await loadConfigsIndexDoc(env);
     var entry = indexLoad.doc.configs.find(function(c) { return c.id === id; });
     if (!entry) return notFound('config not found');
-    if (!identity.isRoot && !isAtOrBelow(entry.bucketId, identity.bucketId, byId)) forbid('config outside your scope');
+    if (!identity.isRoot && !isAtOrBelow(entry.bucketId, identity.bucketIds, byId)) forbid('config outside your scope');
     var f = await fetchPrivateFileWithSha(env, 'configs/' + id + '.json');
     if (!f.exists) return notFound('config content missing (index/content out of sync)');
     return json({ config: configEntryPublic(entry), content: JSON.parse(f.text) });
@@ -1648,11 +1725,11 @@ async function handleAdminDuplicateConfig(request, env, id) {
     var indexLoad = await loadConfigsIndexDoc(env);
     var source = indexLoad.doc.configs.find(function(c) { return c.id === id; });
     if (!source) return notFound('config not found');
-    if (!identity.isRoot && !isAtOrBelow(source.bucketId, identity.bucketId, byId)) forbid('source config outside your scope');
+    if (!identity.isRoot && !isAtOrBelow(source.bucketId, identity.bucketIds, byId)) forbid('source config outside your scope');
 
     var name = String(body.name || (source.name + ' (copy)')).trim();
     var bucketId = body.bucketId !== undefined ? body.bucketId : source.bucketId;
-    if (!identity.isRoot && !isAtOrBelow(bucketId, identity.bucketId, byId)) forbid('target bucket outside your scope');
+    if (!identity.isRoot && !isAtOrBelow(bucketId, identity.bucketIds, byId)) forbid('target bucket outside your scope');
     var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions : [];
     ownConditions.forEach(function(c) {
         if (!canUseFieldForIdentity(identity, c.field, byId)) forbid('field "' + c.field + '" not permitted for your admin tier');
@@ -1688,7 +1765,7 @@ async function handleAdminPatchConfig(request, env, id) {
     var indexLoad = await loadConfigsIndexDoc(env);
     var entry = indexLoad.doc.configs.find(function(c) { return c.id === id; });
     if (!entry) return notFound('config not found');
-    if (!identity.isRoot && !isAtOrBelow(entry.bucketId, identity.bucketId, byId)) forbid('config outside your scope');
+    if (!identity.isRoot && !isAtOrBelow(entry.bucketId, identity.bucketIds, byId)) forbid('config outside your scope');
 
     if (body.name !== undefined) {
         var name = String(body.name).trim();
@@ -1698,7 +1775,7 @@ async function handleAdminPatchConfig(request, env, id) {
     if (body.description !== undefined) entry.description = String(body.description);
     if (body.bucketId !== undefined || body.ownConditions !== undefined) {
         var newBucketId = body.bucketId !== undefined ? body.bucketId : entry.bucketId;
-        if (!identity.isRoot && !isAtOrBelow(newBucketId, identity.bucketId, byId)) forbid('target bucket outside your scope');
+        if (!identity.isRoot && !isAtOrBelow(newBucketId, identity.bucketIds, byId)) forbid('target bucket outside your scope');
         var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions :
             entry.conditions.slice(bucketConditionChain(entry.bucketId, byId).length);
         ownConditions.forEach(function(c) {
@@ -1734,7 +1811,7 @@ async function handleAdminDeleteConfig(request, env, id) {
     var idx = indexLoad.doc.configs.findIndex(function(c) { return c.id === id; });
     if (idx === -1) return notFound('config not found');
     var entry = indexLoad.doc.configs[idx];
-    if (!identity.isRoot && !isAtOrBelow(entry.bucketId, identity.bucketId, byId)) forbid('config outside your scope');
+    if (!identity.isRoot && !isAtOrBelow(entry.bucketId, identity.bucketIds, byId)) forbid('config outside your scope');
 
     indexLoad.doc.configs.splice(idx, 1);
     await writePrivateFile(env, 'configs/index.json', JSON.stringify(indexLoad.doc, null, 2), indexLoad.sha,
@@ -1758,13 +1835,15 @@ async function handleAdminGetGroups(request, env) {
     var bucketsLoad = await loadBucketsDoc(env);
     var byId = bucketsById(bucketsLoad.doc.buckets);
     var groupsLoad = await loadAdminGroupsDoc(env);
+    var accountsById = {};
+    (groupsLoad.doc.accounts || []).forEach(function(a) { accountsById[a.id] = a; });
     var visible = (identity.isRoot ? groupsLoad.doc.groups :
-        groupsLoad.doc.groups.filter(function(g) { return isAtOrBelow(g.bucketId, identity.bucketId, byId); }))
+        groupsLoad.doc.groups.filter(function(g) { return isAtOrBelow(g.bucketId, identity.bucketIds, byId); }))
         .map(function(g) {
             return {
                 id: g.id, bucketId: g.bucketId, label: g.label,
                 allowPeerAdminCreation: !!g.allowPeerAdminCreation, allowChildAdminCreation: !!g.allowChildAdminCreation,
-                members: (g.members || []).map(function(m) {
+                members: (g.memberIds || []).map(function(id) { return accountsById[id]; }).filter(Boolean).map(function(m) {
                     return { id: m.id, email: m.email, label: m.label, mustChangePassword: !!m.mustChangePassword, createdAt: m.createdAt, createdBy: m.createdBy };
                 }),
             };
@@ -1775,7 +1854,6 @@ async function handleAdminGetGroups(request, env) {
 async function handleAdminCreateGroup(request, env) {
     var identity = await resolveAdminIdentity(request, env);
     requireAdmin(identity);
-    if (!identity.isRoot && !identity.allowChildAdminCreation) forbid('your group is not permitted to create child admin groups');
     var body;
     try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
 
@@ -1783,13 +1861,13 @@ async function handleAdminCreateGroup(request, env) {
     var byId = bucketsById(bucketsLoad.doc.buckets);
     var bucketId = body.bucketId;
     if (!bucketId || !byId[bucketId]) return notFound('bucket not found');
-    if (!isBelow(bucketId, identity.bucketId, byId)) forbid('bucket outside your scope (child-group creation targets a descendant bucket, not your own)');
+    if (!identity.isRoot && !canCreateChildGroupAt(identity, bucketId, byId)) forbid('none of your admin groups are permitted to create a child admin group at this bucket');
 
     var groupsLoad = await loadAdminGroupsDoc(env);
     var newGroup = {
         id: genId('grp'), bucketId: bucketId, label: String(body.label || 'Admins'),
         allowPeerAdminCreation: !!body.allowPeerAdminCreation, allowChildAdminCreation: !!body.allowChildAdminCreation,
-        members: [],
+        memberIds: [],
     };
     groupsLoad.doc.groups.push(newGroup);
     await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
@@ -1870,17 +1948,33 @@ async function handleAdminAddGroupMember(request, env, groupId) {
     var groupsLoad = await loadAdminGroupsDoc(env);
     var group = groupsLoad.doc.groups.find(function(g) { return g.id === groupId; });
     if (!group) return notFound('group not found');
-    // Peer creation is specifically "add a member to YOUR OWN group" — not
-    // any group in scope. Root bypasses this entirely.
+    // Peer creation is specifically "add to one of YOUR OWN groups" — not
+    // any group in scope — and is governed by THAT group's own flag (an
+    // admin can belong to several groups with different flags, so this is
+    // never an identity-wide toggle). Root bypasses this entirely.
     if (!identity.isRoot) {
-        if (identity.groupId !== groupId) forbid('you can only add members to your own group');
-        if (!identity.allowPeerAdminCreation) forbid('your group is not permitted to create peer admins');
+        if (identity.groupIds.indexOf(groupId) === -1) forbid('you can only add members to one of your own groups');
+        if (!group.allowPeerAdminCreation) forbid('this group is not permitted to create peer admins');
     }
-    if (emailTaken(groupsLoad.doc, email)) return json({ ok: false, error: 'an account with that email already exists' }, 409);
+
+    // An existing account (found by email) LINKS into this group instead of
+    // being rejected as "taken" — that's exactly what multi-group
+    // membership means: the same person administering more than one
+    // bucket. A brand-new email still provisions a new account as before.
+    var existing = findAccountByEmail(groupsLoad.doc, email);
+    if (existing) {
+        if (existing.isRootAccount) return json({ ok: false, error: 'that email belongs to a root account, not a scoped admin' }, 409);
+        if (group.memberIds.indexOf(existing.account.id) !== -1) return json({ ok: false, error: 'that account is already a member of this group' }, 409);
+        group.memberIds.push(existing.account.id);
+        await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
+            'admin: ' + identity.label + ' added existing account "' + email + '" to group "' + group.label + '"');
+        return json({ ok: true, member: { id: existing.account.id, email: existing.account.email, label: existing.account.label }, linked: true });
+    }
 
     var provisioned = await provisionAccount(env, request, email, body.label, identity.label);
     var member = provisioned.account;
-    group.members.push(member);
+    groupsLoad.doc.accounts.push(member);
+    group.memberIds.push(member.id);
     await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
         'admin: ' + identity.label + ' added account "' + email + '" to group "' + group.label + '"');
     return json(Object.assign({ ok: true, member: { id: member.id, email: email, label: member.label } },
@@ -1915,19 +2009,21 @@ async function handleAdminLogin(request, env) {
     }
     if (!found || !ok) return json({ error: 'invalid username or password' }, 401);
 
-    var isRoot = found.group === null;
-    var bucketId = isRoot ? null : found.group.bucketId;
+    var isRoot = found.isRootAccount;
+    var bucketIds = isRoot ? [] : found.groups.map(function(g) { return g.bucketId; });
     var level = 0;
     if (!isRoot) {
         var bucketsLoad = await loadBucketsDoc(env);
-        level = bucketDepth(bucketId, bucketsById(bucketsLoad.doc.buckets));
+        var byId = bucketsById(bucketsLoad.doc.buckets);
+        var depths = bucketIds.map(function(id) { return bucketDepth(id, byId); }).filter(function(d) { return d >= 0; });
+        level = depths.length ? Math.min.apply(null, depths) : -1;
     }
     var sessionToken = await makeToken(env.ADMIN_SESSION_SECRET, {
         accountId: found.account.id, isRoot: isRoot, exp: Date.now() + ADMIN_SESSION_TTL_MS,
     });
     return json({
         token: sessionToken, role: isRoot ? 'root' : 'scoped', label: found.account.label,
-        level: level, bucketId: bucketId, mustChangePassword: !!found.account.mustChangePassword,
+        level: level, bucketIds: bucketIds, mustChangePassword: !!found.account.mustChangePassword,
     });
 }
 
@@ -1976,15 +2072,17 @@ async function handleAdminCompleteSignup(request, env) {
     // Log them straight in as a convenience - clicking the emailed link
     // already proved account ownership once, no reason to make them log in
     // again immediately after.
-    var isRoot = found.group === null;
-    var bucketId = isRoot ? null : found.group.bucketId;
+    var isRoot = found.isRootAccount;
+    var bucketIds = isRoot ? [] : found.groups.map(function(g) { return g.bucketId; });
     var level = 0;
     if (!isRoot) {
         var bucketsLoad = await loadBucketsDoc(env);
-        level = bucketDepth(bucketId, bucketsById(bucketsLoad.doc.buckets));
+        var byId = bucketsById(bucketsLoad.doc.buckets);
+        var depths = bucketIds.map(function(id) { return bucketDepth(id, byId); }).filter(function(d) { return d >= 0; });
+        level = depths.length ? Math.min.apply(null, depths) : -1;
     }
     var sessionToken = await makeToken(env.ADMIN_SESSION_SECRET, { accountId: found.account.id, isRoot: isRoot, exp: Date.now() + ADMIN_SESSION_TTL_MS });
-    return json({ ok: true, token: sessionToken, role: isRoot ? 'root' : 'scoped', label: found.account.label, level: level, bucketId: bucketId });
+    return json({ ok: true, token: sessionToken, role: isRoot ? 'root' : 'scoped', label: found.account.label, level: level, bucketIds: bucketIds });
 }
 
 // Self-service "forgot password" - public, always returns the same
@@ -2024,9 +2122,19 @@ async function handleAdminResetPassword(request, env, accountId) {
     var groupsLoad = await loadAdminGroupsDoc(env);
     var found = findAccountById(groupsLoad.doc, accountId);
     if (!found) return notFound('account not found');
-    var targetBucketId = found.group ? found.group.bucketId : null;
-    if (found.group === null && !identity.isRoot) forbid('only root can reset a root account\'s password');
-    if (found.group !== null && !identity.isRoot && !isAtOrBelow(targetBucketId, identity.bucketId, byId)) forbid('account outside your scope');
+    if (!identity.isRoot) {
+        if (found.isRootAccount) forbid('only root can reset a root account\'s password');
+        // A password is shared across every group the account belongs to,
+        // so resetting it affects all of them at once - require authority
+        // over ALL of the account's groups (not just one), otherwise an
+        // admin over a minor bucket could reset the password of someone who
+        // also has access to a bucket that admin doesn't otherwise control,
+        // and use the new password to reach it. An account with zero
+        // remaining memberships (every group revoked) is root-only.
+        var authorizedOverAll = found.groups.length > 0 &&
+            found.groups.every(function(g) { return isAtOrBelow(g.bucketId, identity.bucketIds, byId); });
+        if (!authorizedOverAll) forbid('account outside your scope');
+    }
 
     if (isEmailSendingConfigured(env)) {
         found.account.passwordHash = null;
@@ -2109,7 +2217,7 @@ async function handleAdminPatchGroup(request, env, groupId) {
     var groupsLoad = await loadAdminGroupsDoc(env);
     var group = groupsLoad.doc.groups.find(function(g) { return g.id === groupId; });
     if (!group) return notFound('group not found');
-    if (!identity.isRoot && !isAtOrBelow(group.bucketId, identity.bucketId, byId)) forbid('group outside your scope');
+    if (!identity.isRoot && !isAtOrBelow(group.bucketId, identity.bucketIds, byId)) forbid('group outside your scope');
 
     if (body.label !== undefined) {
         var label = String(body.label || '').trim();
@@ -2129,11 +2237,15 @@ async function handleAdminDeleteGroupMember(request, env, groupId, memberId) {
     var groupsLoad = await loadAdminGroupsDoc(env);
     var group = groupsLoad.doc.groups.find(function(g) { return g.id === groupId; });
     if (!group) return notFound('group not found');
-    if (!identity.isRoot && !isAtOrBelow(group.bucketId, identity.bucketId, byId)) forbid('group outside your scope');
+    if (!identity.isRoot && !isAtOrBelow(group.bucketId, identity.bucketIds, byId)) forbid('group outside your scope');
 
-    var before = group.members.length;
-    group.members = group.members.filter(function(m) { return m.id !== memberId; });
-    if (group.members.length === before) return notFound('member not found');
+    // This revokes the account's membership in THIS group only - it does
+    // not delete the account itself, since (now that one account can
+    // belong to more than one group) it may still have access elsewhere
+    // through a different group.
+    var before = group.memberIds.length;
+    group.memberIds = group.memberIds.filter(function(id) { return id !== memberId; });
+    if (group.memberIds.length === before) return notFound('member not found');
     await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
         'admin: ' + identity.label + ' revoked a member from group "' + group.label + '"');
     return json({ ok: true });
@@ -2147,7 +2259,7 @@ async function handleAdminDeleteGroup(request, env, groupId) {
     var groupsLoad = await loadAdminGroupsDoc(env);
     var group = groupsLoad.doc.groups.find(function(g) { return g.id === groupId; });
     if (!group) return notFound('group not found');
-    if (!identity.isRoot && !isAtOrBelow(group.bucketId, identity.bucketId, byId)) forbid('group outside your scope');
+    if (!identity.isRoot && !isAtOrBelow(group.bucketId, identity.bucketIds, byId)) forbid('group outside your scope');
 
     groupsLoad.doc.groups = groupsLoad.doc.groups.filter(function(g) { return g.id !== groupId; });
     await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,

@@ -764,8 +764,20 @@ seed(env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, 'version.json', {
     var orphanRemains = permsAfterCascade.body.allow.some(function(e) { return e.bucketId === workgroupId; });
     check('cascade delete also removed the grant entry that referenced the deleted bucket', !orphanRemains, permsAfterCascade.body.allow);
 
-    var revokedTokenNowFails = await call('GET', '/admin/permissions', { headers: bearerHeaders(avwpToken) });
-    check('admin group scoped under the deleted subtree is revoked (token no longer resolves)', revokedTokenNowFails.status === 401, revokedTokenNowFails.body);
+    // Under multi-group membership, deleting a group no longer deletes the
+    // ACCOUNT (it may still belong to other groups) - so the account still
+    // resolves and logs in, just with zero remaining scope. That's still
+    // safe: bucketIds is empty, which fails every containment check
+    // closed, so a genuinely orphaned account can reach nothing.
+    var revokedTokenStillResolves = await call('GET', '/admin/permissions', { headers: bearerHeaders(avwpToken) });
+    check('admin whose only group was cascade-deleted still resolves (may belong to others) but with zero scope',
+        revokedTokenStillResolves.status === 200 && revokedTokenStillResolves.body.role === 'scoped' &&
+        Array.isArray(revokedTokenStillResolves.body.bucketIds) && revokedTokenStillResolves.body.bucketIds.length === 0,
+        revokedTokenStillResolves.body);
+    var revokedTokenCannotAct = await call('POST', '/admin/permissions/allow', {
+        headers: bearerHeaders(avwpToken), body: { bucketId: null, ownConditions: [{ field: 'username', op: 'eq', value: 'x' }], grants: ['user'] },
+    });
+    check('...and that empty scope still fails closed on writes (403, not a free pass)', revokedTokenCannotAct.status === 403, revokedTokenCannotAct.body);
 
     // ── Root accounts (email/password alternative to ROOT_ADMIN_TOKEN) ──
     var mkRootAcct = await call('POST', '/admin/root-accounts', { headers: rootHeaders(), body: { email: 'william@example.com', label: 'William' } });
@@ -855,6 +867,145 @@ seed(env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, 'version.json', {
 
     var newPwWorks = await login('toreset@example.com', resetResult.body.tempPassword);
     check('the newly-reset temp password logs in, with mustChangePassword true', newPwWorks.status === 200 && newPwWorks.body.mustChangePassword === true, newPwWorks.body);
+
+    // ── Multi-group membership: one account can belong to more than one
+    // admin group at once, with union (OR) semantics for scope/field
+    // containment - a real build request, not just a data-model exercise. ──
+    var mkBucketA = await call('POST', '/admin/buckets', {
+        headers: rootHeaders(), body: { parentId: 'abbvie-ie', label: 'Galway', field: 'insertSite', op: 'eq', value: 'GALWAY' },
+    });
+    var bucketAId = mkBucketA.body.bucket && mkBucketA.body.bucket.id;
+    check('multi-group setup: create bucket A (Galway)', mkBucketA.status === 200 && !!bucketAId, mkBucketA.body);
+    var mkBucketB = await call('POST', '/admin/buckets', {
+        headers: rootHeaders(), body: { parentId: 'abbvie-ie', label: 'Cork', field: 'insertSite', op: 'eq', value: 'CORK' },
+    });
+    var bucketBId = mkBucketB.body.bucket && mkBucketB.body.bucket.id;
+    check('multi-group setup: create bucket B (Cork)', mkBucketB.status === 200 && !!bucketBId, mkBucketB.body);
+    var mkBucketC = await call('POST', '/admin/buckets', {
+        headers: rootHeaders(), body: { parentId: 'abbvie-ie', label: 'Limerick', field: 'insertSite', op: 'eq', value: 'LIMERICK' },
+    });
+    var bucketCId = mkBucketC.body.bucket && mkBucketC.body.bucket.id;
+
+    var restrictBucketA = await call('PATCH', '/admin/buckets/' + bucketAId, {
+        headers: rootHeaders(), body: { allowedFields: ['insertSite'] },
+    });
+    check('multi-group setup: restrict bucket A to only the insertSite field', restrictBucketA.status === 200, restrictBucketA.body);
+
+    var mkGroupA = await call('POST', '/admin/groups', {
+        headers: rootHeaders(), body: { bucketId: bucketAId, label: 'Galway Admins', allowPeerAdminCreation: false, allowChildAdminCreation: false },
+    });
+    var groupAId = mkGroupA.body.group.id;
+    var mkGroupB = await call('POST', '/admin/groups', {
+        headers: rootHeaders(), body: { bucketId: bucketBId, label: 'Cork Admins', allowPeerAdminCreation: true, allowChildAdminCreation: false },
+    });
+    var groupBId = mkGroupB.body.group.id;
+    var mkGroupC = await call('POST', '/admin/groups', {
+        headers: rootHeaders(), body: { bucketId: bucketCId, label: 'Limerick Admins', allowPeerAdminCreation: false, allowChildAdminCreation: false },
+    });
+    var groupCId = mkGroupC.body.group.id;
+
+    var addToA = await call('POST', '/admin/groups/' + groupAId + '/members', {
+        headers: rootHeaders(), body: { email: 'multi.admin@abbvie.com', label: 'Multi Admin' },
+    });
+    check('multi-group: adding a brand-new email to group A provisions a new account',
+        addToA.status === 200 && typeof addToA.body.tempPassword === 'string', addToA.body);
+    var multiTempPassword = addToA.body.tempPassword;
+
+    // The key behavior: adding the SAME (now-existing) email to a DIFFERENT
+    // group LINKS the existing account in, instead of rejecting it as
+    // "taken" - that's what makes multi-group actually reachable.
+    var addToB = await call('POST', '/admin/groups/' + groupBId + '/members', {
+        headers: rootHeaders(), body: { email: 'multi.admin@abbvie.com', label: 'ignored - existing label wins' },
+    });
+    check('multi-group: adding an EXISTING email to a SECOND group links it in (200 + linked:true, not 409)',
+        addToB.status === 200 && addToB.body.linked === true, addToB.body);
+
+    var addToADupe = await call('POST', '/admin/groups/' + groupAId + '/members', {
+        headers: rootHeaders(), body: { email: 'multi.admin@abbvie.com' },
+    });
+    check('multi-group: re-adding to a group they already belong to still 409s', addToADupe.status === 409, addToADupe.body);
+
+    var multiLogin = await login('multi.admin@abbvie.com', multiTempPassword);
+    check('multi-group: the linked account logs in with its ORIGINAL password (one shared password across every group)', multiLogin.status === 200, multiLogin.body);
+    var multiToken = multiLogin.body.token;
+    check('multi-group: login response carries BOTH bucketIds, not just one',
+        Array.isArray(multiLogin.body.bucketIds) && multiLogin.body.bucketIds.length === 2 &&
+        multiLogin.body.bucketIds.indexOf(bucketAId) !== -1 && multiLogin.body.bucketIds.indexOf(bucketBId) !== -1,
+        multiLogin.body.bucketIds);
+
+    var actAtA = await call('POST', '/admin/permissions/allow', {
+        headers: bearerHeaders(multiToken), body: { bucketId: bucketAId, ownConditions: [{ field: 'insertSite', op: 'eq', value: 'GALWAY' }], grants: ['user'] },
+    });
+    check('multi-group: can author a rule at bucket A (one of their two groups)', actAtA.status === 200, actAtA.body);
+    var actAtB = await call('POST', '/admin/permissions/allow', {
+        headers: bearerHeaders(multiToken), body: { bucketId: bucketBId, ownConditions: [{ field: 'insertSite', op: 'eq', value: 'CORK' }], grants: ['user'] },
+    });
+    check('multi-group: can ALSO author a rule at bucket B (their OTHER group) - union scope, not just the first match', actAtB.status === 200, actAtB.body);
+
+    // Union field checklist: bucket A restricts to just ['insertSite'];
+    // bucket B has no restriction. A field bucket A's own checklist would
+    // reject must still work here, because it's permitted via bucket B.
+    var actAtAWithBField = await call('POST', '/admin/permissions/allow', {
+        headers: bearerHeaders(multiToken), body: { bucketId: bucketAId, ownConditions: [{ field: 'workgroup', op: 'eq', value: 'Test' }], grants: ['user'] },
+    });
+    check('multi-group: a field bucket A\'s checklist would reject is still usable because bucket B has no restriction (union semantics)',
+        actAtAWithBField.status === 200, actAtAWithBField.body);
+
+    var groupsAfterLink = await call('GET', '/admin/groups', { headers: rootHeaders() });
+    var groupAAfter = groupsAfterLink.body.groups.find(function(g) { return g.id === groupAId; });
+    var groupBAfter = groupsAfterLink.body.groups.find(function(g) { return g.id === groupBId; });
+    check('multi-group: GET /admin/groups shows the account as a member of group A',
+        groupAAfter && groupAAfter.members.some(function(m) { return m.email === 'multi.admin@abbvie.com'; }), groupAAfter);
+    check('multi-group: ...AND of group B - same account, two groups, not a copy',
+        groupBAfter && groupBAfter.members.some(function(m) { return m.email === 'multi.admin@abbvie.com'; }), groupBAfter);
+
+    // Peer-add is governed by the SPECIFIC group's own flag - group A has
+    // it OFF, group B has it ON, same identity, different outcome per group.
+    var peerAddViaA = await call('POST', '/admin/groups/' + groupAId + '/members', {
+        headers: bearerHeaders(multiToken), body: { email: 'peer.attempt@abbvie.com' },
+    });
+    check('multi-group: peer-add via group A is forbidden (that group\'s own flag is off)', peerAddViaA.status === 403, peerAddViaA.body);
+    var peerAddViaB = await call('POST', '/admin/groups/' + groupBId + '/members', {
+        headers: bearerHeaders(multiToken), body: { email: 'peer.attempt@abbvie.com', label: 'Peer' },
+    });
+    check('multi-group: peer-add via group B succeeds (THAT group\'s own flag is on) - per-group, not identity-wide', peerAddViaB.status === 200, peerAddViaB.body);
+
+    // Revoking membership in ONE group must not affect the others.
+    var multiMemberId = groupAAfter.members.find(function(m) { return m.email === 'multi.admin@abbvie.com'; }).id;
+    var revokeFromA = await call('DELETE', '/admin/groups/' + groupAId + '/members/' + multiMemberId, { headers: rootHeaders() });
+    check('multi-group: revoking membership in group A succeeds', revokeFromA.status === 200, revokeFromA.body);
+
+    var actAtAAfterRevoke = await call('POST', '/admin/permissions/allow', {
+        headers: bearerHeaders(multiToken), body: { bucketId: bucketAId, ownConditions: [{ field: 'insertSite', op: 'eq', value: 'GALWAY2' }], grants: ['user'] },
+    });
+    check('multi-group: after revoking group A, acting at bucket A is now forbidden', actAtAAfterRevoke.status === 403, actAtAAfterRevoke.body);
+    var actAtBAfterRevoke = await call('POST', '/admin/permissions/allow', {
+        headers: bearerHeaders(multiToken), body: { bucketId: bucketBId, ownConditions: [{ field: 'insertSite', op: 'eq', value: 'CORK2' }], grants: ['user'] },
+    });
+    check('multi-group: ...but bucket B still works - revoking one group never touches the others (the whole point)', actAtBAfterRevoke.status === 200, actAtBAfterRevoke.body);
+
+    // Reset-password hardening: a shared password affects every group the
+    // account belongs to, so resetting it now requires authority over ALL
+    // of them. multi.admin currently belongs only to group B (Cork). Link
+    // them into group C (Limerick) too, then confirm an admin who only
+    // controls group B cannot reset multi.admin's password (they don't
+    // control group C, one of multi.admin's groups) - only root can.
+    var linkToC = await call('POST', '/admin/groups/' + groupCId + '/members', {
+        headers: rootHeaders(), body: { email: 'multi.admin@abbvie.com' },
+    });
+    check('multi-group setup: link multi.admin into group C too (now in B and C)', linkToC.status === 200 && linkToC.body.linked === true, linkToC.body);
+
+    var peerLogin = await login('peer.attempt@abbvie.com', peerAddViaB.body.tempPassword);
+    check('multi-group setup: the peer added via group B logs in', peerLogin.status === 200, peerLogin.body);
+    var peerToken = peerLogin.body.token;
+
+    var multiAccountId = groupBAfter.members.find(function(m) { return m.email === 'multi.admin@abbvie.com'; }).id;
+    var peerResetAttempt = await call('POST', '/admin/accounts/' + multiAccountId + '/reset-password', { headers: bearerHeaders(peerToken) });
+    check('multi-group: an admin scoped only to group B CANNOT reset multi.admin\'s password (multi.admin also has group C, outside their authority)',
+        peerResetAttempt.status === 403, peerResetAttempt.body);
+
+    var rootResetAttempt = await call('POST', '/admin/accounts/' + multiAccountId + '/reset-password', { headers: rootHeaders() });
+    check('multi-group: root can still reset it regardless', rootResetAttempt.status === 200, rootResetAttempt.body);
 
     // ── Resend-configured dual mode: flip the two config values on and
     // prove provisioning/reset switches to the emailed-link path with zero

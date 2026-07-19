@@ -188,6 +188,8 @@ Each account is keyed by a real **work email + password** (PBKDF2-hashed, never 
 
 If a whoami-matched admin account's email also matches what Maximo reports for that person, they'll additionally see an **Admin tab** appear right inside the WO Review Tool's own Setup modal (next to Guide/Feedback) — it just opens `/admin` in a new tab, a shortcut on top of the normal bookmark/URL, not a separate access path.
 
+**One account can belong to more than one group.** Adding someone who already has an account (same work email) to a second group links their existing account in rather than creating a duplicate — they keep one password and can now act within either bucket. Their header badge lists every bucket they administer. Revoking them from one group never touches the others; resetting their password does affect all of them at once (it's one shared credential), so that requires authority over every group they're currently in, not just one.
+
 **Cookbook — give someone AVWP-only admin access:**
 1. In `/admin`, go to Buckets, find (or create) the `abbvie-ie-avwp` bucket.
 2. Go to Groups, create a new group scoped to that bucket — pick whether its members can add peers to themselves and/or spin up workgroup-level groups beneath them.

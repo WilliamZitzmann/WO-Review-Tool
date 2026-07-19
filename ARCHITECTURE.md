@@ -303,8 +303,10 @@ cookbook-level detail there.
   (string array) governing what THAT bucket's own admin tier may
   reference when authoring conditions (a new child bucket's `field`, or
   an `ownConditions` entry on a permission/config rule). The checklist
-  that's checked is always the ACTING IDENTITY's own bucket
-  (`identity.bucketId`), never the target/parent bucket —
+  that's checked is always the ACTING IDENTITY's own bucket(s)
+  (`identity.bucketIds` — an account can belong to more than one group,
+  see the multi-group bullet below; union semantics, permitted if ANY of
+  them allows it), never the target/parent bucket —
   `canUseFieldForIdentity(identity, field, byId)` in worker.js. `null`/
   absent = every field allowed (the default — existing buckets with no
   checklist set keep working unchanged); an explicit `[]` is a deliberate
@@ -323,7 +325,7 @@ cookbook-level detail there.
   root** — visibility and authorization were deliberately split apart: a
   scoped admin needs their own branch's ancestors for orientation ("where
   do I sit in the company?"), but every write endpoint independently
-  re-enforces `isAtOrBelow`/`isBelow` against `identity.bucketId`
+  re-enforces `isAtOrBelow`/`isBelow` against `identity.bucketIds`
   regardless of what the read side returns, so widening visibility never
   widens what they can actually do. `admin.html` mirrors the same two
   containment checks client-side (`isAtOrBelowMine()`/`isBelowMine()`,
@@ -335,6 +337,23 @@ cookbook-level detail there.
   it) down to buckets a submit would actually be allowed to target — the
   client-side check is never the real boundary, just avoids offering
   choices that would 403.
+- **Bucket row UI (admin.html Buckets tab)**: clicking anywhere on a row's
+  header (not a dedicated icon) toggles its details panel open/closed —
+  guarded via `e.target.closest('button')` so the tree-nesting chevron and
+  the row's own edit/delete icon buttons keep their own independent click
+  behavior. The details panel defaults to a read-only summary (contact
+  email + the allowed-fields list, never enumerating what's NOT allowed).
+  The row's Edit (pencil) button is the ONLY way into edit mode — it force-
+  expands the row and switches the panel straight into ONE inline form
+  covering label/field/op/value (the bucket's own condition; `parentId`
+  still isn't editable there — delete and recreate under a new parent) AND
+  contact email AND the allowedFields checklist, all submitted together in
+  a single `PATCH /admin/buckets/:id` (the endpoint already accepted every
+  one of those fields independently, so no worker.js change was needed for
+  the merge). There is no separate "Edit bucket" card — the card below the
+  tree (`bkt_form_card`) is create-only now. A bucket the viewer administers
+  gets a `.bkt-mine` yellow left-border highlight (no text badge — an
+  earlier "your bucket" badge was tried and removed).
 - **Matched org configs carry a resolved `bucket` label** (`configs[].bucket`
   on both `/check-access` and `/org-config-content`, via
   `resolveConfigBucketLabels()`) — `null` for a root-owned config
@@ -392,12 +411,52 @@ cookbook-level detail there.
   editable conditions — the inherited prefix is never shown as editable
   and is always recomputed server-side from the chosen bucket on save,
   never accepted verbatim from the client.
-- **`adminGroups.json`** — `{rootAccounts: [...], groups: [...]}`. Each
-  group = shared bucket + delegation rights
-  (`allowPeerAdminCreation`/`allowChildAdminCreation`) + a list of
-  email/password accounts; `rootAccounts` are ungrouped, full-access
-  accounts (a normal-use alternative to `ROOT_ADMIN_TOKEN`). Accounts
-  added/removed without redefining the group's own permission each time.
+- **`adminGroups.json`** — `{rootAccounts: [...], accounts: [...], groups:
+  [...]}`. Accounts live independently in the top-level `accounts[]` array;
+  each group is shared bucket + delegation rights
+  (`allowPeerAdminCreation`/`allowChildAdminCreation`) + `memberIds[]`
+  (references into `accounts[]`, not embedded objects) — this decoupling is
+  what lets one account belong to more than one group (see the multi-group
+  bullet below). `rootAccounts` are ungrouped, full-access accounts (a
+  normal-use alternative to `ROOT_ADMIN_TOKEN`) and never appear in
+  `accounts[]`. `loadAdminGroupsDoc()` self-heals an older on-disk shape
+  (accounts embedded inline per-group as `members[]`, one group per
+  account) into the current shape on every read — the next write persists
+  it, so this only actually does anything against genuinely old data, no
+  separate migration script needed.
+- **Multi-group membership** — an account can belong to more than one
+  group at once (e.g. administer both a country bucket and an unrelated
+  site bucket with one login). `resolveAdminIdentity()` returns
+  `bucketIds`/`groupIds` (arrays, not a single scalar) plus `groups` (the
+  full group objects, needed because `allowPeerAdminCreation`/
+  `allowChildAdminCreation` are PER-GROUP flags, never aggregated onto the
+  identity — a group-scoped action always checks the flag on the SPECIFIC
+  group being acted on, keyed to the URL's `:id`, or via
+  `canCreateChildGroupAt()` for creating a brand-new group where there's no
+  existing `:id` yet). `isAtOrBelow()`/`isBelow()` both accept an array of
+  ancestor ids as well as a single one — true if the candidate is
+  at-or-below ANY of them (union/OR semantics), which is what every
+  scope/field-checklist check downstream inherits for free; root is
+  represented internally as `bucketIds: null` (not `[]` — an empty array
+  means "contains nothing," which is exactly backwards for root, whose
+  implicit null-bypass a couple of handlers rely on without an explicit
+  `identity.isRoot` check). `POST /admin/groups/:id/members` LINKS an
+  already-existing email into the target group (pushes its id into
+  `memberIds`) instead of rejecting it as "taken" — that's the whole point,
+  the same person administering more than one bucket with one shared
+  password; it still 409s if they're already a member of THAT SAME group.
+  Revoking membership in one group (`DELETE .../members/:memberId`) no
+  longer deletes the account — it may still belong to others — so an
+  account can end up with zero remaining memberships (fully revoked
+  everywhere); that's a valid, safe state: `bucketIds: []` fails every
+  containment check closed via `isAtOrBelow`'s empty-array case, so it can
+  reach nothing, but it can still technically log in (a `role: scoped`
+  response with an empty `bucketIds`), it just can't act. Resetting an
+  account's password (`POST /admin/accounts/:id/reset-password`) now
+  requires authority over ALL of that account's groups, not just one — a
+  shared password affects every membership at once, so an admin who only
+  controls one of several buckets an account can reach must not be able to
+  hijack the others via a reset.
 - **Auto-`admin` grant + in-tool Admin tab.** `loadAdminAccountEmails()`
   (edge-cached like `permissions.json`, fail-open to `{}` on error) builds
   a lowercased set of every email across `rootAccounts` + all group
