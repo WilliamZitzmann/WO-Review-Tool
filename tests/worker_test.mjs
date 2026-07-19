@@ -956,17 +956,19 @@ seed(env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, 'version.json', {
         JSON.stringify(unknownEmailLogin.body) === JSON.stringify(wrongPasswordLogin.body),
         { unknown: unknownEmailLogin.body, wrongPw: wrongPasswordLogin.body });
 
-    // ── Admin-assisted password reset (Resend not configured -> temp
-    // password path) ──
+    // ── Admin-assisted password reset is email-only now (no temp-password
+    // fallback) - with Resend not yet configured at this point in the
+    // suite, a reset attempt must be rejected outright, not silently fall
+    // back to a shown-once temp password. The actual successful email-link
+    // reset is exercised later, once Resend gets turned on below. ──
     var mkResetTarget = await call('POST', '/admin/root-accounts', { headers: rootHeaders(), body: { email: 'toreset@example.com', label: 'Reset Target' } });
     var resetResult = await call('POST', '/admin/accounts/' + mkResetTarget.body.account.id + '/reset-password', { headers: rootHeaders() });
-    check('root can reset another root account\'s password (temp password path)', resetResult.status === 200 && typeof resetResult.body.tempPassword === 'string', resetResult.body);
+    check('reset-password is rejected (400) when email delivery isn\'t configured - no temp-password fallback',
+        resetResult.status === 400 && resetResult.body.tempPassword === undefined, resetResult.body);
 
-    var oldPwStillWorks = await login('toreset@example.com', mkResetTarget.body.tempPassword);
-    check('the pre-reset temp password no longer logs in after a reset', oldPwStillWorks.status === 401, oldPwStillWorks.body);
-
-    var newPwWorks = await login('toreset@example.com', resetResult.body.tempPassword);
-    check('the newly-reset temp password logs in, with mustChangePassword true', newPwWorks.status === 200 && newPwWorks.body.mustChangePassword === true, newPwWorks.body);
+    var stillWorksAfterRejectedReset = await login('toreset@example.com', mkResetTarget.body.tempPassword);
+    check('the rejected reset attempt did not touch the account - original creation password still works',
+        stillWorksAfterRejectedReset.status === 200, stillWorksAfterRejectedReset.body);
 
     // ── Multi-group membership: one account can belong to more than one
     // admin group at once, with union (OR) semantics for scope/field
@@ -1104,14 +1106,35 @@ seed(env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, 'version.json', {
     check('multi-group: an admin scoped only to group B CANNOT reset multi.admin\'s password (multi.admin also has group C, outside their authority)',
         peerResetAttempt.status === 403, peerResetAttempt.body);
 
+    // Root passes the authorization check regardless of scope (proven by
+    // NOT getting the peer's 403 above) - it still hits the same "email
+    // must be configured" gate everyone does at this point in the suite,
+    // since Resend isn't turned on yet. That's a distinct 400, not a 403.
     var rootResetAttempt = await call('POST', '/admin/accounts/' + multiAccountId + '/reset-password', { headers: rootHeaders() });
-    check('multi-group: root can still reset it regardless', rootResetAttempt.status === 200, rootResetAttempt.body);
+    check('multi-group: root passes the authorization check regardless of scope (400 = config gate, not 403 = forbidden)',
+        rootResetAttempt.status === 400, rootResetAttempt.body);
 
     // ── Resend-configured dual mode: flip the two config values on and
     // prove provisioning/reset switches to the emailed-link path with zero
     // code changes, purely from config. ──
     env.RESEND_API_KEY = 'fake-resend-key';
     env.RESEND_FROM_EMAIL = 'onboarding@resend.dev';
+
+    // Retry the SAME reset that was rejected earlier (Resend wasn't
+    // configured yet) - now it should actually succeed via the emailed-link
+    // path, no temp password anywhere in the response.
+    var resetNowWorks = await call('POST', '/admin/accounts/' + mkResetTarget.body.account.id + '/reset-password', { headers: rootHeaders() });
+    check('reset-password succeeds once email delivery is configured, with no tempPassword in the response',
+        resetNowWorks.status === 200 && resetNowWorks.body.emailSent === true && resetNowWorks.body.tempPassword === undefined,
+        resetNowWorks.body);
+    var resetEmail = lastEmailTo('toreset@example.com');
+    check('...and an actual reset email was sent to the account', !!resetEmail, resetEmail);
+    var resetSetupToken = resetEmail && extractSetTokenFromLink(resetEmail.html);
+    var oldPwNowFails = await login('toreset@example.com', mkResetTarget.body.tempPassword);
+    check('...the old (pre-reset) password no longer works once the reset actually went through (account setup not complete - passwordHash was cleared)',
+        oldPwNowFails.status === 403, oldPwNowFails.body);
+    var resetCompleteSignup = await call('POST', '/admin/complete-signup', { body: { token: resetSetupToken, newPassword: 'a-fresh-reset-password-999' } });
+    check('...and the emailed reset link actually works to set a new password', resetCompleteSignup.status === 200, resetCompleteSignup.body);
 
     // avwpGroupId's bucket was cascade-deleted earlier in the suite (on
     // purpose, to test cascade behavior) — use root-accounts here instead,

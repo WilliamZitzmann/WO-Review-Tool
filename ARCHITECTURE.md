@@ -274,20 +274,26 @@ cookbook-level detail there.
   not bounded by the 12h TTL. `findAccountByEmail()`/`emailTaken()`
   replaced the old username-keyed lookups; `isValidEmail()` gates account
   creation.
-- **Dual-mode account provisioning/reset (`provisionAccount()` in
-  worker.js)** — if `RESEND_API_KEY`/`RESEND_FROM_EMAIL` are both set
+- **Account provisioning/reset (`provisionAccount()`/`sendAccountSetupEmail()`
+  in worker.js)** — if `RESEND_API_KEY`/`RESEND_FROM_EMAIL` are both set
   (Wrangler secret + `wrangler.toml` var), a new account or a password
   reset emails a one-time setup link (`sendAccountSetupEmail()`, a
   `type:'pwset'` HMAC token, 2h TTL, consumed by the new
   `POST /admin/complete-signup`) instead of generating a temp password —
   `admin.html` detects `?setToken=...` in its own URL and shows a
-  dedicated "set your password" screen instead of the login form. If
-  Resend isn't configured, both flows fall back to the original
-  shown-once temp-password behavior — no code change needed to switch
-  between the two, only the two config values. `POST /admin/forgot-password`
-  is a new **public**, enumeration-resistant endpoint (identical response
-  whether or not the email matches an account) that only does anything if
-  Resend is configured.
+  dedicated "set your password" screen instead of the login form.
+  **Provisioning a brand-new account** falls back to the original
+  shown-once temp-password behavior if Resend isn't configured — no code
+  change needed to switch between the two, only the two config values.
+  **`handleAdminResetPassword` has no such fallback** — reset is
+  email-only; if Resend isn't configured it returns 400 rather than
+  showing a plaintext temp password, since a reset (unlike creation) is
+  handing someone renewed access to an EXISTING account, a weaker
+  side-channel handoff (Slack, in person) is a real credential-handling
+  regression there, not just a convenience trade-off. `POST
+  /admin/forgot-password` is a **public**, enumeration-resistant endpoint
+  (identical response whether or not the email matches an account) that
+  only does anything if Resend is configured — always was.
 - **`buckets.json`** — a parent-pointer tree (company → country → site →
   workgroup, depth varies per branch). Never read by the live
   `/bootstrap`/`/check-access` path. `isAtOrBelow()`/`isBelow()` are the

@@ -2136,25 +2136,30 @@ async function handleAdminResetPassword(request, env, accountId) {
         if (!authorizedOverAll) forbid('account outside your scope');
     }
 
-    if (isEmailSendingConfigured(env)) {
-        found.account.passwordHash = null;
-        found.account.mustChangePassword = true;
-        await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
-            'admin: ' + identity.label + ' reset the password for "' + found.account.email + '" (email link sent)');
-        var originBase = new URL(request.url).origin;
-        try {
-            await sendAccountSetupEmail(env, found.account, 'reset', originBase);
-            return json({ ok: true, email: found.account.email, emailSent: true });
-        } catch (e) {
-            return json({ ok: true, email: found.account.email, emailSent: false, emailError: String(e && e.message || e) });
-        }
+    // Admin-assisted reset is email-only now — no plaintext temp-password
+    // fallback shown in the admin UI. A temp password sent through a
+    // side-channel (Slack, in person) is a weaker credential handoff than a
+    // one-time link only the account's own inbox can redeem, and it's a
+    // real handoff to get wrong when the account being reset may have
+    // access outside the resetting admin's own bucket (see the
+    // authorizedOverAll check above). Account CREATION (provisionAccount)
+    // is unaffected — it still falls back to a shown-once temp password
+    // when Resend isn't configured, since a brand-new account has no
+    // password to protect yet.
+    if (!isEmailSendingConfigured(env)) {
+        return json({ ok: false, error: 'password reset requires email delivery to be configured (RESEND_API_KEY/RESEND_FROM_EMAIL) — there is no temp-password fallback for resets' }, 400);
     }
-    var tempPassword = genTempPassword();
-    found.account.passwordHash = await hashPassword(tempPassword);
+    found.account.passwordHash = null;
     found.account.mustChangePassword = true;
     await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
-        'admin: ' + identity.label + ' reset the password for "' + found.account.email + '"');
-    return json({ ok: true, email: found.account.email, tempPassword: tempPassword });
+        'admin: ' + identity.label + ' reset the password for "' + found.account.email + '" (email link sent)');
+    var originBase = new URL(request.url).origin;
+    try {
+        await sendAccountSetupEmail(env, found.account, 'reset', originBase);
+        return json({ ok: true, email: found.account.email, emailSent: true });
+    } catch (e) {
+        return json({ ok: true, email: found.account.email, emailSent: false, emailError: String(e && e.message || e) });
+    }
 }
 
 // ── Root accounts (email/password, full/unscoped access - a normal-use
