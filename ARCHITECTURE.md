@@ -314,6 +314,15 @@ cookbook-level detail there.
   it) down to buckets a submit would actually be allowed to target — the
   client-side check is never the real boundary, just avoids offering
   choices that would 403.
+- **Matched org configs carry a resolved `bucket` label** (`configs[].bucket`
+  on both `/check-access` and `/org-config-content`, via
+  `resolveConfigBucketLabels()`) — `null` for a root-owned config
+  (`bucketId: null`), otherwise that bucket's `.label`. Lets wo_tool.js
+  show "Name - Bucket" (e.g. "Default - Ireland") instead of a bare name,
+  so two configs sharing a name from different sites aren't
+  indistinguishable in the first-run installer or Setup > Profiles.
+  `installOrgConfig()` stores this labeled form as the installed profile's
+  own `name`, so it stays distinguishable later too, in Local Profiles.
 - **A bucket, by itself, never grants anything.** `evaluateAccess()` never
   reads `buckets.json` at all — a bucket only supplies an ancestor
   condition that gets prepended onto whatever `override`/`allow`/

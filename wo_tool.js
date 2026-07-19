@@ -38,7 +38,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26200.1045z';
+    var BUILD_ID = '26200.1054z';
     // Ultimate fallback ONLY — same key/contract as loader.js's
     // CONTACT_EMAIL_KEY (kept in sync manually, independent files). Real
     // value comes from /check-access's bucket-resolved contactEmail
@@ -1821,6 +1821,17 @@
         }
     }
 
+    // "Name - Bucket" (e.g. "Default - Ireland") when a bucket label is
+    // available (worker.js's resolveConfigBucketLabels()), so two configs
+    // that share a name from different sites/companies aren't
+    // indistinguishable in the installer or Setup > Profiles. Falls back to
+    // a bare name if the bucket couldn't be resolved (root-owned config,
+    // buckets.json hiccup, or an org config cached before this field
+    // existed) — never shows a stray " - " or "undefined".
+    function orgConfigDisplayName(c) {
+        return c.name + (c.bucket ? ' - ' + c.bucket : '');
+    }
+
     // Installs an org config through the same profile pipeline every
     // profile switch uses (backup-before-overwrite, register, activate,
     // applyProfile's settings-subset-merge + migration) — never
@@ -1848,7 +1859,7 @@
             var profileId = 'org_' + entry.id;
             var p = {
                 id: profileId,
-                name: entry.name,
+                name: orgConfigDisplayName(entry),
                 description: entry.description || '',
                 // Read from the uploaded content itself, not hardcoded -
                 // an admin config with no configVersion tag at all
@@ -3078,7 +3089,8 @@
         switchProfile: switchProfile,
         saveProfiles: saveProfiles,
         getProfiles: getProfiles,
-        CURRENT_CONFIG_VERSION: CURRENT_CONFIG_VERSION
+        CURRENT_CONFIG_VERSION: CURRENT_CONFIG_VERSION,
+        orgConfigDisplayName: orgConfigDisplayName
     };
 
     // A semver pre-release suffix (e.g. "0.15.1-beta1") marks a beta/dev build.
@@ -6855,7 +6867,7 @@
                     if (i === 0) selectedProfileId = c.id;
                     return '<label style="display:block;padding:6px;border:1px solid #333;border-radius:4px;margin-bottom:6px;cursor:pointer;">' +
                         '<input type="radio" name="__inst_profile" value="' + c.id + '" ' + (i === 0 ? 'checked' : '') + '> ' +
-                        '<b>' + c.name + '</b><br>' +
+                        '<b>' + orgConfigDisplayName(c) + '</b><br>' +
                         '<span style="color:#888;margin-left:20px;">' + (c.description || '') + '</span>' +
                         '</label>';
                 }).join('');
@@ -11831,14 +11843,14 @@
                 listDiv.innerHTML = list.map(function(c) {
                     var already = !!profiles['org_' + c.id];
                     return '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);margin-bottom:6px;background:var(--wo-field);">' +
-                        '<div style="font-size:11px;"><b>' + c.name + '</b><br><span style="color:var(--wo-muted);font-size:10px;">' + (c.description || '') + '</span></div>' +
+                        '<div style="font-size:11px;"><b>' + orgConfigDisplayName(c) + '</b><br><span style="color:var(--wo-muted);font-size:10px;">' + (c.description || '') + '</span></div>' +
                         '<button type="button" class="__pf_org_import wo-btn" data-id="' + c.id + '" style="font-size:11px;padding:4px 9px;">' + (already ? 'Re-import &amp; Switch' : 'Import &amp; Switch') + '</button>' +
                         '</div>';
                 }).join('');
                 listDiv.querySelectorAll('.__pf_org_import').forEach(function(btn) {
                     btn.onclick = function() {
                         var id = btn.getAttribute('data-id');
-                        var name = (byId[id] && byId[id].name) || id;
+                        var name = (byId[id] && orgConfigDisplayName(byId[id])) || id;
                         var profileId = 'org_' + id;
                         var already = !!profiles[profileId];
                         function proceed() {

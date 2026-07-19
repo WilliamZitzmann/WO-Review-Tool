@@ -235,6 +235,13 @@ seed(env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, 'version.json', {
         avwpUser.body.configs.every(function(c) { return !('bucketId' in c) && !('conditions' in c); }),
         avwpUser.body.configs);
 
+    var avwpConfigsById = {};
+    avwpUser.body.configs.forEach(function(c) { avwpConfigsById[c.id] = c; });
+    check('/check-access resolves a bucket-scoped config\'s label ("AVWP") so wo_tool.js can show "Name - Bucket"',
+        avwpConfigsById.cfg_avwp && avwpConfigsById.cfg_avwp.bucket === 'AVWP', avwpConfigsById.cfg_avwp);
+    check('...and a root-owned config (bucketId null) resolves bucket: null, not a stray label',
+        avwpConfigsById.cfg_universal && avwpConfigsById.cfg_universal.bucket === null, avwpConfigsById.cfg_universal);
+
     var content = await call('GET', '/org-config-content?token=' + encodeURIComponent(avwpUser.body.token));
     var contentById = {};
     (content.body.configs || []).forEach(function(c) { contentById[c.id] = c; });
@@ -243,6 +250,9 @@ seed(env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, 'version.json', {
         contentById.cfg_universal && contentById.cfg_universal.content.rules[0].id === 'r1' &&
         contentById.cfg_avwp && contentById.cfg_avwp.content.rules[0].id === 'r2',
         content.body);
+    check('/org-config-content ALSO resolves the same bucket label (installOrgConfig() stores its own name FROM this response, not /check-access\'s)',
+        contentById.cfg_avwp && contentById.cfg_avwp.bucket === 'AVWP' && contentById.cfg_universal && contentById.cfg_universal.bucket === null,
+        { avwp: contentById.cfg_avwp && contentById.cfg_avwp.bucket, universal: contentById.cfg_universal && contentById.cfg_universal.bucket });
 
     var contentNoMatches = await call('GET', '/org-config-content?token=' + encodeURIComponent(nonAvwpButGranted.body.token));
     check('/org-config-content for a token with only the universal config match returns exactly that one',

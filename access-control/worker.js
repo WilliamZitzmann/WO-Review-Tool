@@ -512,6 +512,26 @@ async function handleBootstrap(env, ctx) {
     });
 }
 
+// Best-effort bucket-label resolution for a granted user's matched org
+// configs, so wo_tool.js's installer/Setup > Profiles can show "Name -
+// Bucket" instead of a bare name when more than one config could apply
+// (e.g. "Default" from two different sites is otherwise indistinguishable).
+// Same fail-open reasoning as resolveContactEmailForUser below: a
+// buckets.json hiccup just means the label is omitted, never blocks the
+// grant/config match itself.
+async function resolveConfigBucketLabels(matchedConfigs, env, ctx) {
+    if (!matchedConfigs.length) return matchedConfigs;
+    var byId = {};
+    try {
+        var bucketsDoc = await loadBucketsDocCached(env, ctx);
+        byId = bucketsById(bucketsDoc.buckets);
+    } catch (e) {}
+    return matchedConfigs.map(function(c) {
+        var node = c.bucketId != null ? byId[c.bucketId] : null;
+        return { id: c.id, name: c.name, description: c.description || '', bucket: node ? node.label : null };
+    });
+}
+
 // Best-effort contact-email resolution — used for BOTH a granted and a
 // denied /check-access result (a denied user still needs to know who to
 // ask for access), so it's factored out and called unconditionally rather
@@ -603,6 +623,7 @@ async function handleCheckAccess(request, env, ctx) {
     }
 
     var contactEmail = await resolveContactEmailForUser(user, env, ctx);
+    var configsWithLabels = await resolveConfigBucketLabels(matchedConfigs, env, ctx);
 
     var token = await makeToken(env.TOKEN_SECRET, {
         grants: result.grants,
@@ -611,7 +632,7 @@ async function handleCheckAccess(request, env, ctx) {
     });
     return json({
         granted: true, grants: result.grants, token: token, contactEmail: contactEmail,
-        configs: matchedConfigs.map(function(c) { return { id: c.id, name: c.name, description: c.description || '' }; }),
+        configs: configsWithLabels,
     });
 }
 
@@ -704,6 +725,15 @@ async function handleGetOrgConfigContent(request, env, ctx) {
     var byId = {};
     (indexDoc.configs || []).forEach(function(c) { byId[c.id] = c; });
 
+    // Same "Name - Bucket" label resolution as /check-access's configs
+    // list (resolveConfigBucketLabels) — this response is what
+    // installOrgConfig() actually stores as the profile's own `name`, so
+    // without this the label would revert to the bare name the moment a
+    // config gets installed, even though the picker showed it labeled.
+    var metasInOrder = ids.map(function(id) { return byId[id]; }).filter(Boolean);
+    var labeledById = {};
+    (await resolveConfigBucketLabels(metasInOrder, env, ctx)).forEach(function(c) { labeledById[c.id] = c; });
+
     var results = [];
     for (var i = 0; i < ids.length; i++) {
         var id = ids[i];
@@ -717,7 +747,8 @@ async function handleGetOrgConfigContent(request, env, ctx) {
         }
         var content;
         try { content = JSON.parse(raw); } catch (e) { continue; }
-        results.push({ id: id, name: meta.name, description: meta.description || '', content: content });
+        var labeled = labeledById[id];
+        results.push({ id: id, name: meta.name, description: meta.description || '', bucket: labeled ? labeled.bucket : null, content: content });
     }
     return json({ configs: results });
 }

@@ -17,6 +17,7 @@ const FILES = [
     'config_version_test.js',
     'revoke_banner_test.js',
     'feedback_tab_test.js',
+    'org_config_bucket_label_test.js',
 ];
 
 const fs = require('fs');
