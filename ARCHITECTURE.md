@@ -1842,13 +1842,11 @@ never finishes.
 
 `sandbox.html` (repo root, git-tracked, never deployed/served by the
 Worker) is a plain static host page: it seeds `localStorage` with dev+beta
-grants and a starter rules config (skips the first-run installer, which
-needs a live Worker round trip this has nothing to talk to), then loads
-the real `wo_tool.js` via a relative `<script src="wo_tool.js">` — the
-exact same file pushed to both repos, never forked/trimmed for sandbox
-purposes; only the host page fakes things. Open it directly in a browser
-(or `node -e "require('http')..."`/any static server if `file://`
-localStorage misbehaves).
+grants and a rules/scan config, then loads the real `wo_tool.js` via a
+relative `<script src="wo_tool.js">` — the exact same file pushed to both
+repos, never forked/trimmed for sandbox purposes; only the host page fakes
+things. Open it directly in a browser (or `node -e "require('http')..."`/
+any static server if `file://` localStorage misbehaves).
 
 **Seeding is idempotent** (`seedIfAbsent()` — only writes a key if it's
 currently absent), so a reload never wipes an imported/edited config, scan
@@ -1857,31 +1855,70 @@ actually work in across sessions, not a demo that resets itself. A "Reset
 sandbox to defaults" link clears every `__wo_*` key and reloads, for
 starting over deliberately.
 
-**Scan actually works** — a fake sample WO tab (plain `<label>`/`<input>`
-elements, not a Maximo DOM replica) is seeded alongside matching
-`__wo_field_config` (FKEY) entries pointing at each input's `id`, the same
-shape a real "pick a field" click on Maximo would have written
-(`resolveField()`'s `findElById(idAtPickTime)` path — see its own comment
-in `wo_tool.js`). The seeded scan config uses `scans: []` (no steps), so
-`runScan()`'s initial `mergeSnapshot(extractSnapshotFull())` already
-captures everything before the (empty) step loop — no `sendEvent`/tab-
-switching machinery needed; a no-op `window.sendEvent` stub is seeded
-anyway, purely defensive, in case a rules config with real scan steps ever
-gets imported here. One sample rule (`r_sample`) exercises real pass/fail
-evaluation against the fake fields, not just capture.
+**The seeded config is a literal copy of wo_tool.js's own DEFAULT_CFG/
+DEFAULT_SCAN** (7 groups / 5 rules, real `waitFor`/`waitTable`/`eventType`
+values) — not a toy stand-in. Seeded explicitly (not left absent to fall
+through to `getCfg()`'s own live DEFAULT_CFG fallback) because an ABSENT
+`__wo_rules_config` is what triggers the real first-run installer modal,
+which needs a live Worker round trip this sandbox has nothing to talk to.
+Keep the copy in sandbox.html in sync with wo_tool.js's real DEFAULT_CFG/
+DEFAULT_SCAN if either ever changes — same discipline as the
+`EPHEMERAL_KEYS`/whoami-mapping duplication below, a real (if currently
+undetected) drift risk, not just a comment.
 
-**Tables remain unsupported, on purpose** — Maximo's table markup
-(`_ttrow_`/`_tdrow_`/`_tbod_` id conventions, column-index markers) is a
-much deeper reverse-engineering exercise than field capture; a rule/group
-referencing a table shows "not rendered" here, same as any other missing
-table on a real page. `whoami()` formulas and the beta_2 REST helpers
-(`domain()`/`assetWOHistory()`/etc.) also need a real Maximo backend and
-just come back empty/no-op.
+**Fields, tables, tabs, AND a dialog all work**, mimicking the exact
+Maximo DOM id conventions the real tool's scan/table code looks for:
+- **Fields** — `<label>`/`<input>` pairs plus matching `__wo_field_config`
+  (FKEY) entries pointing at each input's `id`, the same shape a real
+  "pick a field" click would have written (`resolveField()`'s
+  `findElById(idAtPickTime)` path).
+- **Tables** (Labor, Related Work Orders, the raw-prefix `m69f3c12d`
+  Downtime History) — real `_ttrow_[C:n]_ttitle-lb` header cells +
+  `_tdrow_[C:n]_statictext-lb[R:n]` data cells, deliberately NOT also
+  registered as FKEY `table-column` entries, since `extractSnapshotFull()`
+  always re-runs `discoverTableCols()` fresh regardless (auto-discovering
+  columns from that header markup) — one less thing to keep in sync with
+  the DOM by hand. A human-titled table also needs a `<prefix>-lb` title
+  label (`resolveLiveTablePrefix()`'s non-raw-prefix lookup path); the raw
+  `m69f3c12d` prefix doesn't (its `looksLikePrefix()` branch just checks
+  for `_tdrow_`/`_tbod_tempty` under that literal prefix).
+- **Tabs** — four tab-header `<button>`s with the exact ids
+  `DEFAULT_SCAN.woTabId`/`scans[].tabId` use, each toggling its panel's
+  `display`. `window.sendEvent` is a REAL implementation here (not a
+  no-op stub): `sendEvent('click', id, '')` looks up and clicks the
+  element with that `id`, the same call `runScan()` makes against a real
+  Maximo page.
+- **Dialog** — a `#dialogholder` (Downtime, `eventType: 'MANDWNTIME'`,
+  `app: 'wotrack'`) containing the `m69f3c12d` table + a Cancel button
+  whose id ends in `-pb`. The trigger element (`[eventtype="MANDWNTIME"]`)
+  is always present in the DOM (just `display:none`), so
+  `openDialogTrigger()`'s survey-and-click fast path fires directly,
+  matching a real always-in-DOM Maximo menu action. **Must be
+  `position:absolute`, never `position:fixed`** — `dismissDialog()`/
+  `dialogIsGone()`/`openDialogTrigger()` all gate on `offsetParent !==
+  null` to detect visibility, and a `position:fixed` element's
+  `offsetParent` is ALWAYS `null` per spec regardless of whether it's
+  actually shown. This was caught live: an earlier `position:fixed`
+  version made `dialogIsGone()` vacuously true the instant the dialog
+  opened (scanLog still logged a clean "OK", but `dismissDialog()`'s
+  Cancel-click path never actually ran) — a false-positive that would
+  have shipped unnoticed without checking the dialog's actual DOM state
+  after a scan, not just the scanLog text.
 
-Verified end-to-end in a real Chrome tab (not just jsdom): panel renders
-docked, Setup opens, Scan populates all 6 sample fields and evaluates
-`r_sample` to a real pass, an edited config survives a reload, and Reset
-restores the seeded defaults.
+`whoami()` formulas and the beta_2 REST helpers (`domain()`/
+`assetWOHistory()`/etc.) still need a real Maximo backend and just come
+back empty/no-op — out of scope for a DOM-only fake.
+
+This mimics the tool's **default** config specifically — if a company's
+live, admin-published config uses different field/table names or scan
+steps, this fake DOM's ids won't match it and those parts of a scan won't
+populate; sandbox.html says so in its own header comment.
+
+Verified end-to-end in a real Chrome tab (not just jsdom): all 16 fields
++ all 3 tables populate, all 4 scan steps (3 tabs + 1 dialog) log "OK" in
+scanLog (not "TIMEOUT"), the dialog's DOM `display` is confirmed `none`
+after the scan (not just assumed from the log line), and all 5 DEFAULT_CFG
+rules evaluate to a real PASS against the seeded values.
 
 ---
 
