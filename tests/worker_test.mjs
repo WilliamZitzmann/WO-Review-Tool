@@ -17,7 +17,6 @@ const WORKER_PATH = path.join(__dirname, '..', 'access-control', 'worker.js');
 const env = {
     GITHUB_OWNER: 'WilliamZitzmann',
     GITHUB_REPO: 'WO-Review-Tool-Private',
-    GITHUB_PUBLIC_REPO: 'WO-Review-Tool',
     GITHUB_BRANCH: 'main',
     GITHUB_PAT: 'fake-pat',
     TOKEN_SECRET: 'fake-token-secret',
@@ -283,10 +282,14 @@ seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'configs/index.json', {
 });
 seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'configs/cfg_universal.json', { rules: [{ id: 'r1' }], scan: {}, fields: {}, state: {}, vars: [] });
 seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'configs/cfg_avwp.json', { rules: [{ id: 'r2' }], scan: {}, fields: {}, state: {}, vars: [] });
-seed(env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, 'version.json', {
+seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'version.json', {
     latest: '1.0.0', channels: { stable: '1.0.0', beta: '1.0.0' },
     versions: [{ version: '1.0.0', name: 'Initial', changes: [] }],
 });
+seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'loader.js', '// test loader.js stub\n');
+// wo_tool.min.js deliberately NOT seeded yet — the first /tool test below
+// checks the fallback-to-readable-source path before it's added.
+seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'wo_tool.js', '// wo_tool.js readable source stub\n');
 
 (async function main() {
     // ── Regular-user regression (blacklist-shape + condition-based
@@ -294,8 +297,37 @@ seed(env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, 'version.json', {
     var boot = await call('GET', '/bootstrap');
     check('bootstrap returns maximoHosts + requiredFields', boot.status === 200 && Array.isArray(boot.body.requiredFields), boot.body);
 
+    // ── /loader.js, /version.json — unauthenticated, served from the
+    // private repo (the public repo is no longer a runtime dependency for
+    // bookmarklet.js/wo_tool.js's self-update checker) ──
+    var loaderResp = await call('GET', '/loader.js');
+    check('GET /loader.js serves private repo loader.js unauthenticated',
+        loaderResp.status === 200 && loaderResp.body === '// test loader.js stub\n', loaderResp.body);
+    check('GET /loader.js sets a JS content-type',
+        (loaderResp.headers.get('content-type') || '').indexOf('javascript') !== -1, loaderResp.headers.get('content-type'));
+
+    var versionResp = await call('GET', '/version.json');
+    check('GET /version.json serves private repo version.json unauthenticated',
+        versionResp.status === 200 && versionResp.body.latest === '1.0.0', versionResp.body);
+
     var okUser = await call('POST', '/check-access', { body: { fields: { username: 'someuser', insertSite: 'AVWP' } } });
     check('allow rule grants access', okUser.body.granted === true && okUser.body.grants.includes('user'), okUser.body);
+
+    // ── /tool — prefers wo_tool.min.js, falls back to wo_tool.js when the
+    // minified file doesn't exist at that ref (e.g. a tag cut before
+    // minification existed) ──
+    var toolBeforeMin = await call('GET', '/tool?token=' + encodeURIComponent(okUser.body.token));
+    check('GET /tool falls back to wo_tool.js when wo_tool.min.js is absent',
+        toolBeforeMin.status === 200 && toolBeforeMin.body === '// wo_tool.js readable source stub\n', toolBeforeMin.body);
+
+    seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'wo_tool.min.js', '// wo_tool.min.js minified stub\n');
+    var okUser2 = await call('POST', '/check-access', { body: { fields: { username: 'someuser', insertSite: 'AVWP' } } });
+    var toolAfterMin = await call('GET', '/tool?token=' + encodeURIComponent(okUser2.body.token));
+    check('GET /tool prefers wo_tool.min.js once it exists',
+        toolAfterMin.status === 200 && toolAfterMin.body === '// wo_tool.min.js minified stub\n', toolAfterMin.body);
+
+    var toolBadToken = await call('GET', '/tool?token=garbage');
+    check('GET /tool rejects an invalid token', toolBadToken.status === 403, toolBadToken.body);
 
     var blockedUser = await call('POST', '/check-access', { body: { fields: { username: 'JAMESXW', insertSite: 'AVWP' } } });
     check('blacklist entry ({bucketId,conditions} shape) still blocks', blockedUser.body.granted === false, blockedUser.body);

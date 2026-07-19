@@ -38,7 +38,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26200.1149z';
+    var BUILD_ID = '26200.2202z';
     // Ultimate fallback ONLY — same key/contract as loader.js's
     // CONTACT_EMAIL_KEY (kept in sync manually, independent files). Real
     // value comes from /check-access's bucket-resolved contactEmail
@@ -2276,7 +2276,6 @@
     // any other "beta_N" as a specific feature flag.
     var GRANTS_KEY = '__wo_grants';
     var DEV_UNLOCK_KEY = '__wo_dev_unlock'; // retired key name, kept only so EPHEMERAL_KEYS still cleans up any leftover value from before this change
-    var REPO_RAW_BASE = 'https://raw.githubusercontent.com/WilliamZitzmann/WO-Review-Tool';
     // Same Worker loader.js talks to for the bookmarklet's first load — the
     // tool's own source now lives in a private repo the Worker gates, so
     // every self-update fetch has to go through here too. Without this,
@@ -3215,7 +3214,7 @@
             setStatus('Update check disabled (see Settings)');
             return;
         }
-        var GITHUB_VERSION_URL = REPO_RAW_BASE + '/main/version.json';
+        var GITHUB_VERSION_URL = WORKER_BASE_URL + '/version.json';
         setStatus('Checking for updates...');
         var xhr = new XMLHttpRequest();
         xhr.open('GET', GITHUB_VERSION_URL, true);
@@ -11315,7 +11314,7 @@
             }
             refreshVersionPicker();
             var xhrV = new XMLHttpRequest();
-            xhrV.open('GET', REPO_RAW_BASE + '/main/version.json', true);
+            xhrV.open('GET', WORKER_BASE_URL + '/version.json', true);
             xhrV.onload = function() {
                 if (xhrV.status !== 200) return;
                 try {

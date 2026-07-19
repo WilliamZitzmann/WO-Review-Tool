@@ -10,24 +10,24 @@ Encryption of the request body was considered and deliberately skipped — TLS a
 
 ## 1. Create a second, private repo
 
-The Worker needs somewhere private to fetch `wo_tool.js` and `permissions.json` from. **Don't make your existing public repo private** — that repo also serves GitHub Pages (the guide) and the public orchestration files (`bookmarklet.js`, `loader.js`, `version.json`, `configs/`), none of which are sensitive, and flipping it private would need a paid GitHub plan to keep Pages working, plus it'd break every currently-installed bookmarklet the moment you did it.
+The Worker needs somewhere private to fetch `wo_tool.js`, `permissions.json`, `loader.js`, and `version.json` from. **`bookmarklet.js`** — the one-line snippet a user pastes into their own bookmarks bar once at install time — is the only piece that still needs to live somewhere publicly readable, since GitHub Pages (the guide/install page) serves it from the public repo and it's never fetched at runtime by anything. Everything `bookmarklet.js` triggers after that point (`loader.js`, `version.json`, `wo_tool.js`, `configs/`) is fetched exclusively through the Worker's own routes, sourced from the private repo — the public repo is not a runtime dependency for any of it. (Making the public repo private outright would still need a paid GitHub plan to keep Pages working, so that's a separate future step if you want to go that far — not required for any of the above.)
 
 Instead:
 1. Create a new **private** repo, e.g. `WO-Review-Tool-Private`.
-2. Copy `wo_tool.js` into it.
+2. Copy `wo_tool.js`, `loader.js`, and `version.json` into it.
 3. Create `permissions.json` in it — use `access-control/permissions.example.json` (in the public repo) as the template. **This is the only file with the real allow/deny/override rules and real usernames — it must only ever exist in the private repo.**
-4. Going forward, whenever you update `wo_tool.js`, push it to *both* repos (public, for anyone still on the old direct-fetch bookmarklet during rollout, and private, for the new gated flow) until you're fully cut over — then stop updating the public copy.
+4. Going forward, whenever you update `wo_tool.js`/`loader.js`/`version.json`, push straight to the private repo (`scripts/push-private.sh`) — the public repo's copies are dev-source only now, not what anything fetches live.
 
 ## 2. Create a GitHub fine-grained PAT
 
 GitHub Settings → Developer settings → Fine-grained personal access tokens → Generate new token.
-- Repository access: **both** `WO-Review-Tool-Private` **and** `WO-Review-Tool` (a fine-grained PAT can cover more than one repo — this is deliberate: the admin layer below needs to write `permissions.json`/`buckets.json`/`adminGroups.json`/`admin.html` in the private repo AND `version.json` in the public repo, and a single Worker environment is the real trust boundary regardless of PAT count, so splitting into two PATs wouldn't buy real isolation, just an extra secret to rotate).
-- Permissions: **Contents: Read and write** on both repos, plus **Issues: Read and write** on the private repo (needed for the `/feedback` endpoint, which files bug/suggestion reports as Issues there). Nothing else.
+- Repository access: `WO-Review-Tool-Private` (the Worker only ever reads/writes the private repo at runtime — the public repo doesn't need PAT access at all).
+- Permissions: **Contents: Read and write** on the private repo, plus **Issues: Read and write** (needed for the `/feedback` endpoint, which files bug/suggestion reports as Issues there). Nothing else.
 - Set an expiration and put a calendar reminder to rotate it — still a real credential, even scoped this tightly.
 
 Copy the token now; GitHub won't show it again.
 
-If you already have a PAT deployed from before the admin layer existed, it only has Contents:Read-only on the private repo — edit its permissions on GitHub (fine-grained PATs can be edited in place, no need to regenerate) to add Contents:Read-and-write on both repos, or every `/admin/*` write will fail with a GitHub 403.
+If you already have a PAT scoped to both repos from before `loader.js`/`version.json` moved private, it's fine to leave as-is or narrow it to just the private repo — the Worker no longer calls the GitHub API against the public repo either way.
 
 ## 3. Install Wrangler and log in
 
@@ -72,7 +72,6 @@ wrangler secret put RESEND_API_KEY
 Open `wrangler.toml` and confirm/change:
 - `GITHUB_OWNER` — your GitHub username.
 - `GITHUB_REPO` — the private repo's name from step 1.
-- `GITHUB_PUBLIC_REPO` — the public repo's name (`WO-Review-Tool` by default) — used by the admin tool's Version tab to read/write `version.json`.
 - `GITHUB_BRANCH` — usually `main`.
 - `RESEND_FROM_EMAIL` — only matters if you set `RESEND_API_KEY` above; the "from" address on account-setup/reset emails. `onboarding@resend.dev` works immediately with zero domain verification, but only delivers to the email your Resend account itself is registered under — fine for testing, swap to a verified real address before delegating to anyone else.
 
@@ -84,7 +83,7 @@ wrangler deploy
 
 Wrangler prints the deployed URL, something like `https://wo-review-tool-access.<your-subdomain>.workers.dev`. That's your `WORKER_BASE_URL` — you'll paste it into `loader.js`.
 
-## 7. Test the three endpoints
+## 7. Test the endpoints
 
 ```
 curl https://<your-worker-url>/bootstrap
@@ -102,6 +101,12 @@ Should return `{"granted":true,"tier":"...", "token":"..."}` for a user your rul
 curl "https://<your-worker-url>/tool?token=<token from above>"
 ```
 Should return the full `wo_tool.js` source. Try it again with the same token after ~2 minutes — it should now 403 (expired).
+
+```
+curl https://<your-worker-url>/loader.js
+curl https://<your-worker-url>/version.json
+```
+Both unauthenticated (same reasoning as `/bootstrap` — nothing sensitive in either file), sourced from the private repo. `bookmarklet.js` (in the public repo, pasted into a bookmarks bar once at install time) points at `/loader.js`; `wo_tool.js`'s own self-update checker points at `/version.json` — neither hits `raw.githubusercontent.com` on the public repo anymore.
 
 ## 7b. Set up the admin tool
 

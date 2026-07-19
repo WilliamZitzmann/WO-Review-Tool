@@ -13,28 +13,44 @@ permission-rule cookbook, see `access-control/PERMISSIONS_GUIDE.md`.
 
 ## 1. The three moving pieces
 
-| Piece | Lives in | What it does |
-|---|---|---|
-| `bookmarklet.js` | public repo | Permanent, never-changing one-liner the user actually bookmarks. Fetches `loader.js` (cached fallback if offline), evals it. |
-| `loader.js` | public repo | Real logic for domain-gating, whoami, and the access check. Fetched fresh (or from cache) on every click. |
-| `wo_tool.js` | **private repo only** | The actual tool. Fetched through the Worker, never from a public URL. |
+| Piece | Lives in | Fetched from | What it does |
+|---|---|---|---|
+| `bookmarklet.js` | public repo | pasted into the bookmarks bar once, never re-fetched | Permanent, never-changing one-liner the user actually bookmarks. Fetches `loader.js` from the Worker (cached fallback if offline), evals it. |
+| `loader.js` | **private repo** (dev-edited copy also kept in the public repo — see below) | `GET /loader.js` on the Worker | Real logic for domain-gating, whoami, and the access check. Fetched fresh (or from cache) on every click. |
+| `wo_tool.js` | **private repo only** | `GET /tool` on the Worker (token-gated) | The actual tool. Never from a public URL. |
 
 Split rationale: `bookmarklet.js` never changes so installing it is a one-time
-action. `loader.js` is public because it has to run *before* we know if the
-user is even allowed to see the tool (domain check, whoami, access request) —
-nothing in it is sensitive. `wo_tool.js` is the actual product, gated behind
-the private repo + Worker so a revoked user's cached copy of the bookmarklet
-can't just keep working forever, and so the tool source + permission rules
-aren't sitting on a public URL for anyone to read.
+action — it's the only piece that still needs to sit somewhere public (GitHub
+Pages, for the install page to serve it from), and it's never re-fetched at
+runtime so that's harmless. `loader.js` has to run *before* we know if the
+user is even allowed to see the tool (domain check, whoami, access request),
+so nothing in it is sensitive — but it's still served through the Worker from
+the private repo, not `raw.githubusercontent.com`, so **the public repo is
+not a runtime dependency for it** (a prerequisite for eventually not needing
+the public repo to exist at all). `wo_tool.js` is the actual product, gated
+behind the private repo + Worker so a revoked user's cached copy of the
+bookmarklet can't just keep working forever, and so the tool source and
+permission rules aren't sitting on a public URL for anyone to read; the
+private repo's served copy is `wo_tool.min.js` (identifier-mangled, see
+`scripts/minify-tool.js`) — `wo_tool.js` stays alongside it as the readable
+source of truth, never served directly, except as a fallback for pinned
+version tags cut before minification existed.
+
+Dev-edit workflow: `wo_tool.js`, `loader.js`, and `version.json` are all
+hand-edited in the **public repo's checkout** (this one) during development,
+then pushed to the private repo (the one anything actually fetches from) via
+`scripts/push-private.sh`, which also generates `wo_tool.min.js` at push
+time. The public repo's copies of `loader.js`/`version.json` are dev source
+only — nothing fetches them there anymore.
 
 Real repos:
 - Public: `github.com/WilliamZitzmann/WO-Review-Tool` — `bookmarklet.js`,
-  `loader.js`, `version.json`, `index.html` (Guide), `access-control/`
-  (Worker source + docs + a *template* permissions file), `CONSOLE_COMMANDS.md`,
-  this file.
-- Private: `github.com/WilliamZitzmann/WO-Review-Tool-Private` — `wo_tool.js`
-  and the *real* `permissions.json` (real usernames/rules — never in the
-  public repo).
+  dev-source copies of `loader.js`/`version.json`/`wo_tool.js`, `index.html`
+  (Guide), `access-control/` (Worker source + docs + a *template* permissions
+  file), `CONSOLE_COMMANDS.md`, this file.
+- Private: `github.com/WilliamZitzmann/WO-Review-Tool-Private` — the served
+  copies of `wo_tool.js`/`wo_tool.min.js`/`loader.js`/`version.json`, and the
+  *real* `permissions.json` (real usernames/rules — never in the public repo).
 - Worker: `wo-review-tool-access.williamzitzmann.workers.dev` (Cloudflare,
   free tier) — `access-control/worker.js`, deployed with `wrangler deploy`.
 
@@ -245,7 +261,7 @@ it here, keep that doc current instead.
 ### 3.4 Admin layer (`/admin/*`) — delegated hierarchical management
 
 A separate surface on the same Worker for managing `permissions.json`,
-`buckets.json`, `adminGroups.json`, and (public repo) `version.json`
+`buckets.json`, `adminGroups.json`, and `version.json` (all private repo)
 without hand-editing on GitHub. Fully independent trust model from
 everything above — regular-user access is a client-reported whoami claim;
 admin access is a bearer token, checked entirely server-side, so it works
@@ -1767,33 +1783,42 @@ everyone.
 1. Bump `TOOL_VERSION` in `wo_tool.js`. **Do not** touch `version.json`
    (`latest`, `channels`, or add a `versions[]` entry) — that's what keeps
    stable/beta users unaffected.
-2. Commit + push `wo_tool.js` to the **public** repo's `main`. The public
-   repo's `.git/hooks/pre-commit` auto-rewrites `BUILD_ID` (see §9.3) to the
+2. Commit + push `wo_tool.js` (and `loader.js`, if it also changed) to the
+   **public** repo's `main` — this is the dev-edit checkout, but nothing
+   fetches from it at runtime anymore (see §1). The public repo's
+   `.git/hooks/pre-commit` auto-rewrites `BUILD_ID` (see §9.3) to the
    current UTC timestamp whenever `wo_tool.js` is part of the commit — no
    manual bump needed, it re-stages the file itself.
-3. Same file to the **private** repo's `main` — `scripts/push-private.sh
-   "<commit message>"` (v0.24.0) collapses the whole routine into one
-   command: clones fresh into a `mktemp -d` scratch dir (**still no
+3. Push to the **private** repo's `main` (the copy the Worker actually
+   serves) — `scripts/push-private.sh "<commit message>"` (v0.24.0;
+   extended to cover `loader.js`/`version.json`/minification as of the
+   "eventually delete public" migration) collapses the whole routine into
+   one command: clones fresh into a `mktemp -d` scratch dir (**still no
    persistent local checkout** — confirmed with the user, v0.22.0; the
    script deliberately preserves that, it doesn't change the pattern),
-   copies the SAME `pre-commit` hook into the fresh clone (hooks are
-   local-only, never come along with `git clone`, so this step can't be
-   skipped or `BUILD_ID` silently goes stale there), copies `wo_tool.js` in
-   (leaves `permissions.json` alone), commits, pushes `main` — **no tag
-   yet** — and cleans up the scratch dir automatically via `trap ... EXIT`.
-   Run it from the public repo's root.
+   copies `wo_tool.js`/`loader.js`/`version.json` in, re-stamps `BUILD_ID`
+   itself (explicitly, not via a copied hook — see §9.3 for why the timing
+   matters now that minification reads it), runs `scripts/minify-tool.js`
+   to produce `wo_tool.min.js`, commits all four files, pushes `main` — **no
+   tag yet** — and cleans up the scratch dir automatically via
+   `trap ... EXIT`. Run it from the public repo's root.
 4. Tell the user it's live on dev and wait for them to test and explicitly
    say when to promote.
 
 ### 9.2 Stage 2 — promote to stable/beta (only on explicit go-ahead)
 
-1. Add the `version.json` changelog entry (public repo) describing the
-   already-pushed changes.
+1. Add the `version.json` changelog entry describing the already-pushed
+   changes — `version.json` now lives in the **private** repo (served via
+   `GET /version.json` on the Worker); edit it through the admin tool's
+   Version tab (root-only, writes via `/admin/version`) rather than a manual
+   commit.
 2. Tag `vX.Y.Z` on **both** repos at the commit already pushed in stage 1
    (don't re-push code — it's already there) — pinned-version installs and
    `?version=` silently fail to resolve on whichever repo is missing the tag.
 3. Update `version.json`'s `latest` and the relevant `channels` entries
-   (`stable`, and `beta` if applicable) to `X.Y.Z`, commit, push (public repo).
+   (`stable`, and `beta` if applicable) to `X.Y.Z` via the same admin tool
+   Version tab — it validates that both point at a real `versions[]` entry
+   before writing.
 4. If `access-control/worker.js` changed: `wrangler deploy` (needs
    `CLOUDFLARE_API_TOKEN` — not persisted across sessions, re-provided each
    time it's needed).
@@ -1819,24 +1844,31 @@ surfaced dev-grant-only via `grantsStatusLine()` (prepended ahead of the
 existing grant labels) and a standalone line in Settings > Updates (no
 explanatory subtext there, by request — just the value).
 
-**It is enforced by the `pre-commit` git hook, not by memory or discipline**:
-`.git/hooks/pre-commit` in the public repo greps staged files for
-`wo_tool.js`, and if present, `sed`-rewrites the `BUILD_ID` literal to
-`date -u +"%y%j.%H%M"z` and re-stages the file — so a stale/forgotten
-`BUILD_ID` is structurally impossible on every commit that touches the file,
-on either repo (§9.1 step 3 covers the private repo's copy of the same
-hook, installed fresh by `scripts/push-private.sh` every run since hooks
-aren't part of `git clone`). Since `.git/hooks/` is never tracked by git, a
-fresh clone anywhere else (a new machine, a CI runner) needs the hook file
-recreated manually before it'll take effect there — see the exact `sed`
-line in the hook file itself if it's ever missing.
+**It is enforced by the `pre-commit` git hook on the public repo, and by an
+equivalent explicit step in `push-private.sh` on the private repo — not by
+memory or discipline**: `.git/hooks/pre-commit` in the public repo greps
+staged files for `wo_tool.js`, and if present, `sed`-rewrites the `BUILD_ID`
+literal to `date -u +"%y%j.%H%M"z` and re-stages the file, so a stale/
+forgotten `BUILD_ID` is structurally impossible on a public-repo commit.
+`push-private.sh` does the *same* `sed` rewrite itself, inline, rather than
+installing a copy of the hook into its scratch clone — deliberately, so the
+restamp happens (and is visible to) the minification step that runs right
+after it (`scripts/minify-tool.js`): if the hook restamped it instead, that
+would happen at `git commit` time, *after* `wo_tool.min.js` had already been
+built from the pre-restamp value, leaving the minified file showing a stale
+`BUILD_ID`. Since `.git/hooks/` is never tracked by git, a fresh public-repo
+clone elsewhere (a new machine, a CI runner) needs the hook file recreated
+manually before it'll take effect there — see the exact `sed` line in the
+hook file itself if it's ever missing.
 
 The same public-repo hook (v0.26.0+) also runs `scripts/
 sync-whoami-mapping.js` whenever `loader.js` OR `wo_tool.js` is staged —
-see §10's "known rough edges" entry on why. This one is public-repo-only:
-`loader.js` doesn't exist in the private repo, so there's nothing to sync
-against there — the private repo's `wo_tool.js` is always just a mirrored
-copy pushed by `scripts/push-private.sh`, already in sync by construction.
+see §10's "known rough edges" entry on why. This one only ever needs to run
+in the public repo (the dev-edit checkout, where hand-edits to either file
+actually happen): `scripts/push-private.sh` copies whatever the public
+repo's `wo_tool.js`/`loader.js` already have — already in sync by
+construction — into the private repo, so there's nothing left to reconcile
+there.
 
 ### 9.4 Auto-update banner: one-click re-enable
 
@@ -2126,8 +2158,11 @@ maintenance.json`'s content was reused as the seed for the real org
 configs ("Default"/"Maintenance", now living in the private repo) before
 this file's own copies were deleted — nothing was lost, just relocated.
 
-`REPO_RAW_BASE` (`wo_tool.js`, still present — used by `checkForUpdate()`
-for `version.json`) is what these pointed at.
+`REPO_RAW_BASE` is what these pointed at — since removed from `wo_tool.js`
+entirely (as of the "eventually delete public repo" migration, §1):
+`checkForUpdate()` and the Settings version picker both now fetch
+`version.json` from `WORKER_BASE_URL + '/version.json'` instead, same as
+every other private-repo-sourced fetch.
 
 ```js
 // ── GitHub-hosted preset fetch (configs/index.json + configs/<id>.json) ──

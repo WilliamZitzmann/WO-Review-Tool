@@ -180,7 +180,7 @@
  *                            passwords — see isEmailSendingConfigured().
  *
  * Required vars (wrangler.toml [vars]):
- *   GITHUB_OWNER, GITHUB_REPO (private repo), GITHUB_PUBLIC_REPO, GITHUB_BRANCH
+ *   GITHUB_OWNER, GITHUB_REPO (private repo), GITHUB_BRANCH
  *   RESEND_FROM_EMAIL      — optional, not sensitive (just an address) — see
  *                            RESEND_API_KEY above.
  */
@@ -702,10 +702,46 @@ async function handleGetTool(request, env, ctx) {
     var version = url.searchParams.get('version');
     var ref = version ? 'v' + version.replace(/^v/, '') : null;
     var ttl = ref ? TOOL_SRC_CACHE_TTL_PINNED : TOOL_SRC_CACHE_TTL_UNPINNED;
-    var src = await cachedFetchPrivateFile(env, ctx, 'wo_tool.js', ref, ttl);
+    // wo_tool.min.js is what every build going forward actually serves —
+    // see scripts/minify-tool.js. Tags cut before minification existed only
+    // have wo_tool.js at that ref, so a pinned request for one of those
+    // falls back to the readable file rather than 404ing.
+    var src;
+    try {
+        src = await cachedFetchPrivateFile(env, ctx, 'wo_tool.min.js', ref, ttl);
+    } catch (e) {
+        src = await cachedFetchPrivateFile(env, ctx, 'wo_tool.js', ref, ttl);
+    }
     return new Response(src, {
         status: 200,
         headers: Object.assign({ 'Content-Type': 'application/javascript; charset=utf-8' }, corsHeaders()),
+    });
+}
+
+// bookmarklet.js's one and only fetch target. Unauthenticated by design —
+// same reasoning as /bootstrap: there's nothing here an unauthenticated
+// caller couldn't already get by installing the bookmarklet themselves, and
+// gating it would mean embedding a credential in a plaintext bookmarklet
+// anyone can inspect. Short TTL (same as the tool's own dev-channel/unpinned
+// fetch) since this always tracks the private repo's main branch, not a tag.
+async function handleGetLoader(env, ctx) {
+    var src = await cachedFetchPrivateFile(env, ctx, 'loader.js', null, TOOL_SRC_CACHE_TTL_UNPINNED);
+    return new Response(src, {
+        status: 200,
+        headers: Object.assign({ 'Content-Type': 'application/javascript; charset=utf-8' }, corsHeaders()),
+    });
+}
+
+// wo_tool.js's self-update checker (checkForUpdate(), the Settings version
+// picker) and /admin/version's root-only editor both read/write this same
+// file — this route is the read side for the tool itself, unauthenticated
+// for the same reason as handleGetLoader above (a version manifest isn't
+// sensitive, and gating it would gain nothing).
+async function handleGetVersionJson(env, ctx) {
+    var src = await cachedFetchPrivateFile(env, ctx, 'version.json', null, TOOL_SRC_CACHE_TTL_UNPINNED);
+    return new Response(src, {
+        status: 200,
+        headers: Object.assign({ 'Content-Type': 'application/json; charset=utf-8' }, corsHeaders()),
     });
 }
 
@@ -908,8 +944,6 @@ async function deleteFile(env, owner, repo, path, sha, message) {
 function fetchPrivateFileWithSha(env, path) { return fetchFileWithSha(env, env.GITHUB_OWNER, env.GITHUB_REPO, path); }
 function writePrivateFile(env, path, text, sha, message) { return writeFile(env, env.GITHUB_OWNER, env.GITHUB_REPO, path, text, sha, message); }
 function deletePrivateFile(env, path, sha, message) { return deleteFile(env, env.GITHUB_OWNER, env.GITHUB_REPO, path, sha, message); }
-function fetchPublicFileWithSha(env, path) { return fetchFileWithSha(env, env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, path); }
-function writePublicFile(env, path, text, sha, message) { return writeFile(env, env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, path, text, sha, message); }
 
 async function loadPermissionsLive(env) {
     var f = await fetchPrivateFileWithSha(env, 'permissions.json');
@@ -2272,11 +2306,11 @@ async function handleAdminDeleteGroup(request, env, groupId) {
     return json({ ok: true });
 }
 
-// ── /admin/version (public repo, root-only) ──
+// ── /admin/version (private repo, root-only) ──
 async function handleAdminGetVersion(request, env) {
     var identity = await resolveAdminIdentity(request, env);
     requireRoot(identity);
-    var f = await fetchPublicFileWithSha(env, 'version.json');
+    var f = await fetchPrivateFileWithSha(env, 'version.json');
     if (!f.exists) return notFound('version.json not found');
     return json({ doc: JSON.parse(f.text) });
 }
@@ -2294,8 +2328,8 @@ async function handleAdminPostVersion(request, env) {
         if (known.indexOf(doc.channels[ch]) === -1) badRequest('channels.' + ch + ' (' + doc.channels[ch] + ') does not match any versions[].version');
     });
 
-    var f = await fetchPublicFileWithSha(env, 'version.json');
-    await writePublicFile(env, 'version.json', JSON.stringify(doc, null, 2), f.sha,
+    var f = await fetchPrivateFileWithSha(env, 'version.json');
+    await writePrivateFile(env, 'version.json', JSON.stringify(doc, null, 2), f.sha,
         'admin: ' + identity.label + ' updated version.json');
     return json({ ok: true });
 }
@@ -2383,6 +2417,12 @@ export default {
             }
             if (url.pathname === '/tool' && request.method === 'GET') {
                 return await handleGetTool(request, env, ctx);
+            }
+            if (url.pathname === '/loader.js' && request.method === 'GET') {
+                return await handleGetLoader(env, ctx);
+            }
+            if (url.pathname === '/version.json' && request.method === 'GET') {
+                return await handleGetVersionJson(env, ctx);
             }
             if (url.pathname === '/org-config-content' && request.method === 'GET') {
                 return await handleGetOrgConfigContent(request, env, ctx);

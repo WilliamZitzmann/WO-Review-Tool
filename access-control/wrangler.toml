@@ -5,7 +5,6 @@ compatibility_date = "2025-01-01"
 [vars]
 GITHUB_OWNER = "WilliamZitzmann"
 GITHUB_REPO = "WO-Review-Tool-Private"
-GITHUB_PUBLIC_REPO = "WO-Review-Tool"
 GITHUB_BRANCH = "main"
 # Not sensitive (just an email address) — a var, not a secret. Account-
 # creation/reset emails send FROM this address via Resend. zitzmann.online

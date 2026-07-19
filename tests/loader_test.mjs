@@ -273,7 +273,7 @@ async function testDeniedContactEmailResolved() {
     // else in loader.js will ever call removeBanner() for it, so it needs
     // its own dismiss control or it sits on the page forever (the bug this
     // covers - see the "message sticks" fix in showBanner()).
-    var closeBtn = banner && banner.querySelector('span[title="Dismiss"]');
+    var closeBtn = banner && banner.querySelector('.__wo_close');
     check('[denied] banner has a dismiss control', !!closeBtn);
     if (closeBtn) closeBtn.onclick();
     check('[denied] clicking dismiss removes the banner',
