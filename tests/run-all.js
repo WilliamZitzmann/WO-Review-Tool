@@ -18,6 +18,8 @@ const FILES = [
     'revoke_banner_test.js',
     'feedback_tab_test.js',
     'org_config_bucket_label_test.js',
+    'profiles_kebab_test.js',
+    'scanlog_minimize_test.js',
 ];
 
 const fs = require('fs');

@@ -38,7 +38,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26200.1054z';
+    var BUILD_ID = '26200.1149z';
     // Ultimate fallback ONLY — same key/contract as loader.js's
     // CONTACT_EMAIL_KEY (kept in sync manually, independent files). Real
     // value comes from /check-access's bucket-resolved contactEmail
@@ -5387,6 +5387,29 @@
         localStorage.setItem('__wo_settings', JSON.stringify(s));
     }
 
+    // Hides just the step-by-step #__wo_scanlog (the "reading WO tab...",
+    // "scanning: X..." lines) to reclaim vertical space once you already
+    // trust the process - #__wo_status (e.g. "Scan Complete 11:02") and
+    // #__wo_summary (the rule output) stay visible either way, so the
+    // things you actually came to check are never hidden by this.
+    // Persisted the same way panelCollapsed is, so it survives a reload.
+    function setScanLogMinimized(minimized) {
+        if (!panel) return;
+        var scanLogEl = panel.querySelector('#__wo_scanlog');
+        if (scanLogEl) scanLogEl.style.display = minimized ? 'none' : '';
+        var btn = panel.querySelector('#__wo_scanlog_toggle');
+        if (btn) {
+            btn.setAttribute('aria-label', minimized ? 'Show scan log' : 'Minimize scan log');
+            btn.textContent = minimized ? '+' : '−';
+        }
+        var s = {};
+        try {
+            s = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+        } catch (e) {}
+        s.scanLogMinimized = minimized;
+        localStorage.setItem('__wo_settings', JSON.stringify(s));
+    }
+
     function injectPanelStyles() {
         if (document.getElementById('__wo_panel_style')) return;
         var css = "" +
@@ -5636,7 +5659,10 @@
             '<button id="__wo_exit" class="wo-btn wo-btn-danger">Exit</button>' +
             '</div>' +
             '</div>' +
-            '<div id="__wo_status" style="padding:6px 12px;color:#e3b341;font-size:11px;min-height:15px;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;white-space:pre-line;"></div>' +
+            '<div style="position:relative;background:#0d1117;flex-shrink:0;">' +
+            '<div id="__wo_status" style="padding:6px 28px 6px 12px;color:#e3b341;font-size:11px;min-height:15px;font-family:Consolas,monospace;white-space:pre-line;"></div>' +
+            '<button id="__wo_scanlog_toggle" type="button" aria-label="Minimize scan log" style="position:absolute;top:2px;right:4px;width:18px;height:18px;padding:0;line-height:1;border:1px solid #30363d;border-radius:4px;background:#161b22;color:#9aa4af;font-family:Consolas,monospace;font-size:12px;cursor:pointer;">−</button>' +
+            '</div>' +
             '<div id="__wo_scanlog" style="padding:0 12px 6px;font-size:10.5px;color:#9aa4af;max-height:80px;overflow-y:auto!important;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
             '<div id="__wo_summary" style="padding:0 12px 6px;font-size:11px;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
             // Deliberately NOT display:flex here. That was the actual root
@@ -5684,6 +5710,13 @@
         panel.querySelector('#__wo_collapse_btn').onclick = function() {
             setPanelCollapsed(!panel.classList.contains('is-collapsed'));
         };
+        panel.querySelector('#__wo_scanlog_toggle').onclick = function() {
+            var el = panel.querySelector('#__wo_scanlog');
+            setScanLogMinimized(!(el && el.style.display === 'none'));
+        };
+        try {
+            setScanLogMinimized(!!JSON.parse(localStorage.getItem('__wo_settings') || '{}').scanLogMinimized);
+        } catch (e) {}
         pushLayout(true);
         // Sleek floating tooltip instead of a native title=. Passing the
         // function itself (not its current return value) means the text is
@@ -5692,6 +5725,10 @@
         attachTooltip(panel.querySelector('#__wo_rescan'), scanBtnTooltipText);
         attachTooltip(panel.querySelector('#__wo_collapse_btn'), function() {
             return panel.classList.contains('is-collapsed') ? 'Expand panel' : 'Collapse panel';
+        });
+        attachTooltip(panel.querySelector('#__wo_scanlog_toggle'), function() {
+            var el = panel.querySelector('#__wo_scanlog');
+            return (el && el.style.display === 'none') ? 'Show scan log' : 'Minimize scan log';
         });
     }
 
@@ -11700,11 +11737,12 @@
                     localHtml += '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px;border:1px solid ' + (isActive ? 'var(--wo-pass)' : 'var(--wo-border)') + ';border-radius:var(--wo-r-ctl);margin-bottom:6px;background:var(--wo-field);">' +
                         '<div style="font-size:11px;"><b>' + (p.name || id) + '</b>' + (isActive ? ' <span style="color:var(--wo-pass);font-size:10px;">(active)</span>' : '') +
                         '<br><span style="color:var(--wo-muted);font-size:10px;">' + (p.description || '') + '</span></div>' +
-                        '<div style="display:flex;gap:4px;flex-shrink:0;align-items:center;">' +
-                        '<button type="button" class="__pf_switch wo-btn" data-id="' + id + '" style="font-size:11px;padding:4px 9px;' + (switchBlocked ? 'opacity:0.35;cursor:not-allowed;' : '') + '" ' + (switchBlocked ? 'disabled' : '') + '>Switch</button>' +
-                        '<button type="button" class="__pf_delete wo-btn-ghost wo-kebab-item-danger" data-id="' + id + '" style="' + (deleteBlocked ? 'opacity:0.35;cursor:not-allowed;' : '') + '" ' +
-                        (deleteBlocked ? 'disabled title="Can\'t delete — ' + deleteReason + '"' : 'aria-label="Delete profile"') + '>' + TRASH_SVG + '</button>' +
-                        '</div></div>';
+                        '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
+                        '<button data-pf-kebab type="button" class="wo-kebab-btn" data-id="' + id + '" aria-label="Profile actions" aria-haspopup="true">' +
+                        '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="3" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="13" r="0.7" stroke="currentColor" stroke-width="1.4"/></svg>' +
+                        '</button>' +
+                        '</span>' +
+                        '</div>';
                 });
             }
             localHtml += '</div>' +
@@ -11717,39 +11755,101 @@
             content.appendChild(localDiv);
             makeCollapsible(localDiv, 'Local Profiles', false);
 
-            localDiv.querySelectorAll('.__pf_switch').forEach(function(btn) {
-                btn.onclick = function() {
-                    var id = btn.getAttribute('data-id');
-                    woConfirm('Switch to "' + (profiles[id].name || id) + '"? Your current config is saved first.').then(function(ok) {
-                        if (!ok) return;
-                        flushLiveConfigToStorage();
-                        try {
-                            switchProfile(id);
-                        } catch (e) {
-                            // migrateProfile() throws if this profile's configVersion is
-                            // newer than what this tool build understands - never leave
-                            // it half-applied or silently claim success.
-                            woAlert(e.message);
-                            return;
-                        }
-                        woAlert('Switched to "' + (profiles[id].name || id) + '".').then(function() {
-                            modal.remove();
-                            render();
+            // Switch/Duplicate/Delete consolidated into one "..." menu per
+            // row (same wo-kebab-menu convention as the Variables/Rules
+            // tabs — see closeRuleMenu()/openRuleMenu above) instead of
+            // separate always-visible buttons.
+            localDiv.querySelectorAll('[data-pf-kebab]').forEach(function(kebabBtn) {
+                kebabBtn.onclick = function(ev) {
+                    ev.stopPropagation();
+                    var wasOpen = !!openRuleMenu;
+                    closeRuleMenu();
+                    if (wasOpen) return;
+                    var id = kebabBtn.getAttribute('data-id');
+                    var isActive = id === activeId;
+                    var switchDisabled = isActive || onlyOne;
+                    var deleteDisabled = isActive || onlyOne;
+                    var deleteReason = isActive ? 'Switch to another profile first' : 'This is your only saved profile';
+                    var menu = document.createElement('div');
+                    menu.className = 'wo-kebab-menu';
+                    menu.innerHTML =
+                        '<button data-switch type="button" class="wo-kebab-item"' + (switchDisabled ? ' disabled title="' + (isActive ? 'Already active' : deleteReason) + '"' : '') + '>' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5L6.5 12L13 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+                        '<span>Switch</span>' +
+                        '</button>' +
+                        '<button data-dup type="button" class="wo-kebab-item">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
+                        '<span>Duplicate</span>' +
+                        '</button>' +
+                        '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger"' + (deleteDisabled ? ' disabled title="' + deleteReason + '"' : '') + '>' +
+                        TRASH_SVG +
+                        '<span>Delete</span>' +
+                        '</button>';
+                    menu.style.position = 'fixed';
+                    var btnRect = kebabBtn.getBoundingClientRect();
+                    menu.style.top = (btnRect.bottom + 4) + 'px';
+                    menu.style.right = (window.innerWidth - btnRect.right) + 'px';
+                    modal.appendChild(menu);
+                    var mr = menu.getBoundingClientRect();
+                    if (mr.bottom > window.innerHeight) menu.style.top = Math.max(4, btnRect.top - mr.height - 4) + 'px';
+
+                    var switchBtn = menu.querySelector('[data-switch]');
+                    if (!switchDisabled) switchBtn.onclick = function(e) {
+                        e.stopPropagation();
+                        closeRuleMenu();
+                        woConfirm('Switch to "' + (profiles[id].name || id) + '"? Your current config is saved first.').then(function(ok) {
+                            if (!ok) return;
+                            flushLiveConfigToStorage();
+                            try {
+                                switchProfile(id);
+                            } catch (err) {
+                                // migrateProfile() throws if this profile's configVersion is
+                                // newer than what this tool build understands - never leave
+                                // it half-applied or silently claim success.
+                                woAlert(err.message);
+                                return;
+                            }
+                            woAlert('Switched to "' + (profiles[id].name || id) + '".').then(function() {
+                                modal.remove();
+                                render();
+                            });
                         });
-                    });
-                };
-            });
-            localDiv.querySelectorAll('.__pf_delete').forEach(function(btn) {
-                if (!btn.disabled) attachTooltip(btn, 'Delete profile');
-                btn.onclick = function() {
-                    var id = btn.getAttribute('data-id');
-                    woConfirm('Delete profile "' + (profiles[id].name || id) + '"? This cannot be undone.').then(function(ok) {
-                        if (!ok) return;
+                    };
+                    menu.querySelector('[data-dup]').onclick = function(e) {
+                        e.stopPropagation();
+                        closeRuleMenu();
+                        flushLiveConfigToStorage();
                         var p2 = getProfiles();
-                        delete p2[id];
+                        // The ACTIVE profile's stored blob can lag behind live
+                        // in-memory edits until Save is clicked - re-snapshot
+                        // from current state for that one case (same source
+                        // "Save As New" uses), otherwise the stored blob is
+                        // already the authoritative copy.
+                        var src = isActive ? snapshotProfile(p2[id]) : p2[id];
+                        var newId = id + '-copy-' + Date.now();
+                        var copy = JSON.parse(JSON.stringify(src));
+                        copy.id = newId;
+                        copy.name = (src.name || id) + ' (copy)';
+                        copy.savedAt = new Date().toISOString();
+                        p2[newId] = copy;
                         saveProfiles(p2);
-                        profilesTab();
-                    });
+                        woAlert('Duplicated as "' + copy.name + '".').then(function() {
+                            profilesTab();
+                        });
+                    };
+                    var delBtn = menu.querySelector('[data-del]');
+                    if (!deleteDisabled) delBtn.onclick = function(e) {
+                        e.stopPropagation();
+                        closeRuleMenu();
+                        woConfirm('Delete profile "' + (profiles[id].name || id) + '"? This cannot be undone.').then(function(ok) {
+                            if (!ok) return;
+                            var p3 = getProfiles();
+                            delete p3[id];
+                            saveProfiles(p3);
+                            profilesTab();
+                        });
+                    };
+                    openRuleMenu = menu;
                 };
             });
             localDiv.querySelector('#__pf_save_new').onclick = function() {
