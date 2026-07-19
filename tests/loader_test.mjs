@@ -26,9 +26,9 @@ function check(label, cond, detail) {
     console.log((cond ? 'PASS' : 'FAIL') + ' - ' + label + (detail !== undefined ? ' :: ' + JSON.stringify(detail) : ''));
 }
 
-function makeDom() {
+function makeDom(url) {
     return new JSDOM('<!doctype html><html><body></body></html>', {
-        url: 'https://fake-maximo.example.com/maximo/webclient/login/login.jsp',
+        url: url || 'https://fake-maximo.example.com/maximo/webclient/login/login.jsp',
         runScripts: 'outside-only',
         pretendToBeVisual: true
     });
@@ -351,6 +351,111 @@ async function testRevokeWithNullContactClearsStaleCache() {
         w.localStorage.getItem('__wo_contact_email') === null, w.localStorage.getItem('__wo_contact_email'));
 }
 
+// ── Test 9: a per-company (fixed-host) bookmarklet, clicked from some
+// unrelated page — redirects straight to ITS instance, no picker, and
+// completely ignoring whatever maximoHosts the Worker returns (even a
+// totally unrelated multi-company list) ──
+async function testFixedHostRedirectsAway() {
+    const dom = makeDom('https://random-portal.example.com/');
+    const w = dom.window;
+    w.__wo_fixed_host_url = 'https://maximo-a.example.com/maximo/webclient/login/login.jsp';
+
+    w.fetch = function(url) {
+        var u = String(url);
+        if (u.indexOf('/bootstrap') !== -1) {
+            // Deliberately a DIFFERENT, multi-entry list - proves the fixed
+            // host short-circuits before this is ever consulted.
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve({
+                    maximoHosts: [{ hostname: 'other-company.example.com', url: 'https://other-company.example.com/login' }],
+                    requiredFields: []
+                })
+            });
+        }
+        return Promise.reject(new Error('unexpected fetch ' + u));
+    };
+
+    w.eval(loaderSrc);
+    await tick(50);
+
+    check('[fixed host] redirects to the fixed instance, not anything from maximoHosts',
+        w.localStorage.getItem('__wo_preferred_host') === 'maximo-a.example.com',
+        w.localStorage.getItem('__wo_preferred_host'));
+    const banner = w.document.getElementById('__wo_loader_banner');
+    check('[fixed host] shows the redirecting banner, never the "which instance" picker',
+        !!banner && banner.textContent.indexOf('Redirecting to Maximo') !== -1, banner && banner.textContent);
+}
+
+// ── Test 10: same fixed-host bookmarklet, but already ON that instance —
+// proceeds normally instead of redirecting ──
+async function testFixedHostProceedsWhenAlreadyThere() {
+    const dom = makeDom('https://maximo-a.example.com/maximo/webclient/login/login.jsp');
+    const w = dom.window;
+    w.__wo_fixed_host_url = 'https://maximo-a.example.com/maximo/webclient/login/login.jsp';
+    let resolveCheckAccess;
+    const checkAccessPromise = new Promise(function(res) { resolveCheckAccess = res; });
+
+    w.fetch = function(url) {
+        var u = String(url);
+        if (u.indexOf('/maximo/oslc/whoami') !== -1) {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({ loginID: 'someuser' }) });
+        }
+        if (u.indexOf('/bootstrap') !== -1) {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({ maximoHosts: [], requiredFields: [] }) });
+        }
+        if (u.indexOf('/check-access') !== -1) {
+            return checkAccessPromise.then(function() {
+                return { ok: true, json: () => Promise.resolve({ granted: true, grants: ['user'], token: 'tok', configs: [] }) };
+            });
+        }
+        if (u.indexOf('/tool?') !== -1) {
+            return Promise.resolve({ ok: true, text: () => Promise.resolve('window.__toolRan = (window.__toolRan||0) + 1;') });
+        }
+        return Promise.reject(new Error('unexpected fetch ' + u));
+    };
+
+    w.eval(loaderSrc);
+    await tick(20);
+    resolveCheckAccess();
+    await tick(50);
+
+    check('[fixed host, already there] no redirect was recorded', !w.localStorage.getItem('__wo_preferred_host'));
+    check('[fixed host, already there] the real access check proceeded and the tool ran', w.__toolRan === 1, w.__toolRan);
+}
+
+// ── Test 11: the GENERIC (no fixed host) bookmarklet still shows the
+// picker for a real multi-instance maximoHosts list — the fallback path
+// this whole feature deliberately preserves ──
+async function testGenericMultiHostShowsPicker() {
+    const dom = makeDom('https://random-portal.example.com/');
+    const w = dom.window;
+
+    w.fetch = function(url) {
+        var u = String(url);
+        if (u.indexOf('/bootstrap') !== -1) {
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve({
+                    maximoHosts: [
+                        { hostname: 'maximo-a.example.com', url: 'https://maximo-a.example.com/login' },
+                        { hostname: 'maximo-b.example.com', url: 'https://maximo-b.example.com/login' }
+                    ],
+                    requiredFields: []
+                })
+            });
+        }
+        return Promise.reject(new Error('unexpected fetch ' + u));
+    };
+
+    w.eval(loaderSrc);
+    await tick(50);
+
+    const banner = w.document.getElementById('__wo_loader_banner');
+    check('[generic, multi-host] shows the "which instance" picker', !!banner && banner.textContent.indexOf('Which Maximo instance is this for?') !== -1, banner && banner.textContent);
+    check('[generic, multi-host] lists both hosts as choices', !!banner && banner.textContent.indexOf('maximo-a.example.com') !== -1 && banner.textContent.indexOf('maximo-b.example.com') !== -1, banner && banner.textContent);
+}
+
 (async function main() {
     await testOptimisticGrant();
     await testOptimisticDeny();
@@ -360,6 +465,9 @@ async function testRevokeWithNullContactClearsStaleCache() {
     await testDeniedContactEmailResolved();
     await testNullContactEmailDoesNotClobberCache();
     await testRevokeWithNullContactClearsStaleCache();
+    await testFixedHostRedirectsAway();
+    await testFixedHostProceedsWhenAlreadyThere();
+    await testGenericMultiHostShowsPicker();
 
     const failed = results.filter(function(r) { return !r.ok; });
     console.log('\n' + (failed.length ? failed.length + ' FAILED' : 'ALL ' + results.length + ' PASSED'));

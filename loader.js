@@ -28,6 +28,25 @@
     // resolveContactForBucket()); once cached, that always wins over this.
     var CONTACT_EMAIL = 'williamzitzmann@abbvie.com';
 
+    // Set by a per-company bookmarklet (see install.html's ?loginUrl=
+    // param) before it eval()s this file — a plain `window` property, not
+    // a scope-chain trick, so it works regardless of how run() calls eval
+    // and reads back identically in a test harness. When present, this
+    // bookmarklet is permanently scoped to ONE company's Maximo instance:
+    // there's no "which instance" ambiguity to ask about, ever, so the
+    // whole maximoHosts-list/picker path below is skipped entirely for it.
+    // Absent for the generic bookmarklet (and any old install from before
+    // this existed), which falls back to that original behavior unchanged.
+    var FIXED_LOGIN_URL = (typeof window !== 'undefined' && window.__wo_fixed_host_url) || null;
+    var FIXED_HOSTNAME = null;
+    if (FIXED_LOGIN_URL) {
+        try {
+            FIXED_HOSTNAME = new URL(FIXED_LOGIN_URL).hostname;
+        } catch (e) {
+            FIXED_LOGIN_URL = null; // malformed - fall back to the normal path rather than redirect nowhere
+        }
+    }
+
     function getContactEmail() {
         return localStorage.getItem(CONTACT_EMAIL_KEY) || CONTACT_EMAIL;
     }
@@ -363,16 +382,34 @@
 
     var PREFERRED_HOST_KEY = '__wo_preferred_host';
 
-    function checkDomainThenProceed(hosts, requiredFields) {
+    // Returns true when the caller should proceed normally (already on the
+    // right host); false when it already kicked off a redirect (caller
+    // should return immediately without proceeding). FIXED_HOSTNAME takes
+    // priority and never consults `hosts` at all — one bookmarklet, one
+    // instance, no ambiguity. Falls back to the original maximoHosts-list
+    // check (including the multi-instance picker) only when no fixed host
+    // was set.
+    function resolveHostAndMaybeRedirect(hosts) {
+        if (FIXED_HOSTNAME) {
+            if (location.hostname === FIXED_HOSTNAME) return true;
+            doRedirect({ hostname: FIXED_HOSTNAME, url: FIXED_LOGIN_URL });
+            return false;
+        }
         var here = location.hostname;
         var known = (hosts || []).some(function(h) {
             return h.hostname === here;
         });
         if (hosts && hosts.length && !known) {
             redirectToMaximo(hosts);
-            return;
+            return false;
         }
-        proceedWithAccessCheck(requiredFields);
+        return true;
+    }
+
+    function checkDomainThenProceed(hosts, requiredFields) {
+        if (resolveHostAndMaybeRedirect(hosts)) {
+            proceedWithAccessCheck(requiredFields);
+        }
     }
 
     function doRedirect(host) {
@@ -512,14 +549,7 @@
         try {
             cachedHosts = JSON.parse(localStorage.getItem(HOSTS_CACHE_KEY) || '[]');
         } catch (e) {}
-        var here = location.hostname;
-        var known = cachedHosts.some(function(h) {
-            return h.hostname === here;
-        });
-        if (cachedHosts.length && !known) {
-            redirectToMaximo(cachedHosts);
-            return;
-        }
+        if (!resolveHostAndMaybeRedirect(cachedHosts)) return;
 
         restoreFromRevokedBackupIfAny();
         removeBanner();

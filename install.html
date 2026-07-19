@@ -267,6 +267,7 @@
     </div>
     <a class="bm-button" id="bmLink" href="javascript:(function(){var LOADER_URL='https://wo-review-tool-access.williamzitzmann.workers.dev/loader.js';var CACHE_KEY='__wo_loader_cache';function run(src){try{eval(src);}catch(e){alert('WO Tool loader error: '+e.message);}}var xhr=new XMLHttpRequest();xhr.open('GET',LOADER_URL,true);xhr.onload=function(){if(xhr.status===200){localStorage.setItem(CACHE_KEY,xhr.responseText);run(xhr.responseText);}else{var c=localStorage.getItem(CACHE_KEY);if(c){run(c);}else{alert('WO Tool: failed to load (HTTP '+xhr.status+').');}}};xhr.onerror=function(){var c=localStorage.getItem(CACHE_KEY);if(c){run(c);}else{alert('WO Tool: network error, check connection.');}};xhr.send();})();">Review Tool</a>
     <div class="install-note">Clicking it here does nothing useful — it only works dragged to your bookmarks bar, then clicked from <em>there</em> while a Maximo work order is open.</div>
+    <div class="install-note" id="scopeNote" style="display:none;"></div>
   </div>
 
   <div class="callout">
@@ -302,6 +303,38 @@
 </div>
 
 <script>
+  // ?loginUrl=<url-encoded Maximo login URL> scopes the generated
+  // bookmarklet to exactly one instance: no "which Maximo instance is
+  // this for?" prompt, ever, because that bookmarklet only ever redirects
+  // to this one URL. Regenerates both the drag button and the manual-add
+  // code box from the same base bookmarklet already in the HTML (so
+  // there's exactly one place that base code needs to stay in sync with
+  // bookmarklet.js), by inserting one statement right after the opening
+  // `(function(){`. Absent (or unparseable) leaves both untouched — the
+  // generic, ask-if-ambiguous bookmarklet from the plain page load.
+  (function() {
+    var raw = new URLSearchParams(location.search).get('loginUrl');
+    if (!raw) return;
+    var hostname;
+    try {
+      hostname = new URL(raw).hostname;
+    } catch (e) {
+      return; // not a valid absolute URL - fall back to the generic bookmarklet
+    }
+    var inject = 'window.__wo_fixed_host_url=' + JSON.stringify(raw) + ';';
+    var bmLink = document.getElementById('bmLink');
+    var codeBox = document.getElementById('codeBox');
+    var scoped = function(code) { return code.replace('(function(){', '(function(){' + inject); };
+    // getAttribute/setAttribute, not the .href property - the property
+    // getter can normalize javascript: URLs on some browsers, which would
+    // corrupt the exact-match replace() above.
+    bmLink.setAttribute('href', scoped(bmLink.getAttribute('href')));
+    codeBox.textContent = scoped(codeBox.textContent);
+    var note = document.getElementById('scopeNote');
+    note.textContent = 'This bookmarklet is scoped to ' + hostname + ' — it always redirects there, with no "which instance" prompt.';
+    note.style.display = '';
+  })();
+
   document.getElementById('copyBtn').addEventListener('click', function() {
     var btn = this;
     var text = document.getElementById('codeBox').textContent;
