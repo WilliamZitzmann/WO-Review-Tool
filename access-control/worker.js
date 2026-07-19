@@ -1397,8 +1397,16 @@ async function handleAdminGetBuckets(request, env) {
     requireAdmin(identity);
     var bucketsLoad = await loadBucketsDoc(env);
     var byId = bucketsById(bucketsLoad.doc.buckets);
-    var visible = identity.isRoot ? bucketsLoad.doc.buckets :
-        bucketsLoad.doc.buckets.filter(function(b) { return isAtOrBelow(b.id, identity.bucketId, byId); });
+    // Every admin sees the FULL tree, not just their own subtree — scoped
+    // admins need the ancestors/siblings above them for orientation (where
+    // does my branch sit in the company?). This is read-only visibility;
+    // every write endpoint below still independently enforces
+    // isAtOrBelow/isBelow against identity.bucketId, so nothing here
+    // widens what a scoped admin can actually DO — admin.html is expected
+    // to grey out/hide edit/delete controls for out-of-scope nodes using
+    // the same identity.bucketId this response's containing /admin/permissions
+    // call already returned.
+    var visible = bucketsLoad.doc.buckets;
     // fieldUsage lets the Field Levels tab grey out "delete" without a
     // separate round-trip per field - checks both bucket definitions AND
     // permission-rule conditions (a field can be referenced by one without

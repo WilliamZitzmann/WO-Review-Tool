@@ -292,6 +292,22 @@ cookbook-level detail there.
   `admin.html` can offer a dropdown of known whoami fields (plus a
   "Custom…" fallback) when creating a bucket or registering a field level,
   instead of a blind free-text box.
+- **`GET /admin/buckets` returns the FULL tree to every admin, scoped or
+  root** — visibility and authorization were deliberately split apart: a
+  scoped admin needs their own branch's ancestors for orientation ("where
+  do I sit in the company?"), but every write endpoint independently
+  re-enforces `isAtOrBelow`/`isBelow` against `identity.bucketId`
+  regardless of what the read side returns, so widening visibility never
+  widens what they can actually do. `admin.html` mirrors the same two
+  containment checks client-side (`isAtOrBelowMine()`/`isBelowMine()`,
+  next to `isRootIdentity()`) purely for UX — greying out-of-scope tree
+  rows to a "read-only" state (including the admin's own node itself,
+  since bucket CRUD is strictly-below, not at, your own node) and
+  filtering `bucketOptionsIndented()`'s dropdown options (new-bucket
+  parent, and every permission/config rule's bucketId picker that reuses
+  it) down to buckets a submit would actually be allowed to target — the
+  client-side check is never the real boundary, just avoids offering
+  choices that would 403.
 - **A bucket, by itself, never grants anything.** `evaluateAccess()` never
   reads `buckets.json` at all — a bucket only supplies an ancestor
   condition that gets prepended onto whatever `override`/`allow`/

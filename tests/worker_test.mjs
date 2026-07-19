@@ -608,6 +608,32 @@ seed(env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, 'version.json', {
     var downloadOutOfScope = await call('GET', '/admin/configs/' + companyConfigId, { headers: bearerHeaders(avwpToken) });
     check('scoped admin cannot download a config outside their scope', downloadOutOfScope.status === 403, downloadOutOfScope.body);
 
+    // ── Buckets deliberately DON'T follow the configs/permissions/groups
+    // visibility pattern above — GET /admin/buckets returns the FULL tree
+    // to every admin (scoped admins need their own branch's ancestors for
+    // orientation), while every WRITE endpoint still independently
+    // enforces containment. Visibility widened, authorization didn't. ──
+    var bucketsAsScoped = await call('GET', '/admin/buckets', { headers: bearerHeaders(avwpToken) });
+    check('a scoped (AVWP) admin\'s GET /admin/buckets includes its OWN bucket',
+        bucketsAsScoped.status === 200 && bucketsAsScoped.body.buckets.some(function(b) { return b.id === 'abbvie-ie-avwp'; }),
+        bucketsAsScoped.body.buckets && bucketsAsScoped.body.buckets.map(function(b) { return b.id; }));
+    check('...AND buckets ABOVE it (ancestors it does not control) — the actual behavior change',
+        bucketsAsScoped.body.buckets.some(function(b) { return b.id === 'abbvie'; }) &&
+        bucketsAsScoped.body.buckets.some(function(b) { return b.id === 'abbvie-ie'; }),
+        bucketsAsScoped.body.buckets && bucketsAsScoped.body.buckets.map(function(b) { return b.id; }));
+    check('...matches what root sees (same full tree, not a partial one)',
+        bucketsAsScoped.body.buckets.length === bucketsGet.body.buckets.length +
+            (mkWorkgroup.body.bucket ? 1 : 0), // +1 for the workgroup bucket created after bucketsGet was captured
+        { scoped: bucketsAsScoped.body.buckets.length, root: bucketsGet.body.buckets.length });
+
+    var scopedEditsAncestor = await call('PATCH', '/admin/buckets/abbvie-ie', {
+        headers: bearerHeaders(avwpToken), body: { label: 'Hijacked' },
+    });
+    check('but a scoped admin still CANNOT edit an ancestor bucket it can now merely see', scopedEditsAncestor.status === 403, scopedEditsAncestor.body);
+
+    var scopedDeletesAncestor = await call('DELETE', '/admin/buckets/abbvie-ie', { headers: bearerHeaders(avwpToken) });
+    check('...nor delete one', scopedDeletesAncestor.status === 403, scopedDeletesAncestor.body);
+
     var downloadOwn = await call('GET', '/admin/configs/' + avwpConfigId, { headers: bearerHeaders(avwpToken) });
     check('scoped admin can download their own config, gets the exact content back', downloadOwn.status === 200 &&
         JSON.stringify(downloadOwn.body.content) === JSON.stringify(sampleBlob), downloadOwn.body);
