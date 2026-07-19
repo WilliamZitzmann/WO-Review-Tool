@@ -14,6 +14,7 @@ const FILES = [
     'loader_test.mjs',
     'update_defer_test.js',
     'sync_whoami_mapping_test.js',
+    'config_version_test.js',
 ];
 
 const fs = require('fs');

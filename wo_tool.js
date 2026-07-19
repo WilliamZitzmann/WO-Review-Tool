@@ -38,7 +38,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26199.1550z';
+    var BUILD_ID = '26200.1000z';
     // Ultimate fallback ONLY — same key/contract as loader.js's
     // CONTACT_EMAIL_KEY (kept in sync manually, independent files). Real
     // value comes from /check-access's bucket-resolved contactEmail
@@ -1489,6 +1489,7 @@
     // ── Backup blob builder ──
     function buildBackupBlob() {
         return JSON.stringify({
+            configVersion: CURRENT_CONFIG_VERSION,
             rules: getCfg(),
             scan: getScan(),
             fields: JSON.parse(localStorage.getItem(FKEY) || '{}'),
@@ -1501,6 +1502,51 @@
             savedAt: new Date().toISOString(),
             version: TOOL_VERSION
         }, null, 2);
+    }
+
+    function isPlainObj(x) {
+        return !!x && typeof x === 'object' && !Array.isArray(x);
+    }
+
+    // Shared shape/version gate for anything that can inject a config blob
+    // into the tool (auto-backup file, cross-browser restore, raw-paste
+    // Import) — throws a user-facing message instead of letting garbage
+    // (wrong file type, hand-edited JSON, a future tool version's shape)
+    // partially land in localStorage. Deliberately lenient about *unknown*
+    // keys (forward-compatible) but strict about *known* keys having the
+    // wrong basic type, since that's the actual "wrong file" signal.
+    function validateBackupShape(b) {
+        if (!isPlainObj(b)) {
+            throw new Error('Not a valid WO Tool config file (expected a JSON object).');
+        }
+        var v = b.configVersion || 1;
+        if (v > CURRENT_CONFIG_VERSION) {
+            throw new Error('This config was saved by a newer version of WO Review Tool (config format v' + v +
+                ') than this one understands (up to v' + CURRENT_CONFIG_VERSION + '). Update the tool before using it.');
+        }
+        ['rules', 'scan', 'fields', 'state', 'settings', 'profiles'].forEach(function(key) {
+            if (b[key] !== undefined && !isPlainObj(b[key])) {
+                throw new Error('Not a valid WO Tool config file (' + key + ' section is malformed).');
+            }
+        });
+        if (b.vars !== undefined && !Array.isArray(b.vars)) {
+            throw new Error('Not a valid WO Tool config file (vars section is malformed).');
+        }
+        if (b.rules !== undefined && b.rules.rules !== undefined && !Array.isArray(b.rules.rules)) {
+            throw new Error('Not a valid WO Tool config file (rules section is malformed).');
+        }
+        if (b.src !== undefined) {
+            if (typeof b.src !== 'string') {
+                throw new Error('Not a valid WO Tool config file (src must be text).');
+            }
+            if (b.src) {
+                try {
+                    new Function(b.src);
+                } catch (e) {
+                    throw new Error('Backup file\'s embedded tool code is corrupt (' + e.message + ') — refusing to restore it.');
+                }
+            }
+        }
     }
 
     // ── Auto-save to file ──
@@ -1543,7 +1589,11 @@
     }
 
     // ── Apply backup object to localStorage ──
+    // Throws (via validateBackupShape) before writing anything if the blob
+    // is malformed or from a newer configVersion — callers must catch and
+    // surface e.message rather than assume this always succeeds.
     function applyBackup(b) {
+        validateBackupShape(b);
         if (b.rules) localStorage.setItem(RKEY, JSON.stringify(b.rules));
         if (b.scan) localStorage.setItem(SKEY, JSON.stringify(b.scan));
         if (b.fields) localStorage.setItem(FKEY, JSON.stringify(b.fields));
@@ -1593,9 +1643,21 @@
     // CURRENT_CONFIG_VERSION, in order, and stamps the result. No-ops today
     // (CONFIG_MIGRATIONS is empty) but every profile passes through this
     // before being applied, so it's live infrastructure, not a stub.
+    //
+    // THROWS if p.configVersion is NEWER than this running code's
+    // CURRENT_CONFIG_VERSION — a config produced by a newer tool version,
+    // in a shape this older code was never taught to migrate FROM (there's
+    // nothing to migrate TO here, only forward). Deliberately fails closed
+    // instead of the old behavior (silently overwriting configVersion
+    // downward and proceeding anyway) - callers must not catch-and-ignore
+    // this; let it propagate to a user-facing woAlert(e.message).
     function migrateProfile(p) {
         if (!p) return p;
         var v = p.configVersion || 1;
+        if (v > CURRENT_CONFIG_VERSION) {
+            throw new Error('This config was saved by a newer version of WO Review Tool (config format v' + v +
+                ') than this one understands (up to v' + CURRENT_CONFIG_VERSION + '). Update the tool before using it.');
+        }
         while (v < CURRENT_CONFIG_VERSION && CONFIG_MIGRATIONS[v]) {
             p = CONFIG_MIGRATIONS[v](p);
             v++;
@@ -1689,6 +1751,14 @@
         }
         var target = profiles[id];
         if (!target) return false;
+        // migrateProfile() (inside applyProfile) can throw if target's
+        // configVersion is too new for this tool build - deliberately
+        // checked BEFORE moving the active-profile pointer, so a rejected
+        // switch never leaves ACTIVE_PROFILE_KEY pointing at a profile
+        // whose data was never actually written (RKEY/etc. would still
+        // hold the OLD profile's content while the pointer claimed the
+        // new one - a real inconsistency the old code let happen).
+        migrateProfile(target); // throws here, before anything is mutated, if incompatible
         // Set the active pointer BEFORE applyProfile's own auto-save fires, so a
         // linked PC backup file reflects the new active profile immediately
         // rather than lagging one switch behind.
@@ -1780,7 +1850,12 @@
                 id: profileId,
                 name: entry.name,
                 description: entry.description || '',
-                configVersion: 1,
+                // Read from the uploaded content itself, not hardcoded -
+                // an admin config with no configVersion tag at all
+                // (uploaded before this field existed) is safely treated
+                // as v1, same as migrateProfile()'s own `p.configVersion || 1`
+                // fallback for every other profile shape.
+                configVersion: entry.content.configVersion || 1,
                 rules: entry.content.rules,
                 scan: entry.content.scan,
                 fields: entry.content.fields,
@@ -1845,6 +1920,7 @@
                             setStatus('Config restored from ' + handle.name);
                         } catch (e) {
                             banner.remove();
+                            setStatus('⚠ Could not restore backup: ' + e.message);
                         }
                     });
                 }).catch(function(e) {
@@ -1877,7 +1953,12 @@
             '</div>';
         if (bodyEl) bodyEl.insertBefore(banner, bodyEl.firstChild);
         document.getElementById('__wo_load_bak_btn').onclick = function() {
-            applyBackup(b);
+            try {
+                applyBackup(b);
+            } catch (e) {
+                banner.remove();
+                return woAlert('Could not load backup: ' + e.message);
+            }
             banner.remove();
             render();
             setStatus('Config loaded from backup file');
@@ -2970,7 +3051,16 @@
         },
         getScanState: function() {
             return { cache: cache, hasScanned: hasScanned, scanLog: scanLog, currentReturnMsg: currentReturnMsg };
-        }
+        },
+        // For testing the configVersion forward-compatibility gate and
+        // backup/import shape validation without driving the actual UI.
+        applyBackup: applyBackup,
+        buildBackupBlob: buildBackupBlob,
+        migrateProfile: migrateProfile,
+        switchProfile: switchProfile,
+        saveProfiles: saveProfiles,
+        getProfiles: getProfiles,
+        CURRENT_CONFIG_VERSION: CURRENT_CONFIG_VERSION
     };
 
     // A semver pre-release suffix (e.g. "0.15.1-beta1") marks a beta/dev build.
@@ -6771,11 +6861,14 @@
                     var ok = !!(result && result.ok);
                     statusEl.textContent = ok ? 'Done!' : 'Could not install — starting with basic defaults.';
                     setTimeout(finish, ok ? 300 : 1200);
-                }).catch(function() {
+                }).catch(function(e) {
                     // installOrgConfig() re-verifies access live and can reject
                     // (offline, or access no longer granted) — never leave the
-                    // installer stuck on "Installing...".
-                    statusEl.textContent = 'Could not install — starting with basic defaults.';
+                    // installer stuck on "Installing...". A configVersion
+                    // mismatch (migrateProfile()) has a specific, useful
+                    // message worth surfacing instead of the generic one.
+                    statusEl.textContent = (e && /configVersion|newer version/.test(e.message)) ?
+                        e.message : 'Could not install — starting with basic defaults.';
                     setTimeout(finish, 1200);
                 });
             };
@@ -8370,6 +8463,7 @@
                 if (!raw) return;
                 try {
                     var b = JSON.parse(raw);
+                    validateBackupShape(b);
                     if (b.rules) saveCfg(b.rules);
                     if (b.scan) saveScan(b.scan);
                     if (b.fields) saveFieldCfg(b.fields);
@@ -8381,7 +8475,7 @@
                         render();
                     });
                 } catch (e) {
-                    woAlert('Invalid JSON: ' + e.message);
+                    woAlert((e instanceof SyntaxError ? 'Invalid JSON: ' : '') + e.message);
                 }
             });
         };
@@ -11580,7 +11674,15 @@
                     woConfirm('Switch to "' + (profiles[id].name || id) + '"? Your current config is saved first.').then(function(ok) {
                         if (!ok) return;
                         flushLiveConfigToStorage();
-                        switchProfile(id);
+                        try {
+                            switchProfile(id);
+                        } catch (e) {
+                            // migrateProfile() throws if this profile's configVersion is
+                            // newer than what this tool build understands - never leave
+                            // it half-applied or silently claim success.
+                            woAlert(e.message);
+                            return;
+                        }
                         woAlert('Switched to "' + (profiles[id].name || id) + '".').then(function() {
                             modal.remove();
                             render();
@@ -11716,9 +11818,10 @@
                                     btn.disabled = false;
                                     btn.textContent = 'Failed — retry';
                                 }
-                            }).catch(function() {
+                            }).catch(function(e) {
                                 btn.disabled = false;
                                 btn.textContent = 'Failed — retry';
+                                if (e && /configVersion|newer version/.test(e.message)) woAlert(e.message);
                             });
                         }
                         if (already) {

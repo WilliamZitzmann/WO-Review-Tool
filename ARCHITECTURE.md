@@ -518,7 +518,31 @@ profile.
 (keyed by version), run via `migrateProfile()` on every profile load/import.
 No migrations exist yet (only one config shape has ever shipped) but the
 plumbing is live — add an entry here whenever a config shape change needs
-one.
+one. `migrateProfile()` **throws** if `p.configVersion` is newer than
+`CURRENT_CONFIG_VERSION` — a config produced by a newer tool version, in a
+shape this older build was never taught to read. This is a real
+forward-compatibility gate, not just an upgrade path: `switchProfile()`
+calls `migrateProfile()` explicitly *before* moving `ACTIVE_PROFILE_KEY`,
+so a rejected switch can't leave the active pointer inconsistent with what
+was actually applied; `installOrgConfig()` and the first-run installer both
+catch the throw and surface `e.message` via `woAlert()` instead of falling
+back to the generic "could not install" message. `buildBackupBlob()`
+stamps `configVersion: CURRENT_CONFIG_VERSION` on every full-device backup.
+
+**Backup/import shape validation**: `validateBackupShape(b)` gates every
+path that can inject an externally-sourced blob into localStorage —
+`applyBackup()` (auto-backup file, cross-browser restore banner, "newer
+backup found" prompt) and the Setup > Profiles raw-paste Import
+(`#__s_imp`). It throws (before any localStorage write, so a rejected blob
+never partially applies) on: not a JSON object, a too-new `configVersion`
+(same message/mechanism as `migrateProfile()`), any known section
+(`rules`/`scan`/`fields`/`state`/`settings`/`profiles`/`vars`) present but
+the wrong basic type, or — for `applyBackup()` specifically, since it's the
+only path that can write `src` — an embedded `src` that isn't a string or
+fails a `new Function(src)` syntax check (mirrors `rawInstall()`'s own
+guard against installing broken code). Unknown keys are ignored
+(forward-compatible); this is a shape/type gate, not a full schema
+validator.
 
 ### 4.1 The `openSetup()` shared-`st` gotcha
 
