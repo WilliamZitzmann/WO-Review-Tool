@@ -2191,6 +2191,34 @@ async function handleAdminDeleteRootAccount(request, env, accountId) {
     return json({ ok: true });
 }
 
+// Rename-only for now (label) - bucketId/flags are deliberately not
+// editable here (moving a group to a different bucket or changing its
+// delegation flags is a bigger decision than a quick rename; delete and
+// recreate covers that, same convention as buckets' own "no parentId
+// change via PATCH" rule).
+async function handleAdminPatchGroup(request, env, groupId) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireAdmin(identity);
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+
+    var bucketsLoad = await loadBucketsDoc(env);
+    var byId = bucketsById(bucketsLoad.doc.buckets);
+    var groupsLoad = await loadAdminGroupsDoc(env);
+    var group = groupsLoad.doc.groups.find(function(g) { return g.id === groupId; });
+    if (!group) return notFound('group not found');
+    if (!identity.isRoot && !isAtOrBelow(group.bucketId, identity.bucketId, byId)) forbid('group outside your scope');
+
+    if (body.label !== undefined) {
+        var label = String(body.label || '').trim();
+        if (!label) return badRequest('label required');
+        group.label = label;
+    }
+    await writePrivateFile(env, 'adminGroups.json', JSON.stringify(groupsLoad.doc, null, 2), groupsLoad.sha,
+        'admin: ' + identity.label + ' renamed admin group to "' + group.label + '"');
+    return json({ ok: true, group: group });
+}
+
 async function handleAdminDeleteGroupMember(request, env, groupId, memberId) {
     var identity = await resolveAdminIdentity(request, env);
     requireAdmin(identity);
@@ -2316,6 +2344,7 @@ async function routeAdmin(request, env, ctx, pathname) {
     var m6 = /^\/admin\/groups\/([^/]+)\/members\/([^/]+)$/.exec(pathname);
     if (m6 && method === 'DELETE') return handleAdminDeleteGroupMember(request, env, m6[1], m6[2]);
     var m7 = /^\/admin\/groups\/([^/]+)$/.exec(pathname);
+    if (m7 && method === 'PATCH') return handleAdminPatchGroup(request, env, m7[1]);
     if (m7 && method === 'DELETE') return handleAdminDeleteGroup(request, env, m7[1]);
 
     if (pathname === '/admin/version' && method === 'GET') return handleAdminGetVersion(request, env);

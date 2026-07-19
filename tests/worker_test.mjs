@@ -413,6 +413,18 @@ seed(env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, 'version.json', {
     });
     check('adding an account with an invalid email is rejected (400)', invalidEmail.status === 400, invalidEmail.body);
 
+    var renameGroup = await call('PATCH', '/admin/groups/' + avwpGroupId, {
+        headers: rootHeaders(), body: { label: 'AVWP Admins (renamed)' },
+    });
+    check('root renames the group via PATCH', renameGroup.status === 200 && renameGroup.body.group.label === 'AVWP Admins (renamed)', renameGroup.body);
+    var groupsGetAfterRename = await call('GET', '/admin/groups', { headers: rootHeaders() });
+    check('rename is reflected on the next GET', groupsGetAfterRename.body.groups.some(function(g) { return g.id === avwpGroupId && g.label === 'AVWP Admins (renamed)'; }), groupsGetAfterRename.body.groups);
+
+    var renameEmptyLabel = await call('PATCH', '/admin/groups/' + avwpGroupId, {
+        headers: rootHeaders(), body: { label: '   ' },
+    });
+    check('renaming to a blank label is rejected (400)', renameEmptyLabel.status === 400, renameEmptyLabel.body);
+
     var avwpLoginWrongPw = await login('avwplead@abbvie.com', 'totally-wrong-password');
     check('login with wrong password is rejected', avwpLoginWrongPw.status === 401, avwpLoginWrongPw.body);
 
@@ -446,6 +458,11 @@ seed(env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, 'version.json', {
         headers: bearerHeaders(avwpToken), body: { bucketId: null, ownConditions: [{ field: 'username', op: 'eq', value: 'sneaky' }], grants: ['dev'] },
     });
     check('scoped admin cannot touch override', scopedOverrideAttempt.status === 403, scopedOverrideAttempt.body);
+
+    var scopedRenamesOwnGroup = await call('PATCH', '/admin/groups/' + avwpGroupId, {
+        headers: bearerHeaders(avwpToken), body: { label: 'AVWP Admins (self-renamed)' },
+    });
+    check('scoped admin CAN rename their own group', scopedRenamesOwnGroup.status === 200 && scopedRenamesOwnGroup.body.group.label === 'AVWP Admins (self-renamed)', scopedRenamesOwnGroup.body);
 
     var scopedExtraGrantsAttempt = await call('POST', '/admin/permissions/extraGrants', {
         headers: bearerHeaders(avwpToken), body: { bucketId: null, ownConditions: [{ field: 'username', op: 'eq', value: 'sneaky' }], grants: ['dev'] },
