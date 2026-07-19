@@ -2,52 +2,94 @@
 <!--
   Local sandbox — NOT part of the deployed tool, NOT served by the Worker.
   Lets you run the real wo_tool.js in an ordinary browser on a machine with
-  no Maximo access, to test anything that doesn't depend on live Maximo
-  data: Setup > Rules editor, Formula Reference/editor + autocomplete,
-  Table Editor, Variables tab, Settings, Beta toggles.
+  no Maximo access: Setup > Rules editor, Formula Reference/editor +
+  autocomplete, Table Editor, Variables tab, Settings, Beta toggles, AND
+  Scan — a fake sample work order (a handful of plain <input>/<label>
+  elements below, registered the same way a real field-pick would) is
+  seeded so pressing Scan actually populates fields and runs rules against
+  real values, not just an empty panel.
 
-  What WON'T work here (by design, not a bug): scanning a real work order
-  (there's no Maximo tracking table on this page to scan), whoami()-based
-  formulas, live domain()/assetWOHistory()/assetDowntimeHistory() calls
-  (beta_2 REST helpers) — all of these need an actual Maximo backend and
-  will just come back empty/no-op.
+  What still WON'T work here (by design, not a bug): DOM tables (Failure
+  Report, Labor, etc.) — Maximo's table markup uses very specific ID
+  conventions (_ttrow_/_tdrow_/_tbod_, column-index markers) that this
+  sandbox does not attempt to replicate, so any rule/group referencing a
+  table will show "not rendered". whoami()-based formulas and the beta_2
+  REST helpers (domain()/assetWOHistory()/assetDowntimeHistory()) also
+  need a real Maximo backend and will just come back empty/no-op.
+
+  wo_tool.js is loaded via a plain relative <script src="wo_tool.js"> —
+  the exact same file this repo pushes to both the public and private
+  repos (dev channel). Nothing about it is forked, trimmed, or mocked for
+  sandbox purposes; only this HOST PAGE fakes a WO tab and a no-op
+  sendEvent so the tool's own unmodified scan logic has something to read.
 
   Usage: open this file directly in Chrome/Edge (double-click, or
   File > Open). If localStorage doesn't seem to persist between reloads
   (some browsers restrict it for file:// origins), serve the folder instead:
-      python -m http.server 8000
+      node -e "require('http').createServer((q,s)=>require('fs').readFile('.'+q.url,(e,d)=>e?(s.writeHead(404),s.end()):s.end(d))).listen(8000)"
   then visit http://localhost:8000/sandbox.html.
 
-  Everything below only ever touches THIS page's own localStorage — it's
-  seeded fresh by the script tag each load, so reloading always gets you
-  back to a known state. Delete/edit the seed below to try different
-  starting configs.
+  Persistence: every key below is seeded ONLY if it doesn't already exist —
+  a reload does NOT wipe whatever you've edited, imported (Setup > Import),
+  or scanned. To start over from a clean slate, click "Reset sandbox" below.
 -->
 <html>
 <head>
 <meta charset="utf-8">
 <title>WO Tool — Local Sandbox</title>
 <style>
-  body { font-family: system-ui, sans-serif; background: #1e1e1e; color: #ddd; padding: 24px; }
+  body { font-family: system-ui, sans-serif; background: #1e1e1e; color: #ddd; padding: 24px; max-width: 900px; }
   h1 { font-size: 18px; }
   code { background: #2a2a2a; padding: 2px 6px; border-radius: 3px; }
+  a { color: #6cb6ff; }
+  #__sbx_wo_tab { margin-top: 20px; border: 1px solid #333; border-radius: 6px; padding: 14px; background: #161616; max-width: 420px; }
+  #__sbx_wo_tab h2 { font-size: 13px; margin: 0 0 10px; color: #999; text-transform: uppercase; letter-spacing: .04em; }
+  #__sbx_wo_tab label { display: block; font-size: 11px; color: #888; margin-top: 8px; }
+  #__sbx_wo_tab input, #__sbx_wo_tab select { width: 100%; box-sizing: border-box; background: #0d0d0d; border: 1px solid #333; color: #ddd; padding: 5px 7px; border-radius: 4px; font-size: 12px; margin-top: 2px; }
 </style>
 </head>
 <body>
 <h1>WO Tool — Local Sandbox</h1>
-<p>No Maximo page here — this is just a blank host page for the tool's own panel.
-The panel should appear automatically. Use <code>Setup</code> to explore Rules,
-Formulas, Tables, and Variables without needing a real work order to scan.</p>
+<p>No real Maximo page here — this is a host page with a fake sample work order
+(below) for the tool's own panel to scan. Use <code>Setup</code> to explore Rules,
+Formulas, Tables, and Variables, or hit <code>Scan</code> to pull the sample
+fields below into the panel and run your rules against them.
+<a href="#" id="__sbx_reset">Reset sandbox to defaults</a> (clears everything seeded here — an
+imported/edited config, scan results, active profile, etc.)</p>
+
+<!-- ── Fake sample WO tab ──
+     Deliberately plain <label>/<input> pairs, not a Maximo DOM replica.
+     resolveField() in wo_tool.js resolves a registered field by
+     idAtPickTime (a stable element id) via a straight getElementById, so
+     this is all it actually needs — see FKEY seeding below, which
+     registers each input's id exactly the way clicking "pick a field" on
+     a real Maximo page would have written it. -->
+<div id="__sbx_wo_tab">
+  <h2>Sample Work Order (fake, for scan testing)</h2>
+  <label>Work Order</label><input id="__sbx_wonum" value="WO-100234">
+  <label>Description</label><input id="__sbx_desc" value="Replace worn bearing on Pump 4">
+  <label>Asset</label><input id="__sbx_asset" value="PUMP-004">
+  <label>Location</label><input id="__sbx_location" value="BLDG3-MECH">
+  <label>Work Type</label><input id="__sbx_worktype" value="CM">
+  <label>Status</label><input id="__sbx_status" value="WAPPR">
+</div>
 
 <script>
+    function seedIfAbsent(key, value) {
+        if (localStorage.getItem(key) === null) localStorage.setItem(key, value);
+    }
+
     // Grants: dev + beta_0 (every beta feature unlocked) so nothing in
     // Setup/Beta is hidden behind an access check the sandbox can't satisfy.
+    // Ephemeral (not persistence-worthy) - always re-seeded, same as a real
+    // boot re-deriving these from the last check-access rather than trusting
+    // a stale copy.
     localStorage.setItem('__wo_grants', JSON.stringify(['user', 'dev', 'beta_0']));
     localStorage.setItem('__wo_grant_cache', JSON.stringify({ grants: ['user', 'dev', 'beta_0'], cachedAt: Date.now() }));
 
     // Settings tuned to stay quiet: no auto-update/auto-backup nags, since
     // neither the update-channel worker nor a real backup file exists here.
-    localStorage.setItem('__wo_settings', JSON.stringify({
+    seedIfAbsent('__wo_settings', JSON.stringify({
         autoUpdate: false,
         autoUpdatePatch: false,
         autoBackup: false,
@@ -55,22 +97,62 @@ Formulas, Tables, and Variables without needing a real work order to scan.</p>
         betaEnabled: { beta_2: true }
     }));
 
-    // A minimal but non-empty rules config so the first-run installer is
-    // skipped (it needs a live Worker round trip that has nothing to talk
-    // to here) and you land straight in the normal panel.
-    localStorage.setItem('__wo_rules_config', JSON.stringify({
+    // A starter rules config (same field set as the tool's own DEFAULT_CFG)
+    // so the first-run installer is skipped (it needs a live Worker round
+    // trip that has nothing to talk to here) and Scan has something real to
+    // populate right away. One sample rule included so pass/fail evaluation
+    // is visibly exercised, not just field capture.
+    seedIfAbsent('__wo_rules_config', JSON.stringify({
         groups: [{
             id: 'g_sandbox',
-            title: 'Sandbox',
+            title: 'Sample Work Order',
             layout: 'vertical',
-            fields: [],
+            fields: ['Work Order :: Work Order', 'Work Order :: Description', 'Work Order :: Asset', 'Work Order :: Location', 'Work Order :: Work Type', 'Work Order :: Status'],
             tables: [],
-            ruleRefs: [],
+            ruleRefs: ['r_sample'],
             defaultCollapsed: false
         }],
-        rules: []
+        rules: [{
+            id: 'r_sample',
+            label: 'Status is WAPPR',
+            formula: "F('Work Order :: Status') === 'WAPPR'",
+            pass: { short: 'OK', long: [] },
+            fail: { short: 'Not WAPPR', long: [], returnMode: 'none', returnCustom: '' },
+            warn: { short: '', long: [], returnMode: 'none', returnCustom: '' }
+        }]
     }));
-    localStorage.setItem('__wo_scan_config', JSON.stringify({ targets: [] }));
+    seedIfAbsent('__wo_scan_config', JSON.stringify({ woTabId: '__sbx_wo_tab', scans: [] }));
+
+    // Registers the fake inputs above the exact way a real "pick a field"
+    // click on a Maximo page would have written into FKEY (__wo_field_config)
+    // - see resolveField()/extractSnapshotFull() in wo_tool.js. scans: []
+    // above means runScan() never needs to switch "tabs" via sendEvent - the
+    // pre-scan snapshot this seeds into cache.fields is already everything
+    // there is to read on this single-page sandbox.
+    seedIfAbsent('__wo_field_config', JSON.stringify({
+        'Work Order :: Work Order': { type: 'field', tab: 'Work Order', label: 'Work Order', idAtPickTime: '__sbx_wonum' },
+        'Work Order :: Description': { type: 'field', tab: 'Work Order', label: 'Description', idAtPickTime: '__sbx_desc' },
+        'Work Order :: Asset': { type: 'field', tab: 'Work Order', label: 'Asset', idAtPickTime: '__sbx_asset' },
+        'Work Order :: Location': { type: 'field', tab: 'Work Order', label: 'Location', idAtPickTime: '__sbx_location' },
+        'Work Order :: Work Type': { type: 'field', tab: 'Work Order', label: 'Work Type', idAtPickTime: '__sbx_worktype' },
+        'Work Order :: Status': { type: 'field', tab: 'Work Order', label: 'Status', idAtPickTime: '__sbx_status' }
+    }));
+
+    // findSendEventWin() looks for a window.sendEvent function (Maximo's own
+    // tab-switching API) in every frame - a no-op stub is enough since
+    // scan.scans is empty (see above), so it's never actually called, but
+    // this keeps the lookup itself from ever being a surprise if a rules
+    // config with real scan steps gets imported here.
+    window.sendEvent = function() {};
+
+    document.getElementById('__sbx_reset').onclick = function(e) {
+        e.preventDefault();
+        if (!confirm('Reset the sandbox? This clears the imported/edited config, scan state, and active profile on THIS page only - it does not touch anything else.')) return;
+        Object.keys(localStorage).forEach(function(k) {
+            if (k.indexOf('__wo_') === 0) localStorage.removeItem(k);
+        });
+        location.reload();
+    };
 </script>
 <script src="wo_tool.js"></script>
 </body>

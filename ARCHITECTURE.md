@@ -1822,18 +1822,46 @@ never finishes.
 
 `sandbox.html` (repo root, git-tracked, never deployed/served by the
 Worker) is a plain static host page: it seeds `localStorage` with dev+beta
-grants and a minimal starter rules config (skips the first-run installer,
-which needs a live Worker round trip this has nothing to talk to), then
-loads the real `wo_tool.js` via a relative `<script src="wo_tool.js">`.
-Open it directly in a browser (or `node -e "require('http')..."`/any
-static server if `file://` localStorage misbehaves) to interactively
-exercise Setup's Rules/Groups/Variables/Tables/Profiles/Settings/Beta
-tabs, the Formula Reference and autocomplete, and the Table Editor — none
-of which need a real Maximo work order. Live-scanning a real WO, `whoami()`
-formulas, and the beta_2 REST helpers (`domain()`/`assetWOHistory()`/etc.)
-won't work here by design — there's no Maximo backend for them to reach.
-Verified end-to-end in a real Chrome tab (not just jsdom) — panel renders
-docked, Setup opens, tab switching works.
+grants and a starter rules config (skips the first-run installer, which
+needs a live Worker round trip this has nothing to talk to), then loads
+the real `wo_tool.js` via a relative `<script src="wo_tool.js">` — the
+exact same file pushed to both repos, never forked/trimmed for sandbox
+purposes; only the host page fakes things. Open it directly in a browser
+(or `node -e "require('http')..."`/any static server if `file://`
+localStorage misbehaves).
+
+**Seeding is idempotent** (`seedIfAbsent()` — only writes a key if it's
+currently absent), so a reload never wipes an imported/edited config, scan
+results, or the active profile — the whole point of a *sandbox* you can
+actually work in across sessions, not a demo that resets itself. A "Reset
+sandbox to defaults" link clears every `__wo_*` key and reloads, for
+starting over deliberately.
+
+**Scan actually works** — a fake sample WO tab (plain `<label>`/`<input>`
+elements, not a Maximo DOM replica) is seeded alongside matching
+`__wo_field_config` (FKEY) entries pointing at each input's `id`, the same
+shape a real "pick a field" click on Maximo would have written
+(`resolveField()`'s `findElById(idAtPickTime)` path — see its own comment
+in `wo_tool.js`). The seeded scan config uses `scans: []` (no steps), so
+`runScan()`'s initial `mergeSnapshot(extractSnapshotFull())` already
+captures everything before the (empty) step loop — no `sendEvent`/tab-
+switching machinery needed; a no-op `window.sendEvent` stub is seeded
+anyway, purely defensive, in case a rules config with real scan steps ever
+gets imported here. One sample rule (`r_sample`) exercises real pass/fail
+evaluation against the fake fields, not just capture.
+
+**Tables remain unsupported, on purpose** — Maximo's table markup
+(`_ttrow_`/`_tdrow_`/`_tbod_` id conventions, column-index markers) is a
+much deeper reverse-engineering exercise than field capture; a rule/group
+referencing a table shows "not rendered" here, same as any other missing
+table on a real page. `whoami()` formulas and the beta_2 REST helpers
+(`domain()`/`assetWOHistory()`/etc.) also need a real Maximo backend and
+just come back empty/no-op.
+
+Verified end-to-end in a real Chrome tab (not just jsdom): panel renders
+docked, Setup opens, Scan populates all 6 sample fields and evaluates
+`r_sample` to a real pass, an edited config survives a reload, and Reset
+restores the seeded defaults.
 
 ---
 
