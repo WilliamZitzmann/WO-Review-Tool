@@ -129,6 +129,106 @@ async function login(email, password) {
     return call('POST', '/admin/login', { body: { email: email, password: password } });
 }
 
+// ── Old-shape adminGroups.json migration — a real account created BEFORE
+// multi-group membership shipped is embedded inline in its group's
+// members[] (no top-level accounts[]/memberIds[]), exactly like the live
+// adminGroups.json this Worker still had on disk at the moment this
+// feature deployed. Runs against a genuinely separate isolated
+// owner/repo namespace (same in-memory store, different key prefix) so it
+// can't disturb the main sequential flow's own adminGroups.json state. ──
+async function testOldShapeMigration() {
+    var env2 = Object.assign({}, env, { GITHUB_REPO: 'WO-Review-Tool-Private-migration-test' });
+    // This test runs at the very end, after the Resend-configured section
+    // has already flipped these on for the shared `env` object it was
+    // copied from - strip them explicitly so account provisioning always
+    // takes the temp-password path here, regardless of call order.
+    delete env2.RESEND_API_KEY;
+    delete env2.RESEND_FROM_EMAIL;
+    async function call2(method, path, opts) {
+        opts = opts || {};
+        var headers = opts.headers || {};
+        var init = { method: method, headers: headers };
+        if (opts.body !== undefined) { init.body = JSON.stringify(opts.body); headers['Content-Type'] = 'application/json'; }
+        var req = new Request('https://fake-worker.internal' + path, init);
+        var res = await worker.fetch(req, env2, { waitUntil: () => {} });
+        var text = await res.text();
+        var body = null;
+        try { body = JSON.parse(text); } catch (e) { body = text; }
+        return { status: res.status, body: body, headers: res.headers };
+    }
+
+    seed(env2.GITHUB_OWNER, env2.GITHUB_REPO, 'buckets.json', {
+        buckets: [{ id: 'legacy-co', parentId: null, label: 'Legacy Co', field: 'email', op: 'endsWith', value: '@legacy.example.com' }],
+    });
+    seed(env2.GITHUB_OWNER, env2.GITHUB_REPO, 'permissions.json', {
+        maximoHosts: [], override: [], blacklist: [], allow: [], extraGrants: [],
+    });
+    seed(env2.GITHUB_OWNER, env2.GITHUB_REPO, 'adminGroups.json', { rootAccounts: [], groups: [] });
+
+    // Build the account through the real API first (so it gets a real
+    // PBKDF2 passwordHash, not a hand-rolled one), THEN rewrite the store's
+    // JSON back into the old embedded-members shape to simulate "this
+    // account predates the migration."
+    var mkGroup = await call2('POST', '/admin/groups', {
+        headers: { Authorization: 'Bearer ' + env2.ROOT_ADMIN_TOKEN },
+        body: { bucketId: 'legacy-co', label: 'Legacy Co Admins', allowPeerAdminCreation: true, allowChildAdminCreation: false },
+    });
+    var legacyGroupId = mkGroup.body.group.id;
+    var addMember = await call2('POST', '/admin/groups/' + legacyGroupId + '/members', {
+        headers: { Authorization: 'Bearer ' + env2.ROOT_ADMIN_TOKEN },
+        body: { email: 'legacy.admin@legacy.example.com', label: 'Legacy Admin' },
+    });
+    var legacyTempPassword = addMember.body.tempPassword;
+
+    var currentDoc = JSON.parse(store.get(key(env2.GITHUB_OWNER, env2.GITHUB_REPO, 'adminGroups.json')).content);
+    var accountsById = {};
+    (currentDoc.accounts || []).forEach(function(a) { accountsById[a.id] = a; });
+    var oldShapeDoc = {
+        rootAccounts: currentDoc.rootAccounts,
+        groups: currentDoc.groups.map(function(g) {
+            var old = Object.assign({}, g);
+            old.members = (g.memberIds || []).map(function(id) { return accountsById[id]; }).filter(Boolean);
+            delete old.memberIds;
+            return old;
+        }),
+    };
+    check('migration test setup: rewritten doc has the old embedded-members shape (no top-level accounts[])', oldShapeDoc.accounts === undefined && oldShapeDoc.groups[0].members.length === 1);
+    seed(env2.GITHUB_OWNER, env2.GITHUB_REPO, 'adminGroups.json', oldShapeDoc);
+
+    // First real read of the old-shape file - this is the migration path's
+    // actual first execution against genuinely old data.
+    var legacyLogin = await call2('POST', '/admin/login', { body: { email: 'legacy.admin@legacy.example.com', password: legacyTempPassword } });
+    check('old-shape account logs in successfully after migration', legacyLogin.status === 200, legacyLogin.body);
+    check('...with the correct bucketIds carried over from its old embedded membership',
+        Array.isArray(legacyLogin.body.bucketIds) && legacyLogin.body.bucketIds.length === 1 && legacyLogin.body.bucketIds[0] === 'legacy-co',
+        legacyLogin.body.bucketIds);
+    var legacyToken = legacyLogin.body.token;
+
+    var legacyAction = await call2('POST', '/admin/permissions/allow', {
+        headers: { Authorization: 'Bearer ' + legacyToken },
+        body: { bucketId: 'legacy-co', ownConditions: [{ field: 'email', op: 'endsWith', value: '@legacy.example.com' }], grants: ['user'] },
+    });
+    check('old-shape account can act within its migrated scope (not locked out)', legacyAction.status === 200, legacyAction.body);
+
+    // That write only touched permissions.json, not adminGroups.json - self-
+    // healing happens on the next write TO adminGroups.json specifically
+    // (loadAdminGroupsDoc migrates in-memory on every read, but nothing
+    // persists it back to "disk" until something actually writes that
+    // file). Trigger one (changing their own password) and confirm THAT
+    // persists the migrated shape.
+    var legacyChangePw = await call2('POST', '/admin/accounts/me/change-password', {
+        headers: { Authorization: 'Bearer ' + legacyToken },
+        body: { currentPassword: legacyTempPassword, newPassword: 'a-real-legacy-password-123' },
+    });
+    check('old-shape account can change its own password (a write to adminGroups.json)', legacyChangePw.status === 200, legacyChangePw.body);
+
+    var persistedDoc = JSON.parse(store.get(key(env2.GITHUB_OWNER, env2.GITHUB_REPO, 'adminGroups.json')).content);
+    check('...and THAT write leaves the on-disk file migrated to the new shape (self-healed, not just read-time)',
+        Array.isArray(persistedDoc.accounts) && persistedDoc.accounts.length === 1 &&
+        Array.isArray(persistedDoc.groups[0].memberIds) && persistedDoc.groups[0].members === undefined,
+        persistedDoc);
+}
+
 const results = [];
 function check(label, cond, detail) {
     results.push({ label, ok: !!cond });
@@ -1050,6 +1150,8 @@ seed(env.GITHUB_OWNER, env.GITHUB_PUBLIC_REPO, 'version.json', {
         forgotKnown.status === 200 && forgotUnknown.status === 200 && JSON.stringify(forgotKnown.body) === JSON.stringify(forgotUnknown.body),
         { known: forgotKnown.body, unknown: forgotUnknown.body });
     check('forgot-password for a known email actually sent a reset email', !!lastEmailTo('william@example.com'), sentEmails.map(function(e) { return e.to; }));
+
+    await testOldShapeMigration();
 
     const failed = results.filter(function(r) { return !r.ok; });
     console.log('\n' + (failed.length ? failed.length + ' FAILED of ' + results.length : 'ALL ' + results.length + ' PASSED'));
