@@ -38,7 +38,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26200.2202z';
+    var BUILD_ID = '26201.2127z';
     // Ultimate fallback ONLY — same key/contract as loader.js's
     // CONTACT_EMAIL_KEY (kept in sync manually, independent files). Real
     // value comes from /check-access's bucket-resolved contactEmail
@@ -218,7 +218,7 @@
         defaultHotkey: DEFAULT_HOTKEY,
         run: function() {
             if (actionsBusy()) return;
-            runScan(render);
+            runScanThenFocusReturnBox();
         }
     }, {
         id: 'return',
@@ -256,12 +256,12 @@
         betaFeature: 'beta_1', // only registered/assignable at all while this beta feature is on
         run: function() {
             if (actionsBusy()) return;
-            runScan(render, 'fix');
+            runScanThenFocusReturnBox('fix');
         }
     }, {
         id: 'copyReturn',
         settingsKey: 'copyReturnHotkey',
-        label: 'Copy',
+        label: 'Copy Return Message',
         defaultHotkey: 'Alt+C',
         run: function() {
             copyReturnMessage();
@@ -3733,6 +3733,21 @@
             b.style.opacity = locked ? '0.55' : '';
             b.style.cursor = locked ? 'not-allowed' : '';
         });
+        // Fires once, only on the unlock edge — lets a button's own
+        // click handler queue "run this when the in-flight route/scan
+        // finishes" work (e.g. settling a completion animation) without
+        // routeWorkflow/runScan needing to know animation exists at all.
+        if (!locked && __woActionsUnlockListeners.length) {
+            var fns = __woActionsUnlockListeners;
+            __woActionsUnlockListeners = [];
+            fns.forEach(function(fn) {
+                try { fn(); } catch (e) {}
+            });
+        }
+    }
+    var __woActionsUnlockListeners = [];
+    function onceActionsUnlocked(fn) {
+        __woActionsUnlockListeners.push(fn);
     }
     // Releases the routing lock — called from every terminal branch inside
     // routeWorkflow (whether it finished cleanly, hit an error, or handed
@@ -4241,6 +4256,13 @@
         function next() {
             if (i >= scan.scans.length) return finish();
             var t = scan.scans[i++];
+            if (t.skipped) {
+                scanLog.push({
+                    title: t.title,
+                    result: 'skipped (manually skipped)'
+                });
+                return next();
+            }
             if (!formulaBool(t.condition, cache)) {
                 scanLog.push({
                     title: t.title,
@@ -4719,6 +4741,12 @@
         saveGS(gs);
     }
     var panel, bodyEl, footerAreaEl, statusEl, summaryEl, updateScrollShadows = function() {};
+    // Transient (session-only, not persisted) — which tables' column-toggle
+    // panels are currently open, keyed by "groupId::tableId". render()
+    // rebuilds every tile's HTML from scratch on every call (including a
+    // column checkbox's own onchange), which would otherwise always reset
+    // a just-opened panel back to its markup default of closed.
+    var __woOpenColPanels = {};
 
     // Shared with openSetup()'s own (identical) copy of these three, used
     // by the Setup modal's Rules/Groups/Variables/Scan card drag-reorder.
@@ -5321,7 +5349,11 @@
             if (old) old.remove();
             var tt = document.createElement('div');
             tt.id = '__wo_tip_float';
-            tt.style.cssText = 'position:fixed;z-index:9999999;background:#1f2630;color:#f0f3f6;font-size:11px;font-family:"Segoe UI",Arial,sans-serif;padding:6px 9px;border-radius:6px;max-width:240px;white-space:pre-wrap;box-shadow:0 4px 14px rgba(0,0,0,.5);border:1px solid #30363d;pointer-events:none;';
+            // width:fit-content (not the default shrink-to-fit auto) — plain
+            // width:auto doesn't reliably size tight to the longest line for
+            // a white-space:pre-wrap box with hard \n breaks, leaving every
+            // shorter line surrounded by dead space out to the max-width.
+            tt.style.cssText = 'position:fixed;z-index:9999999;background:#1f2630;color:#f0f3f6;font-size:11px;font-family:"Segoe UI",Arial,sans-serif;padding:6px 9px;border-radius:6px;width:fit-content;max-width:240px;white-space:pre-wrap;box-shadow:0 4px 14px rgba(0,0,0,.5);border:1px solid #30363d;pointer-events:none;';
             tt.textContent = text;
             document.body.appendChild(tt);
             var r = el.getBoundingClientRect();
@@ -5481,6 +5513,18 @@
             "#__wo_dock .wo-btn:focus-visible{outline:3px solid var(--wo-accent);outline-offset:1px;}" +
             "#__wo_dock .wo-btn-primary{background:var(--wo-accent);color:var(--wo-on-accent);border-color:var(--wo-accent);}" +
             "#__wo_dock .wo-btn-danger{color:var(--wo-fail);border-color:var(--wo-fail);}" +
+            "#__wo_dock .wo-btn-danger:hover{border-color:var(--wo-fail);background:color-mix(in srgb, var(--wo-fail) 12%, var(--wo-surface-2));}" +
+            // Scan button — collapses from its text width into a fixed-size
+            // circle while scanning, with a single stroked <path> (see
+            // wireScanButtonAnimation()) that spins as an arc and, once it
+            // settles, continues on as the same stroke to draw the
+            // completion tick — never two separate line elements.
+            "#__wo_dock .wo-scan-btn{position:relative;overflow:hidden;color:#fff;width:70px;height:40px;padding:0;box-sizing:border-box;display:flex;align-items:center;justify-content:center;border-radius:var(--wo-r-ctl);transition:width .4s cubic-bezier(.4,0,.2,1),border-radius .4s cubic-bezier(.4,0,.2,1);}" +
+            "#__wo_dock .wo-scan-label{transition:opacity .18s ease;}" +
+            "#__wo_dock .wo-scan-spin{position:absolute;opacity:0;transition:opacity .18s ease;}" +
+            "#__wo_dock .wo-scan-btn.is-spinning{width:40px;border-radius:50%;}" +
+            "#__wo_dock .wo-scan-btn.is-spinning .wo-scan-label{opacity:0;}" +
+            "#__wo_dock .wo-scan-btn.is-spinning .wo-scan-spin{opacity:1;}" +
             /* #__wo_status/#__wo_scanlog/#__wo_groups/#__wo_footer_area layout is kept fully inline at creation (see buildPanel()) — not duplicated here. */
             "#__wo_dock .wo-card{background:var(--wo-surface);border:1px solid var(--wo-border);border-radius:var(--wo-r-card);overflow:hidden;margin-bottom:8px;}" +
             "#__wo_dock .__wo_th{background:var(--wo-surface-2);padding:6px 10px;min-height:32px;display:flex;align-items:center;gap:8px;cursor:pointer;}" +
@@ -5585,6 +5629,19 @@
             // label ahead of Return/Fix/Approve, not one of the actions.
             "#__wo_dock .wo-route-symbol{display:flex;align-items:center;justify-content:center;flex:0 0 auto;width:36px;color:var(--wo-muted);cursor:default;margin-right:-3.5px;}" +
             "#__wo_dock .wo-btn-block.wo-btn-icon{display:inline-flex;align-items:center;justify-content:center;gap:7px;}" +
+            // Return/Approve — a filled overlay wipes in from the left while
+            // the route is in flight (doubling as the busy indicator: no
+            // separate spinner needed), with a second, identically-clipped
+            // white-text layer so the label crossfades color in lockstep
+            // with the fill edge instead of snapping. Approve additionally
+            // pops a check badge once the route actually finishes.
+            "#__wo_dock .wo-btn-danger,#__wo_dock .wo-btn-pass{position:relative;overflow:hidden;}" +
+            "#__wo_dock .wo-act-row{transition:opacity .2s ease;}" +
+            "#__wo_dock .wo-act-fill{position:absolute;inset:0;clip-path:inset(0 100% 0 0);transition:clip-path .5s cubic-bezier(.65,0,.35,1);pointer-events:none;}" +
+            "#__wo_dock .wo-btn-danger .wo-act-fill{background:var(--wo-fail);}" +
+            "#__wo_dock .wo-btn-pass .wo-act-fill{background:#4fcd74;}" +
+            "#__wo_dock .wo-act-over{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:7px;color:#fff;clip-path:inset(0 100% 0 0);transition:clip-path .5s cubic-bezier(.65,0,.35,1);pointer-events:none;white-space:nowrap;}" +
+            "#__wo_dock .wo-act-badge{position:absolute;top:50%;left:50%;width:24px;height:24px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;transform:translate(-50%,-50%) scale(0);transition:transform .3s cubic-bezier(.34,1.56,.64,1);color:var(--wo-pass);pointer-events:none;}" +
             "#__wo_dock .wo-btn-pass{background:var(--wo-pass);color:#04210c;border-color:var(--wo-pass);}" +
             "#__wo_dock .wo-btn-warn{background:var(--wo-warn);color:#241900;border-color:var(--wo-warn);}" +
             "#__wo_dock .wo-btn-fail{background:var(--wo-fail);color:#2b0705;border-color:var(--wo-fail);}" +
@@ -5650,17 +5707,22 @@
         panel.innerHTML =
             '<button id="__wo_collapse_btn" class="wo-collapse-btn" type="button" aria-label="' + (startCollapsed ? 'Expand panel' : 'Collapse panel') + '">' + (startCollapsed ? '◀' : '▶') + '</button>' +
             '<div class="wo-head">' +
-            '<div class="wo-head-title"><b>Will\'s WO</b><span>Review Tool</span></div>' +
+            '<div class="wo-head-title"><b>Will\'s WO</b><span>Review Manager</span></div>' +
             '<div class="wo-head-ver">v' + TOOL_VERSION + '</div>' +
             '<div class="wo-head-actions">' +
-            '<button id="__wo_rescan" class="wo-btn wo-btn-primary">Scan</button>' +
+            '<button id="__wo_rescan" type="button" class="wo-btn wo-btn-primary wo-scan-btn">' +
+            '<span class="wo-scan-label">Scan</span>' +
+            '<svg class="wo-scan-spin" viewBox="0 0 40 40" width="30" height="30" aria-hidden="true">' +
+            '<path class="wo-scan-stroke" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" d=""/>' +
+            '</svg>' +
+            '</button>' +
             '<button id="__wo_setup" class="wo-btn">Setup</button>' +
             '<button id="__wo_exit" class="wo-btn wo-btn-danger">Exit</button>' +
             '</div>' +
             '</div>' +
             '<div style="position:relative;background:#0d1117;flex-shrink:0;">' +
             '<div id="__wo_status" style="padding:6px 28px 6px 12px;color:#e3b341;font-size:11px;min-height:15px;font-family:Consolas,monospace;white-space:pre-line;"></div>' +
-            '<button id="__wo_scanlog_toggle" type="button" aria-label="Minimize scan log" style="position:absolute;top:2px;right:4px;width:18px;height:18px;padding:0;line-height:1;border:1px solid #30363d;border-radius:4px;background:#161b22;color:#9aa4af;font-family:Consolas,monospace;font-size:12px;cursor:pointer;">−</button>' +
+            '<button id="__wo_scanlog_toggle" type="button" aria-label="Minimize scan log" style="position:absolute;top:2px;right:4px;width:18px;height:18px;padding:0;line-height:1;border:none;border-radius:4px;background:transparent;color:#9aa4af;font-family:Consolas,monospace;font-size:12px;cursor:pointer;">−</button>' +
             '</div>' +
             '<div id="__wo_scanlog" style="padding:0 12px 6px;font-size:10.5px;color:#9aa4af;max-height:80px;overflow-y:auto!important;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
             '<div id="__wo_summary" style="padding:0 12px 6px;font-size:11px;font-family:Consolas,monospace;background:#0d1117;flex-shrink:0;"></div>' +
@@ -5696,10 +5758,119 @@
         };
         bodyEl.addEventListener('scroll', updateScrollShadows);
         new ResizeObserver(updateScrollShadows).observe(bodyEl);
-        panel.querySelector('#__wo_rescan').onclick = function() {
-            if (actionsBusy()) return;
-            runScan(render);
-        };
+        // Scan button spinner — ONE stroked <path> plays both the spinning
+        // arc and the completion tick. During the spin, its `d` is
+        // rewritten every frame as an arc (sweep length varying with a
+        // sine wave, per the original spec) whose leading end travels
+        // clockwise from the top. When it settles, that end is eased to
+        // land exactly on the circle's west point; the SAME path then
+        // switches its `d` to a checkmark anchored at that exact point
+        // (getTotalLength()-driven stroke-dash draw-in), so the stroke
+        // reads as one continuous line handing off from circle to tick
+        // rather than a second shape appearing on top of it.
+        (function() {
+            var scanBtn = panel.querySelector('#__wo_rescan');
+            var strokeEl = scanBtn.querySelector('.wo-scan-stroke');
+            var cx = 20,
+                cy = 20,
+                r = 15;
+
+            function ptAt(deg) {
+                var rad = deg * Math.PI / 180;
+                return [cx + r * Math.sin(rad), cy - r * Math.cos(rad)];
+            }
+
+            function arcPath(headDeg, sweepDeg) {
+                var tail = ptAt(headDeg - sweepDeg),
+                    head = ptAt(headDeg);
+                var largeArc = sweepDeg > 180 ? 1 : 0;
+                return 'M' + tail[0].toFixed(2) + ',' + tail[1].toFixed(2) + ' A' + r + ',' + r + ' 0 ' + largeArc + ',1 ' + head[0].toFixed(2) + ',' + head[1].toFixed(2);
+            }
+
+            function tickPathFrom(westPt) {
+                var b = [cx - r * 0.28, cy + r * 0.55],
+                    c = [cx + r * 0.62, cy - r * 0.42];
+                return 'M' + westPt[0].toFixed(2) + ',' + westPt[1].toFixed(2) + ' L' + b[0].toFixed(2) + ',' + b[1].toFixed(2) + ' L' + c[0].toFixed(2) + ',' + c[1].toFixed(2);
+            }
+            var raf = null,
+                spinning = false;
+            // Angular speed varies with a sine wave (sweep length varies
+            // with it too — long when fast, pinched short at the slow
+            // point each rotation), so the head angle is numerically
+            // integrated frame-to-frame rather than a closed-form angle(t).
+            var curAngle = 0,
+                curSweep = 40,
+                lastT = 0;
+
+            function spinLoop(now) {
+                if (!spinning) return;
+                if (!lastT) lastT = now;
+                var dt = Math.min(0.05, (now - lastT) / 1000);
+                lastT = now;
+                var omega = 0.55 + 0.45 * Math.sin(now / 1000 * 3.4);
+                curAngle += omega * 340 * dt;
+                curSweep = 18 + omega * 150;
+                strokeEl.setAttribute('d', arcPath(curAngle, curSweep));
+                raf = requestAnimationFrame(spinLoop);
+            }
+
+            function easeSettle(fromDeg, toDeg, fromSweep, toSweep, dur) {
+                return new Promise(function(resolve) {
+                    var t0 = performance.now();
+
+                    function step(now) {
+                        var p = Math.min(1, (now - t0) / dur);
+                        var e = 1 - Math.pow(1 - p, 3);
+                        var deg = fromDeg + (toDeg - fromDeg) * e;
+                        var sweep = fromSweep + (toSweep - fromSweep) * e;
+                        strokeEl.setAttribute('d', arcPath(deg, sweep));
+                        if (p < 1) requestAnimationFrame(step);
+                        else resolve();
+                    }
+                    requestAnimationFrame(step);
+                });
+            }
+
+            function start() {
+                scanBtn.classList.add('is-spinning');
+                spinning = true;
+                lastT = 0;
+                curAngle = 0;
+                strokeEl.setAttribute('stroke-dasharray', '');
+                strokeEl.setAttribute('stroke-dashoffset', '0');
+                raf = requestAnimationFrame(spinLoop);
+            }
+
+            function finish() {
+                spinning = false;
+                if (raf) cancelAnimationFrame(raf);
+                var from = curAngle % 360;
+                if (from < 0) from += 360;
+                var target = Math.ceil((from - 270) / 360) * 360 + 270;
+                easeSettle(from, target, curSweep, 26, 360).then(function() {
+                    var west = ptAt(270);
+                    strokeEl.setAttribute('d', tickPathFrom(west));
+                    var len = strokeEl.getTotalLength();
+                    strokeEl.setAttribute('stroke-dasharray', len);
+                    strokeEl.setAttribute('stroke-dashoffset', len);
+                    strokeEl.style.transition = 'stroke-dashoffset .32s ease';
+                    requestAnimationFrame(function() {
+                        strokeEl.setAttribute('stroke-dashoffset', '0');
+                    });
+                    setTimeout(function() {
+                        strokeEl.style.transition = '';
+                        strokeEl.setAttribute('d', '');
+                        scanBtn.classList.remove('is-spinning');
+                    }, 650);
+                });
+            }
+            panel.querySelector('#__wo_rescan').onclick = function() {
+                if (actionsBusy()) return;
+                start();
+                onceActionsUnlocked(finish);
+                runScanThenFocusReturnBox();
+            };
+        })();
         panel.querySelector('#__wo_setup').onclick = openSetup;
         panel.querySelector('#__wo_exit').onclick = function() {
             woConfirm('Close WO Validation tool?').then(function(ok) {
@@ -5761,10 +5932,13 @@
 
     function buildReturnMessage() {
         var st2 = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
-        var prefix = (st2.msgPrefix || '').trim();
-        var suffix = (st2.msgSuffix || '').trim();
         var delim = st2.msgDelim !== undefined ? st2.msgDelim : '. ';
         var cfg3 = getCfg();
+        // Prefix/suffix go through the same {{expr}} field/variable resolver
+        // as every other configurable message (see resolveMsg()) — resolved
+        // AFTER the rules loop below populates `cache`, so a prefix can
+        // reference the same field data the rules themselves just read.
+        var prefix, suffix;
         var parts = [];
         cfg3.rules.forEach(function(rule) {
             var res = runFormula(rule.formula, cache);
@@ -5789,6 +5963,8 @@
         // greeting + signature with nothing in between reads as broken, not
         // like a real return message.
         if (!body) return '';
+        prefix = resolveMsg((st2.msgPrefix || '').trim(), cache).trim();
+        suffix = resolveMsg((st2.msgSuffix || '').trim(), cache).trim();
         var full = (prefix ? prefix + delim : '') + body + (suffix ? ' ' + suffix : '');
         return full.trim();
     }
@@ -5799,6 +5975,38 @@
     // routeWorkflow('return') so all three can never disagree.
     function currentOrComputedReturnMessage() {
         return currentReturnMsg !== null ? currentReturnMsg : buildReturnMessage();
+    }
+
+    // After a manual Scan/Fix, drop the cursor into the return message box
+    // right after the generated message but before the suffix, so typing an
+    // addendum needs no click first. Only wired to direct user actions
+    // (Scan/Fix button + hotkey) — NOT auto-scan, which fires unprompted in
+    // the background and shouldn't yank focus away from whatever the user
+    // is doing.
+    function focusReturnMessageBoxBeforeSuffix() {
+        if (!panel) return;
+        var box = panel.querySelector('.wo-qr-box');
+        if (!box || box.disabled) return;
+        var text = box.value;
+        var s;
+        try {
+            s = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+        } catch (e) {
+            s = {};
+        }
+        var suffixResolved = resolveMsg((s.msgSuffix || '').trim(), cache).trim();
+        var cursorPos = text.length;
+        if (suffixResolved && text.slice(-(suffixResolved.length + 1)) === ' ' + suffixResolved) {
+            cursorPos = text.length - (suffixResolved.length + 1);
+        }
+        box.focus();
+        box.setSelectionRange(cursorPos, cursorPos);
+    }
+    function runScanThenFocusReturnBox(mode) {
+        runScan(function() {
+            render();
+            focusReturnMessageBoxBeforeSuffix();
+        }, mode);
     }
 
     // Generic clipboard copy (temp textarea + execCommand — same technique
@@ -6296,10 +6504,14 @@
                 var colBtn = block.querySelector('.__wo_col_toggle_btn');
                 var colPanel = block.querySelector('.__wo_col_panel');
                 if (colBtn && colPanel) {
+                    var colPanelKey = group.id + '::' + blockTableId;
+                    if (__woOpenColPanels[colPanelKey]) colPanel.style.display = 'block';
                     attachTooltip(colBtn, 'Toggle visible columns');
                     colBtn.onclick = function(e) {
                         e.stopPropagation();
-                        colPanel.style.display = colPanel.style.display === 'none' ? 'block' : 'none';
+                        var nowOpen = colPanel.style.display === 'none';
+                        colPanel.style.display = nowOpen ? 'block' : 'none';
+                        __woOpenColPanels[colPanelKey] = nowOpen;
                     };
                     colPanel.querySelectorAll('.__wo_colcb').forEach(function(cb) {
                         cb.onchange = function() {
@@ -6312,6 +6524,7 @@
                                 });
                             }
                             saveGroupTableState(group.id, blockTableId, { hiddenCols: hidden });
+                            __woOpenColPanels[colPanelKey] = true;
                             render();
                         };
                     });
@@ -6482,8 +6695,10 @@
         var returnBtn = document.createElement('button');
         returnBtn.type = 'button';
         returnBtn.id = '__wo_action_return';
-        returnBtn.textContent = '↩ Return';
-        returnBtn.className = 'wo-btn wo-btn-danger wo-btn-block';
+        returnBtn.className = 'wo-btn wo-btn-danger wo-btn-block wo-btn-icon';
+        returnBtn.innerHTML = '<span class="wo-act-fill"></span>' +
+            '<span class="wo-act-row">↩ Return</span>' +
+            '<span class="wo-act-over">↩ Return</span>';
         returnBtn.disabled = actionsBusy();
         returnBtn.onclick = function() {
             if (actionsBusy()) return;
@@ -6491,6 +6706,16 @@
                 if (!ok || actionsBusy()) return;
                 routing = true;
                 setActionsLocked(true);
+                var fill = returnBtn.querySelector('.wo-act-fill'),
+                    over = returnBtn.querySelector('.wo-act-over');
+                fill.style.clipPath = 'inset(0 0 0 0)';
+                over.style.clipPath = 'inset(0 0 0 0)';
+                onceActionsUnlocked(function() {
+                    setTimeout(function() {
+                        fill.style.clipPath = 'inset(0 100% 0 0)';
+                        over.style.clipPath = 'inset(0 100% 0 0)';
+                    }, 260);
+                });
                 routeWorkflow('return');
             });
         };
@@ -6513,7 +6738,7 @@
             fixBtn.disabled = actionsBusy();
             fixBtn.onclick = function() {
                 if (actionsBusy()) return;
-                runScan(render, 'fix');
+                runScanThenFocusReturnBox('fix');
             };
             actionRow.appendChild(fixBtn);
         }
@@ -6521,8 +6746,10 @@
         var approveBtn = document.createElement('button');
         approveBtn.type = 'button';
         approveBtn.id = '__wo_action_approve';
-        approveBtn.textContent = '✓ Approve';
-        approveBtn.className = 'wo-btn wo-btn-pass wo-btn-block';
+        approveBtn.className = 'wo-btn wo-btn-pass wo-btn-block wo-btn-icon';
+        approveBtn.innerHTML = '<span class="wo-act-fill"></span>' +
+            '<span class="wo-act-row">✓ Approve</span>' +
+            '<span class="wo-act-badge"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
         approveBtn.disabled = actionsBusy();
         approveBtn.onclick = function() {
             if (actionsBusy()) return;
@@ -6530,6 +6757,19 @@
                 if (!ok || actionsBusy()) return;
                 routing = true;
                 setActionsLocked(true);
+                var fill = approveBtn.querySelector('.wo-act-fill'),
+                    row = approveBtn.querySelector('.wo-act-row'),
+                    badge = approveBtn.querySelector('.wo-act-badge');
+                fill.style.clipPath = 'inset(0 0 0 0)';
+                onceActionsUnlocked(function() {
+                    row.style.opacity = '0';
+                    badge.style.transform = 'translate(-50%,-50%) scale(1)';
+                    setTimeout(function() {
+                        badge.style.transform = 'translate(-50%,-50%) scale(0)';
+                        row.style.opacity = '';
+                        fill.style.clipPath = 'inset(0 100% 0 0)';
+                    }, 1100);
+                });
                 routeWorkflow('approve');
             });
         };
@@ -6719,7 +6959,7 @@
 
         bModal.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
             '<b style="font-size:13px;">Browse Page Fields</b>' +
-            '<button id="__fb_close" type="button" class="wo-btn-ghost">✕ Close</button>' +
+            '<button id="__fb_close" type="button" class="wo-btn-ghost" aria-label="Close">✕</button>' +
             '</div>' +
             '<div style="margin-bottom:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
             '<input id="__fb_search" type="text" placeholder="Filter fields..." style="flex:1;min-width:150px;">' +
@@ -6733,6 +6973,7 @@
             '<div id="__fb_list" style="flex:1;overflow:auto;border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:4px;"></div>' +
             '<div style="margin-top:8px;display:flex;justify-content:flex-end;gap:8px;">' +
             '<button id="__fb_selall" type="button" class="wo-btn">Select All Visible</button>' +
+            '<button id="__fb_selnotempty" type="button" class="wo-btn">Select All Not Empty</button>' +
             '<button id="__fb_selnone" type="button" class="wo-btn">Deselect All</button>' +
             '<button id="__fb_save" type="button" class="wo-btn wo-btn-pass">Save</button>' +
             '</div>';
@@ -6774,6 +7015,15 @@
         bModal.querySelector('#__fb_selall').onclick = function() {
             listEl.querySelectorAll('input[type="checkbox"]:not([disabled])').forEach(function(cb) {
                 cb.checked = true;
+            });
+        };
+        bModal.querySelector('#__fb_selnotempty').onclick = function() {
+            var valueByKey = {};
+            found.forEach(function(f) {
+                valueByKey[f.key] = f.value;
+            });
+            listEl.querySelectorAll('input[type="checkbox"]:not([disabled])').forEach(function(cb) {
+                cb.checked = !!valueByKey[cb.getAttribute('data-fkey')];
             });
         };
         bModal.querySelector('#__fb_selnone').onclick = function() {
@@ -6986,8 +7236,19 @@
             // A thin divider separates adjacent SIBLING tabs, except on
             // either side of the active tab, where the tab's own
             // background already does the separating.
-            "#__wo_setup_modal .wo-modal-tabs{position:relative;display:flex;align-items:flex-end;flex-wrap:nowrap;padding:8px 4px 0;}" +
+            "#__wo_setup_modal .wo-modal-tabs{position:relative;display:flex;align-items:flex-end;flex-wrap:nowrap;padding:8px 4px 0;overflow-x:auto;scrollbar-width:none;}" +
+            "#__wo_setup_modal .wo-modal-tabs::-webkit-scrollbar{display:none;}" +
             "#__wo_setup_modal .wo-modal-tabs::after{content:'';position:absolute;left:4px;right:4px;bottom:0;height:1px;background:var(--wo-border);z-index:0;}" +
+            // Same top/bottom-shadow-instead-of-scrollbar pattern as
+            // #__wo_groups, mirrored horizontally — applyResponsiveTabFit()
+            // (icon-shrink, then the "…" overflow menu) keeps this from
+            // actually needing to scroll in ordinary use, but this is the
+            // fallback for whatever combination of window width + active
+            // beta tabs still doesn't fit.
+            "#__wo_setup_modal .wo-tabs-scroll-shadow{position:absolute;top:0;bottom:0;width:16px;pointer-events:none;opacity:0;transition:opacity 150ms;z-index:3;}" +
+            "#__wo_setup_modal .wo-tabs-scroll-shadow-left{left:0;background:linear-gradient(to right, var(--wo-surface-2), transparent);}" +
+            "#__wo_setup_modal .wo-tabs-scroll-shadow-right{right:0;background:linear-gradient(to left, var(--wo-surface-2), transparent);}" +
+            "#__wo_setup_modal .wo-tabs-scroll-shadow.is-visible{opacity:1;}" +
             "#__wo_setup_modal .wo-tab-group{display:flex;align-items:flex-end;position:relative;z-index:1;flex-shrink:0;}" +
             // A bare flex `gap` between the three tab groups left a floating
             // stretch of blank space at each boundary (e.g. between Scan and
@@ -7041,6 +7302,7 @@
             "#__wo_setup_modal .wo-btn-primary{background:var(--wo-accent);color:var(--wo-on-accent);border-color:var(--wo-accent);}" +
             "#__wo_setup_modal .wo-btn-primary:disabled{background:var(--wo-surface-2);color:var(--wo-muted);border-color:var(--wo-border);cursor:default;opacity:.6;}" +
             "#__wo_setup_modal .wo-btn-danger{color:var(--wo-fail);border-color:var(--wo-fail);}" +
+            "#__wo_setup_modal .wo-btn-danger:hover{border-color:var(--wo-fail);background:color-mix(in srgb, var(--wo-fail) 12%, var(--wo-surface-2));}" +
             "#__wo_setup_modal .wo-btn-pass{background:var(--wo-pass);color:#04210c;border-color:var(--wo-pass);}" +
             "#__wo_setup_modal .wo-btn-ghost{background:none;border:1px solid transparent;color:var(--wo-muted);cursor:pointer;font:inherit;font-size:11px;padding:6px 8px;border-radius:var(--wo-r-ctl);}" +
             "#__wo_setup_modal .wo-btn-ghost:hover{color:var(--wo-text);background:var(--wo-field);}" +
@@ -7048,7 +7310,22 @@
             // marker — reused wherever a beta feature's own settings live
             // inline (not centralized), so it's visually obvious without a
             // trip to the Beta tab.
-            "#__wo_setup_modal .wo-beta-pill{display:inline-block;padding:1px 5px;border-radius:3px;background:#8957e5;color:#fff;font-size:8.5px;font-weight:800;letter-spacing:.03em;vertical-align:middle;}" +
+            "#__wo_setup_modal .wo-beta-pill{display:inline-flex;align-items:center;justify-content:center;line-height:1;padding:3px 5px 2px;border-radius:3px;background:#8957e5;color:#fff;font-size:8.5px;font-weight:800;letter-spacing:.03em;vertical-align:middle;}" +
+            "#__wo_setup_modal .wo-skip-tag{display:inline-flex;align-items:center;justify-content:center;line-height:1;padding:3px 6px 2px;border-radius:3px;background:var(--wo-warn);color:#241900;font-size:9px;font-weight:800;letter-spacing:.03em;flex-shrink:0;margin-left:6px;}" +
+            // Save button — icon+label when idle/ready, collapses to an
+            // icon-only rounded square once a save completes (stays that
+            // way until updateSaveButtonState() sees a new change to undo
+            // it — see the .is-collapsed handling there).
+            "#__wo_setup_modal .wo-save-btn{position:relative;overflow:hidden;gap:7px;padding:8px 16px 8px 13px;font-size:13px;width:92px;box-sizing:border-box;transition:width .45s cubic-bezier(.4,0,.2,1),padding .45s cubic-bezier(.4,0,.2,1),background .2s ease,border-color .2s ease;}" +
+            "#__wo_setup_modal .wo-save-row{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;}" +
+            "#__wo_setup_modal .wo-save-icon{flex-shrink:0;}" +
+            "#__wo_setup_modal .wo-save-label{transition:opacity .2s ease;}" +
+            "#__wo_setup_modal .wo-save-btn.is-collapsed{width:34px;padding:8px;}" +
+            "#__wo_setup_modal .wo-save-btn.is-collapsed .wo-save-label{opacity:0;}" +
+            "#__wo_setup_modal .wo-save-btn.is-pulsing .wo-save-row{animation:woSavePulse .5s ease-in-out;}" +
+            "@keyframes woSavePulse{45%{transform:scale(1.1);}}" +
+            "#__wo_setup_modal .wo-save-tick.is-drawn{animation:woSaveTickDraw .32s ease forwards;}" +
+            "@keyframes woSaveTickDraw{to{stroke-dashoffset:0;}}" +
             "#__wo_setup_modal input[type=text],#__wo_setup_modal input[type=number],#__wo_setup_modal textarea,#__wo_setup_modal select{font:inherit;font-size:11.5px;background:var(--wo-field);color:var(--wo-text);border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:5px 7px;}" +
             // Every plain textarea only grows/shrinks vertically — a
             // textarea that can also stretch wider than its container
@@ -7108,6 +7385,15 @@
             // its own ad hoc bordered div.
             "#__wo_setup_modal .wo-subbox{border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:8px;background:var(--wo-field);}" +
             "#__wo_setup_modal .wo-subbox-accent{border-color:var(--wo-accent);}" +
+            // Scan Order's fixed start/end markers — not real cards (no
+            // drag handle, kebab, or delete), just framing.
+            "#__wo_setup_modal .wo-scan-bookend{display:flex;align-items:center;gap:7px;padding:7px 10px;color:var(--wo-muted);font-size:11px;flex-wrap:wrap;}" +
+            "#__wo_setup_modal .wo-scan-bookend-icon{display:flex;flex-shrink:0;color:var(--wo-accent);}" +
+            "#__wo_setup_modal .wo-scan-bookend-label{font-weight:700;color:var(--wo-text);flex-shrink:0;}" +
+            "#__wo_setup_modal .wo-scan-bookend-sub{font-weight:400;color:var(--wo-muted);}" +
+            "#__wo_setup_modal .wo-scan-bookend-note{font-size:10px;font-style:italic;}" +
+            "#__wo_setup_modal .wo-scan-bookend-input{margin-left:auto;width:160px;font-size:11px;}" +
+            "#__wo_setup_modal .wo-scan-return-symbol{display:inline-flex;align-items:center;color:var(--wo-accent);margin-left:6px;flex-shrink:0;}" +
             // Shared editable-rows table (Scan tab's Row Detail Fields /
             // Post-Scan Actions) — one header row instead of repeating each
             // field's label inside every entry.
@@ -7289,9 +7575,19 @@
             '<div class="wo-modal-titlebar" id="__s_titlebar">' +
             '<span class="wo-modal-title">Setup</span>' +
             '<span class="wo-modal-title-actions">' +
-            '<button id="__s_formulas" type="button" class="wo-btn-ghost" aria-label="Formula reference">📖</button>' +
-            '<button id="__s_save" class="wo-btn wo-btn-primary">Save</button>' +
-            '<button id="__s_close" class="wo-btn-ghost" aria-label="Close">✕</button>' +
+            '<button id="__s_formulas" type="button" class="wo-btn-ghost" aria-label="Formula reference"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2.5 3.5C2.5 3 2.9 2.7 3.4 2.8C5 3 6.5 3.6 8 4.6C9.5 3.6 11 3 12.6 2.8C13.1 2.7 13.5 3 13.5 3.5V11.5C13.5 12 13.1 12.3 12.6 12.4C11 12.6 9.5 13.2 8 14.2C6.5 13.2 5 12.6 3.4 12.4C2.9 12.3 2.5 12 2.5 11.5V3.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 4.6V14.2" stroke="currentColor" stroke-width="1.2"/></svg></button>' +
+            '<button id="__s_save" type="button" class="wo-btn wo-btn-primary wo-save-btn">' +
+            '<span class="wo-save-row">' +
+            '<svg class="wo-save-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">' +
+            '<defs><clipPath id="__wo_save_clip"><path class="wo-save-mask" d="M0,0"/></clipPath></defs>' +
+            '<path d="M6 3 Q6 2 7 2 H17 Q18 2 18 3 V21 L12 17 L6 21 Z" clip-path="url(#__wo_save_clip)" fill="currentColor"/>' +
+            '<path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M6 3 Q6 2 7 2 H17 Q18 2 18 3 V21 L12 17 L6 21 Z"/>' +
+            '<path class="wo-save-tick" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="20" stroke-dashoffset="20" d="M9.4 12.3 L11 13.9 L14.6 10.1"/>' +
+            '</svg>' +
+            '<span class="wo-save-label">Save</span>' +
+            '</span>' +
+            '</button>' +
+            '<button id="__s_close" class="wo-btn-ghost" aria-label="Close"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 3L13 13M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>' +
             '</span>' +
             '</div>' +
             '<div class="wo-modal-tabs">' +
@@ -7319,6 +7615,8 @@
             '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="3" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="13" r="0.7" stroke="currentColor" stroke-width="1.4"/></svg>' +
             '</button>' +
             '</div>' +
+            '<div class="wo-tabs-scroll-shadow wo-tabs-scroll-shadow-left"></div>' +
+            '<div class="wo-tabs-scroll-shadow wo-tabs-scroll-shadow-right"></div>' +
             '</div>' +
             '<div id="__s_content" class="wo-modal-content"></div>' +
             // Bottom-right keeps the visible grab-icon affordance; the other
@@ -7494,9 +7792,21 @@
         }
         var tabBarResizeObserver = new ResizeObserver(function() {
             applyResponsiveTabFit();
+            updateTabScrollShadows();
         });
         tabBarResizeObserver.observe(modal.querySelector('.wo-modal-tabs'));
         applyResponsiveTabFit(true);
+
+        var tabShadowLeft = modal.querySelector('.wo-tabs-scroll-shadow-left');
+        var tabShadowRight = modal.querySelector('.wo-tabs-scroll-shadow-right');
+        function updateTabScrollShadows() {
+            var bar = modal.querySelector('.wo-modal-tabs');
+            if (!bar || !tabShadowLeft || !tabShadowRight) return;
+            tabShadowLeft.classList.toggle('is-visible', bar.scrollLeft > 1);
+            tabShadowRight.classList.toggle('is-visible', bar.scrollLeft + bar.clientWidth < bar.scrollWidth - 1);
+        }
+        modal.querySelector('.wo-modal-tabs').addEventListener('scroll', updateTabScrollShadows);
+        updateTabScrollShadows();
 
         var tabCtxMenu = null;
 
@@ -7801,8 +8111,54 @@
             saveScan(scan);
             saveSettingsCfg(st);
         }
+        // 'ready' (blue, clickable) / 'saving' (mid-animation) / 'saved'
+        // (collapsed to an icon-only square). Only 'ready'<->'saved' are
+        // ever set here — 'saving' is set/cleared entirely inside the
+        // click handler's animation sequence below.
+        var saveVisualState = 'ready';
+        var saveIconEl = saveBtn.querySelector('.wo-save-icon');
+        var saveMaskEl = saveBtn.querySelector('.wo-save-mask');
+        var saveTickEl = saveBtn.querySelector('.wo-save-tick');
+        function saveBookmarkClipPath(h) {
+            if (h <= 2) return 'M0,0';
+            if (h <= 17) return 'M6,2 H18 V' + h + ' H6 Z';
+            var lx = 12 - 1.5 * (h - 17),
+                rx = 12 + 1.5 * (h - 17);
+            return 'M6,2 H18 V' + h + ' L' + rx + ',' + h + ' L12,17 L' + lx + ',' + h + ' H6 Z';
+        }
+        function animateBookmarkFill(ms) {
+            return new Promise(function(resolve) {
+                var h = 2,
+                    step = 19 / (ms / 10);
+                var timer = setInterval(function() {
+                    h += step;
+                    if (h >= 21) {
+                        h = 21;
+                        saveMaskEl.setAttribute('d', saveBookmarkClipPath(h));
+                        clearInterval(timer);
+                        resolve();
+                        return;
+                    }
+                    saveMaskEl.setAttribute('d', saveBookmarkClipPath(h));
+                }, 10);
+            });
+        }
+        function resetSaveIconVisual() {
+            saveMaskEl.setAttribute('d', 'M0,0');
+            saveTickEl.classList.remove('is-drawn');
+            saveTickEl.style.strokeDashoffset = '20';
+        }
         function updateSaveButtonState() {
-            saveBtn.disabled = !isSetupDirty();
+            var dirty = isSetupDirty();
+            // A new edit after a completed save re-arms the button — expand
+            // back out to the ready/blue state instead of staying collapsed
+            // and dead until the modal is reopened.
+            if (dirty && saveVisualState === 'saved') {
+                saveVisualState = 'ready';
+                saveBtn.classList.remove('is-collapsed');
+                resetSaveIconVisual();
+            }
+            if (saveVisualState !== 'saving') saveBtn.disabled = !dirty;
         }
         updateSaveButtonState();
 
@@ -8292,7 +8648,7 @@
         // has moved a few pixels past mousedown, so a plain click still
         // reaches makeCollapsible untouched, and a real drag never lets a
         // click reach it at all (the capture overlay owns the mouseup).
-        function attachCardDrag(headerEl, cardEl, container, arr, idx, rerenderFn) {
+        function attachCardDrag(headerEl, cardEl, container, arr, idx, rerenderFn, getId, expandState) {
             // A data attribute, not the .wo-card class, marks which of
             // container's children are reorderable cards — so this works
             // for tabs (Variables, Scan) whose cards don't use .wo-card
@@ -8336,13 +8692,22 @@
                 // actually finished — until then the dragged card is
                 // visually lifted (shadow/elevation) but doesn't yet track
                 // the cursor or trigger a reorder.
+                // Force-collapsing for the drag is otherwise purely visual —
+                // the underlying expand-state object never heard about it,
+                // so the next rerenderFn() (fired on drop) rebuilds every
+                // card from that untouched state and springs them back
+                // open. Writing the collapse into `expandState` here too
+                // (when the caller passed one) makes the drag's collapse
+                // the new persisted state, matching what's on screen.
                 cards.forEach(function(c, i) {
                     if (i === idx) return;
                     var body = c.querySelector('[data-coll-body]');
                     if (body && body.style.display !== 'none') animateBodyToggle(body, false);
+                    if (getId && expandState) expandState[getId(arr[i])] = false;
                 });
                 var draggedBody = cardEl.querySelector('[data-coll-body]');
                 if (draggedBody && draggedBody.style.display !== 'none') animateBodyToggle(draggedBody, false);
+                if (getId && expandState) expandState[getId(arr[idx])] = false;
 
                 cardEl.style.position = 'relative';
                 cardEl.style.zIndex = '10';
@@ -8486,6 +8851,7 @@
             doCloseSetup();
         };
         modal.querySelector('#__s_save').onclick = function() {
+            if (saveVisualState === 'saving') return;
             saveCfg(cfg);
             saveScan(scan);
             saveSettingsCfg(st);
@@ -8507,9 +8873,27 @@
             __woSetupSnapshot = JSON.stringify({
                 cfg: cfg,
                 scan: scan,
-                st: st
+                st: deferredSettingsSlice(st)
             });
-            updateSaveButtonState();
+            // Save itself is synchronous (localStorage only) — this sequence
+            // is a purely visual confirmation, not gating on real async work.
+            saveVisualState = 'saving';
+            saveBtn.disabled = true;
+            saveBtn.classList.add('is-pulsing');
+            setTimeout(function() {
+                saveBtn.classList.remove('is-pulsing');
+                saveBtn.querySelector('.wo-save-label').textContent = 'Saved';
+                animateBookmarkFill(420).then(function() {
+                    setTimeout(function() {
+                        saveTickEl.classList.add('is-drawn');
+                        setTimeout(function() {
+                            saveBtn.classList.add('is-collapsed');
+                            saveBtn.querySelector('.wo-save-label').textContent = 'Save';
+                            saveVisualState = 'saved';
+                        }, 320);
+                    }, 140);
+                });
+            }, 150);
         };
 
         modal.querySelector('#__s_exp').onclick = function() {
@@ -8602,13 +8986,40 @@
             var pop = document.createElement('div');
             pop.id = '__wo_formula_ref';
             pop.style.cssText = 'position:fixed;top:6%;left:50%;transform:translateX(-50%);width:min(560px,88%);height:82%;z-index:10000000;background:var(--wo-bg,#0d1117);color:var(--wo-text,#f0f3f6);border:1px solid var(--wo-border,#30363d);border-radius:10px;box-shadow:0 6px 30px rgba(0,0,0,.8);display:flex;flex-direction:column;font-family:"Segoe UI",system-ui,sans-serif;font-size:12px;padding:10px;';
-            pop.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex:0 0 auto;">' +
+            pop.innerHTML = '<div id="__fr_titlebar" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex:0 0 auto;cursor:move;user-select:none;">' +
                 '<b style="font-size:13px;">Formula Reference</b>' +
-                '<button id="__fr_close" type="button" class="wo-btn-ghost">✕ Close</button>' +
+                '<button id="__fr_close" type="button" class="wo-btn-ghost" aria-label="Close"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 3L13 13M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>' +
                 '</div>' +
                 '<input id="__fr_search" type="text" placeholder="Filter functions..." style="flex:0 0 auto;margin-bottom:8px;">' +
                 '<div id="__fr_list" style="flex:1;overflow:auto;"></div>';
             document.body.appendChild(pop);
+
+            // Draggable — simple free-drag (no edge-snap like the Setup
+            // modal itself has), converting the initial centered
+            // transform-positioning to absolute left/top on the first drag.
+            (function() {
+                var tbEl = pop.querySelector('#__fr_titlebar');
+                var ox = 0,
+                    oy = 0,
+                    mx = 0,
+                    my = 0;
+                tbEl.addEventListener('mousedown', function(e) {
+                    if (e.target.closest('button')) return;
+                    e.preventDefault();
+                    var r = pop.getBoundingClientRect();
+                    pop.style.left = r.left + 'px';
+                    pop.style.top = r.top + 'px';
+                    pop.style.transform = 'none';
+                    ox = r.left;
+                    oy = r.top;
+                    mx = e.clientX;
+                    my = e.clientY;
+                    startPointerCapture(function(mv) {
+                        pop.style.left = Math.max(0, ox + mv.clientX - mx) + 'px';
+                        pop.style.top = Math.max(0, oy + mv.clientY - my) + 'px';
+                    }, null, 'grabbing');
+                });
+            })();
 
             var listEl = pop.querySelector('#__fr_list');
 
@@ -9109,7 +9520,9 @@
                 attachCardDrag(box.querySelector('[data-coll-header]'), box, content, vars, idx, function() {
                     saveVars(vars);
                     varsTab();
-                });
+                }, function(item) {
+                    return item.id;
+                }, varExpandState);
 
                 var fa = box.querySelector('[data-f]');
                 var titleInput = box.querySelector('[data-l]');
@@ -9173,7 +9586,10 @@
                     modal.appendChild(menu);
                     var mr = menu.getBoundingClientRect();
                     if (mr.bottom > window.innerHeight) menu.style.top = Math.max(4, btnRect.top - mr.height - 4) + 'px';
-                    wireEditTooltipKebabItem(menu, v, v.label, varsTab);
+                    wireEditTooltipKebabItem(menu, v, v.label, function() {
+                        saveVars(vars);
+                        varsTab();
+                    });
                     menu.querySelector('[data-rename]').onclick = function(ev) {
                         ev.stopPropagation();
                         closeRuleMenu();
@@ -9419,7 +9835,9 @@
                 msgWrap.appendChild(msgSection(rule, 'warn', '⚠ Warn — needs reviewer confirmation', '#d29922', true));
 
                 wireMoveButtons(box, cfg.rules, idx, rulesTab);
-                attachCardDrag(box.querySelector('[data-coll-header]'), box, content, cfg.rules, idx, rulesTab);
+                attachCardDrag(box.querySelector('[data-coll-header]'), box, content, cfg.rules, idx, rulesTab, function(item) {
+                    return item.id;
+                }, ruleExpandState);
 
                 var fa = box.querySelector('[data-f]');
                 var titleInput = box.querySelector('[data-l]');
@@ -9733,7 +10151,9 @@
                     g2.__order = ids;
                     saveGS(g2);
                     groupsTab();
-                });
+                }, function(item) {
+                    return item.id;
+                }, groupExpandState);
 
                 var titleInput = box.querySelector('[data-ti]');
                 if (titleInput) {
@@ -10056,7 +10476,7 @@
             // Pick from page button
             var pickBtn = document.createElement('button');
             pickBtn.type = 'button';
-            pickBtn.textContent = '🔍 Browse Page Fields';
+            pickBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" style="vertical-align:-2px;margin-right:4px;" aria-hidden="true"><circle cx="6.8" cy="6.8" r="4.3" stroke="currentColor" stroke-width="1.3"/><path d="M10 10L13.5 13.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>Browse Page Fields';
             pickBtn.className = 'wo-btn';
             pickBtn.style.cssText = 'margin-top:8px;';
             pickBtn.onclick = function() {
@@ -10083,12 +10503,38 @@
 
         // ── SCAN TAB ──
         function scanTab() {
-            content.innerHTML = '<div style="margin-bottom:10px;font-size:11px;">WO Tab ID: <input type="text" data-wt value="' + scan.woTabId + '"> <span style="color:var(--wo-muted);">(tab returned to after scan)</span>' +
-                '<div style="margin-top:8px;font-weight:700;color:var(--wo-text);">Scan Order</div>' +
+            // Bookend rows aren't real scan.scans entries (nothing to drag,
+            // rename, or delete) — they're a fixed visual frame making the
+            // implicit start/end of every scan explicit: a scan always
+            // begins by switching to the WO tab (regardless of where the
+            // page happens to be) and always finishes back on it. Both
+            // read/write the SAME scan.woTabId this used to be a bare
+            // "WO Tab ID:" field for — only the framing changed.
+            function woBookendHtml(kind) {
+                var isStart = kind === 'start';
+                var icon = isStart ?
+                    '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2.5 3.5C2.5 3 2.9 2.7 3.4 2.8C5 3 6.5 3.6 8 4.6C9.5 3.6 11 3 12.6 2.8C13.1 2.7 13.5 3 13.5 3.5V11.5C13.5 12 13.1 12.3 12.6 12.4C11 12.6 9.5 13.2 8 14.2C6.5 13.2 5 12.6 3.4 12.4C2.9 12.3 2.5 12 2.5 11.5V3.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>' :
+                    '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 4.5V2.8L6 6.3L10 9.8V8.1C11.9 8.1 13.4 8.9 14.4 10.5C14.2 8 12.9 5.1 10 4.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>';
+                return '<div class="wo-scan-bookend">' +
+                    '<span class="wo-scan-bookend-icon">' + icon + '</span>' +
+                    '<span class="wo-scan-bookend-label">Work Order <span class="wo-scan-bookend-sub">(main page)</span></span>' +
+                    '<span class="wo-scan-bookend-note">' + (isStart ? 'Scan always starts here, even if this isn\'t the current tab' : 'Scan always returns here when finished') + '</span>' +
+                    (isStart ? '<input type="text" data-wt value="' + String(scan.woTabId).replace(/"/g, '&quot;') + '" class="wo-scan-bookend-input">' : '') +
+                    '</div>';
+            }
+            content.innerHTML = '<div style="margin-bottom:10px;">' +
+                '<div style="margin-bottom:8px;font-weight:700;color:var(--wo-text);">Scan Order</div>' +
+                woBookendHtml('start') +
+                '<div id="__scan_order_list"></div>' +
+                woBookendHtml('end') +
                 '</div>';
-            content.querySelector('[data-wt]').oninput = function(e) {
-                scan.woTabId = e.target.value;
-            };
+            content.querySelectorAll('[data-wt]').forEach(function(inp) {
+                attachTooltip(inp, 'Tab ID/event for the Work Order tab itself');
+                inp.oninput = function(e) {
+                    scan.woTabId = e.target.value;
+                };
+            });
+            var scanOrderList = content.querySelector('#__scan_order_list');
             scan.scans.forEach(function(s, idx) {
                 var box = document.createElement('div');
                 box.className = 'wo-card';
@@ -10100,6 +10546,7 @@
                     '<div data-coll-header class="wo-card-head">' +
                     DRAG_HANDLE_HTML +
                     titleHtml +
+                    (s.skipped ? '<span class="wo-skip-tag">Skipped</span>' : '') +
                     entryTipIconHtml(s) +
                     moveButtonsHtml(idx === 0, idx === scan.scans.length - 1) +
                     '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
@@ -10305,14 +10752,23 @@
                     renderRdfList();
                 };
 
-                content.appendChild(box);
+                scanOrderList.appendChild(box);
                 makeCollapsible(box, s.title, !scanExpandState[s.id], function(expandedNow) {
                     scanExpandState[s.id] = expandedNow;
                 });
                 wireEntryTipIcon(box, s);
                 attachTooltip(box.querySelector('[data-kebab]'), 'More actions');
                 wireMoveButtons(box, scan.scans, idx, scanTab);
-                attachCardDrag(box.querySelector('[data-coll-header]'), box, content, scan.scans, idx, scanTab);
+                attachCardDrag(box.querySelector('[data-coll-header]'), box, scanOrderList, scan.scans, idx, scanTab, function(item) {
+                    return item.id;
+                }, scanExpandState);
+                if (idx === scan.scans.length - 1) {
+                    var backSym = document.createElement('span');
+                    backSym.className = 'wo-scan-return-symbol';
+                    backSym.innerHTML = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 4.5V2.8L6 6.3L10 9.8V8.1C11.9 8.1 13.4 8.9 14.4 10.5C14.2 8 12.9 5.1 10 4.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>';
+                    box.querySelector('[data-coll-header]').appendChild(backSym);
+                    attachTooltip(backSym, 'Last item — scan returns to the Work Order tab after this');
+                }
 
                 var titleInput = box.querySelector('[data-l]');
                 if (titleInput) {
@@ -10365,6 +10821,10 @@
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
                         '<span>Duplicate</span>' +
                         '</button>' +
+                        '<button data-skip type="button" class="wo-kebab-item">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 3.5L4 12.5L10 8L4 3.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M12 3.5V12.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>' +
+                        '<span>' + (s.skipped ? 'Un-skip' : 'Skip') + '</span>' +
+                        '</button>' +
                         editTooltipKebabHtml(s) +
                         '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger">' +
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
@@ -10391,6 +10851,12 @@
                         copy.id = 's_' + Date.now();
                         copy.title = s.title + ' (copy)';
                         scan.scans.splice(idx + 1, 0, copy);
+                        scanTab();
+                    };
+                    menu.querySelector('[data-skip]').onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        s.skipped = !s.skipped;
                         scanTab();
                     };
                     menu.querySelector('[data-del]').onclick = function(ev) {
@@ -10948,11 +11414,11 @@
             qrDiv.innerHTML =
                 '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Return Message</span></div>' +
                 '<div data-coll-body style="margin-top:7px;">' +
-                '<div style="margin-bottom:6px;"><label style="color:var(--wo-muted);font-size:11px;">Prefix (e.g. Hi {name},)</label><br>' +
+                '<div style="margin-bottom:6px;"><label style="color:var(--wo-muted);font-size:11px;">Prefix — fields/variables allowed, e.g. Hi {{F("Reported By Name")}},</label><br>' +
                 '<input id="__st_prefix" type="text" value="' + (st.msgPrefix || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;margin-top:2px;"></div>' +
-                '<div style="margin-bottom:6px;"><label style="color:var(--wo-muted);font-size:11px;">Suffix / Signature (e.g. - wz)</label><br>' +
+                '<div style="margin-bottom:6px;"><label style="color:var(--wo-muted);font-size:11px;">Suffix / Signature — fields/variables allowed, e.g. - {{V("initials")}}</label><br>' +
                 '<input id="__st_suffix" type="text" value="' + (st.msgSuffix || '').replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;margin-top:2px;"></div>' +
-                '<div style="margin-bottom:6px;"><label style="color:var(--wo-muted);font-size:11px;">Delimiter (default: ". ")</label><br>' +
+                '<div style="margin-bottom:6px;"><label style="color:var(--wo-muted);font-size:11px;">Delimiter</label><br>' +
                 '<input id="__st_delim" type="text" value="' + (st.msgDelim !== undefined ? st.msgDelim : '. ').replace(/"/g, '&quot;') + '" style="width:80px;font-size:11px;margin-top:2px;"></div>' +
                 '<div style="margin-top:8px;color:var(--wo-muted);font-size:10px;">Per-rule inclusion is set in each rule\'s Fail/Warn section.</div>' +
                 '</div>';
@@ -10970,7 +11436,7 @@
                 hkCard.innerHTML = '<div data-coll-header class="wo-card-head"><span class="wo-rule-title">Hotkeys</span></div>' +
                     '<div data-coll-body style="margin-top:7px;"></div>';
                 content.appendChild(hkCard);
-                makeCollapsible(hkCard, 'Hotkeys', false);
+                makeCollapsible(hkCard, 'Hotkeys', true);
                 var hkBody = hkCard.querySelector('[data-coll-body]');
 
                 activeHotkeyActions.forEach(function(action, ai) {
@@ -11035,7 +11501,7 @@
                 '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;">Detects a WO number change from the last scan and starts a new one.</div>' +
                 '</div>';
             content.appendChild(autoScanDiv);
-            makeCollapsible(autoScanDiv, 'Auto-Scan', false);
+            makeCollapsible(autoScanDiv, 'Auto-Scan', true);
 
             autoScanDiv.querySelector('#__st_autoscan').onchange = function(e) {
                 st.autoScan = e.target.checked;
@@ -11059,7 +11525,7 @@
                 '<div style="color:var(--wo-muted);font-size:10px;margin-top:4px;">Allows rules/messages using your name, username, or email via whoami().</div>' +
                 '</div>';
             content.appendChild(displayDiv);
-            makeCollapsible(displayDiv, 'Display', false);
+            makeCollapsible(displayDiv, 'Display', true);
 
             displayDiv.querySelector('#__st_hide_summary').onchange = function(e) {
                 st.hideSummaryBar = !e.target.checked;
@@ -11084,7 +11550,7 @@
                     '<button id="__st_beta2diag" type="button" class="wo-btn">Run beta_2 Diagnostics (copies report to clipboard)</button>' +
                     '</div>';
                 content.appendChild(dbgDiv);
-                makeCollapsible(dbgDiv, 'Debug', false);
+                makeCollapsible(dbgDiv, 'Debug', true);
                 dbgDiv.querySelector('#__st_debug').onclick = function() {
                     window.__woDebugTables();
                     window.__woDebugCache();
@@ -11166,7 +11632,7 @@
                 '</label></div>' +
                 '</div>';
             content.appendChild(backupSettDiv);
-            makeCollapsible(backupSettDiv, 'Backups', false);
+            makeCollapsible(backupSettDiv, 'Backups', true);
 
             backupSettDiv.querySelector('#__st_autobackup').onchange = function(e) {
                 st.autoBackup = e.target.checked;
@@ -11240,7 +11706,7 @@
                     '') +
                 '</div>';
             content.appendChild(updSettDiv);
-            makeCollapsible(updSettDiv, 'Updates', false);
+            makeCollapsible(updSettDiv, 'Updates', true);
 
             updSettDiv.querySelector('#__st_channel').onchange = function(e) {
                 // Stage only — e.stopPropagation() keeps this from also
@@ -12141,6 +12607,28 @@
         document.addEventListener('keydown', window.__wo_hk_listener);
     }
     applyHotkeys();
+
+    // One-time-only: brand new install (no __wo_settings yet at all) gets a
+    // default return-message suffix of the user's initials, from whoami's
+    // first/last name — non-blocking, doesn't hold up buildPanel() below.
+    // Never overwrites a value that's already there by the time whoami
+    // resolves (an explicit edit, or a concurrent seed, wins).
+    (function seedInitialsSuffixOnFirstInstall() {
+        if (localStorage.getItem('__wo_settings')) return;
+        readWhoamiCanonical().then(function(w) {
+            var initials = (((w.firstName || '').trim()[0] || '') + ((w.lastName || '').trim()[0] || '')).toUpperCase();
+            var s;
+            try {
+                s = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+            } catch (e) {
+                s = {};
+            }
+            if (s.__initialsSeeded) return;
+            s.__initialsSeeded = true;
+            if (initials && !s.msgSuffix) s.msgSuffix = '- ' + initials;
+            saveSettingsCfg(s);
+        }).catch(function() {});
+    })();
 
     buildPanel();
     // mergeSnapshot(extractSnapshotFull());
