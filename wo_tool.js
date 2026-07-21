@@ -38,7 +38,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26201.2127z';
+    var BUILD_ID = '26202.0046z';
     // Ultimate fallback ONLY — same key/contract as loader.js's
     // CONTACT_EMAIL_KEY (kept in sync manually, independent files). Real
     // value comes from /check-access's bucket-resolved contactEmail
@@ -189,6 +189,92 @@
             }
         );
     }
+
+    // Export a config blob — download it as a file, or copy it, instead of
+    // always dropping straight to clipboard the way the old single Export
+    // button did. Resolves 'download'/'copy'/null (cancelled) — callers
+    // that just want "did something happen" can treat any non-null as done.
+    function woExportChoice(text, filename) {
+        return woDialogBase(
+            '<div style="font-size:12.5px;line-height:1.5;margin-bottom:16px;">Export this config — download it as a file, or copy it to the clipboard.</div>' +
+            '<div style="display:flex;justify-content:flex-end;gap:8px;">' +
+            '<button id="__wo_dlg_cancel" type="button" style="' + WO_DLG_BTN_CSS + '">Cancel</button>' +
+            '<button id="__wo_dlg_copy" type="button" style="' + WO_DLG_BTN_CSS + '">Copy to Clipboard</button>' +
+            '<button id="__wo_dlg_dl" type="button" style="' + WO_DLG_BTN_PRIMARY_CSS + '">Download File</button>' +
+            '</div>',
+            function(overlay, cleanup) {
+                overlay.querySelector('#__wo_dlg_dl').onclick = function() {
+                    var blob = new Blob([text], { type: 'application/json' });
+                    var url = URL.createObjectURL(blob);
+                    var a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(function() {
+                        URL.revokeObjectURL(url);
+                    }, 1000);
+                    cleanup('download');
+                };
+                overlay.querySelector('#__wo_dlg_copy').onclick = function() {
+                    var ta = document.createElement('textarea');
+                    ta.value = text;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    ta.remove();
+                    cleanup('copy');
+                };
+                overlay.querySelector('#__wo_dlg_cancel').onclick = function() {
+                    cleanup(null);
+                };
+                return function(e) {
+                    if (e.key === 'Escape') cleanup(null);
+                };
+            }
+        );
+    }
+
+    // Import a config — paste JSON directly, or upload a file (which just
+    // fills the same textarea, read via FileReader) — one flow instead of
+    // woPrompt's paste-only single line. Resolves the raw text (caller
+    // still does its own JSON.parse/validateBackupShape), or null if
+    // cancelled with nothing usable.
+    function woImportChoice() {
+        return woDialogBase(
+            '<div style="font-size:12.5px;line-height:1.5;margin-bottom:10px;">Paste exported config JSON below, or upload a file.</div>' +
+            '<textarea id="__wo_dlg_ta" placeholder="Paste config JSON here..." style="width:100%;box-sizing:border-box;min-height:110px;padding:6px 8px;margin-bottom:8px;background:#1f2630;border:1px solid #30363d;border-radius:6px;color:#f0f3f6;font:inherit;font-size:11.5px;resize:vertical;"></textarea>' +
+            '<input id="__wo_dlg_file" type="file" accept=".json,.txt,application/json" style="display:block;margin-bottom:16px;font-size:11px;color:#9aa4af;">' +
+            '<div style="display:flex;justify-content:flex-end;gap:8px;">' +
+            '<button id="__wo_dlg_cancel" type="button" style="' + WO_DLG_BTN_CSS + '">Cancel</button>' +
+            '<button id="__wo_dlg_ok" type="button" style="' + WO_DLG_BTN_PRIMARY_CSS + '">Import</button>' +
+            '</div>',
+            function(overlay, cleanup) {
+                var ta = overlay.querySelector('#__wo_dlg_ta');
+                var fileInput = overlay.querySelector('#__wo_dlg_file');
+                fileInput.onchange = function() {
+                    var f = fileInput.files[0];
+                    if (!f) return;
+                    var reader = new FileReader();
+                    reader.onload = function() {
+                        ta.value = reader.result;
+                    };
+                    reader.readAsText(f);
+                };
+                overlay.querySelector('#__wo_dlg_ok').onclick = function() {
+                    cleanup(ta.value);
+                };
+                overlay.querySelector('#__wo_dlg_cancel').onclick = function() {
+                    cleanup(null);
+                };
+                ta.focus();
+                return function(e) {
+                    if (e.key === 'Escape') cleanup(null);
+                };
+            }
+        );
+    }
     // Built-in fallback hotkey — used whenever __wo_settings has never set
     // rescanHotkey (undefined), regardless of which config/profile is loaded.
     // An explicit '' (user hit "Clear" in Setup) is a deliberate choice and
@@ -284,7 +370,6 @@
         groups: [{
             id: 'g_core',
             title: 'Summary',
-            layout: 'vertical',
             fields: ['Work Order :: Work Order', 'Work Order :: Description', 'Work Order :: Asset', 'Work Order :: Location', 'Work Order :: Work Type', 'Work Order :: Status'],
             tables: [],
             ruleRefs: [],
@@ -292,7 +377,6 @@
         }, {
             id: 'g_time',
             title: 'Time',
-            layout: 'horizontal',
             fields: ['Work Order :: Actual Start', 'Work Order :: Actual Finish', 'Work Order :: Duration'],
             tables: [],
             ruleRefs: ['r_duration'],
@@ -300,7 +384,6 @@
         }, {
             id: 'g_lot',
             title: 'Lot',
-            layout: 'vertical',
             fields: ['Work Order :: Production Run Lot #'],
             tables: [],
             ruleRefs: ['r_lot'],
@@ -308,7 +391,6 @@
         }, {
             id: 'g_downtime',
             title: 'Downtime',
-            layout: 'vertical',
             fields: [],
             tables: ['m69f3c12d'],
             ruleRefs: ['r_downtime'],
@@ -316,7 +398,6 @@
         }, {
             id: 'g_related',
             title: 'Related WOs',
-            layout: 'vertical',
             fields: [],
             tables: ['Related Work Orders'],
             ruleRefs: ['r_related'],
@@ -324,7 +405,6 @@
         }, {
             id: 'g_approvers',
             title: 'Approvers',
-            layout: 'vertical',
             fields: ['Approvers :: Approval Group 1', 'Approvers :: Approval Group 2', 'Approvers :: Approval Group 3'],
             tables: [],
             ruleRefs: ['r_approver'],
@@ -332,7 +412,6 @@
         }, {
             id: 'g_labor',
             title: 'Labor',
-            layout: 'vertical',
             fields: [],
             tables: ['Labor'],
             ruleRefs: [],
@@ -2578,6 +2657,46 @@
             });
         }
         return [];
+    }
+
+    // "Automatically fetch the list of domains" — there's no REST endpoint
+    // this tool has found that enumerates every domain Maximo knows about,
+    // so this is a discovery, not a network fetch: scan every localStorage
+    // key for the one confirmed real cache shape (see domainDecodeRaw's
+    // comment) and treat a match as a genuine domain list. Live and
+    // session-accurate (only lists domains Maximo has actually cached so
+    // far) rather than the static KNOWN_DOMAIN_KEYS seed list, which is
+    // just an autocomplete hint for domains that may not be cached yet.
+    // Hover preview for a Domain List API table's key field — first two
+    // cached rows, so a typo or a domain Maximo hasn't cached yet is
+    // obvious before the config is even saved.
+    function domainPreviewTooltipText(key) {
+        if (!key) return 'Type or pick a domain key to preview its cached values.';
+        var rows = domainTableRows(key);
+        if (!rows.length) return 'No cached values found for "' + key + '" yet — open a Maximo page/field that uses this domain first, then reopen this tab.';
+        var preview = rows.slice(0, 2).map(function(r) {
+            if (r.value !== undefined || r.description !== undefined) {
+                return (r.value != null ? r.value : '') + (r.description != null ? ' — ' + r.description : '');
+            }
+            return Object.keys(r).map(function(k) {
+                return k + ': ' + r[k];
+            }).join(', ');
+        }).join('\n');
+        return rows.length + ' cached value' + (rows.length === 1 ? '' : 's') + (rows.length > 2 ? ' — first 2:' : ':') + '\n' + preview;
+    }
+    function discoverCachedDomainKeys() {
+        var found = [];
+        try {
+            for (var i = 0; i < localStorage.length; i++) {
+                var key = localStorage.key(i);
+                if (!key || found.indexOf(key) >= 0) continue;
+                var raw = getDomainRaw(key);
+                if (raw && Array.isArray(raw.data) && raw.attributes && typeof raw.attributes === 'object') {
+                    found.push(key);
+                }
+            }
+        } catch (e) {}
+        return found.sort();
     }
 
     // Raw fetchers (Promise-returning, no cache, no beta gate) — the actual
@@ -5492,7 +5611,17 @@
             "#__wo_dock .wo-collapse-btn{position:absolute;left:-14px;top:50%;transform:translateY(-50%);width:14px;height:52px;padding:0;background:var(--wo-surface-2);border:1px solid var(--wo-border);border-right:none;border-radius:6px 0 0 6px;color:var(--wo-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px;}" +
             "#__wo_dock .wo-collapse-btn:hover{color:var(--wo-text);background:var(--wo-field);}" +
             "#__wo_dock .wo-collapse-btn:focus-visible{outline:2px solid var(--wo-accent);outline-offset:1px;}" +
-            "#__wo_dock.is-collapsed>*:not(.wo-collapse-btn){display:none;}" +
+            // Fast-but-smooth minimize: content fades out quicker than the
+            // width shrinks (so the reflow-as-it-narrows never really shows)
+            // instead of an instant display:none snap. pointer-events:none
+            // keeps faded-out content unclickable without needing display:
+            // none at all, which would make width itself impossible to
+            // transition (a display:none subtree stops participating in
+            // layout, but #__wo_dock's own width transition doesn't need
+            // its children's layout to do that — this is just for the
+            // children's own visibility).
+            "#__wo_dock>*:not(.wo-collapse-btn){transition:opacity .12s ease;}" +
+            "#__wo_dock.is-collapsed>*:not(.wo-collapse-btn){opacity:0;pointer-events:none;}" +
             "#__wo_dock #__wo_groups::-webkit-scrollbar{display:none;}" +
             // Faint gradient overlays hinting there's more to scroll, shown
             // only when there actually is (toggled in updateScrollShadows()
@@ -5519,10 +5648,16 @@
             // wireScanButtonAnimation()) that spins as an arc and, once it
             // settles, continues on as the same stroke to draw the
             // completion tick — never two separate line elements.
-            "#__wo_dock .wo-scan-btn{position:relative;overflow:hidden;color:#fff;width:70px;height:40px;padding:0;box-sizing:border-box;display:flex;align-items:center;justify-content:center;border-radius:var(--wo-r-ctl);transition:width .4s cubic-bezier(.4,0,.2,1),border-radius .4s cubic-bezier(.4,0,.2,1);}" +
+            // Same font-size/font-weight/padding as base .wo-btn (not an
+            // explicit height) so its natural height comes out byte-for-
+            // byte identical to Setup/Exit's — an explicit height here
+            // previously stretched ALL FOUR header buttons to match it
+            // (flex's default align-items:stretch), which is why they'd
+            // all gone visibly taller than before.
+            "#__wo_dock .wo-scan-btn{position:relative;overflow:hidden;color:#fff;width:70px;font-size:11.5px;padding:7px 13px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;border-radius:var(--wo-r-ctl);transition:width .4s cubic-bezier(.4,0,.2,1),border-radius .4s cubic-bezier(.4,0,.2,1);}" +
             "#__wo_dock .wo-scan-label{transition:opacity .18s ease;}" +
             "#__wo_dock .wo-scan-spin{position:absolute;opacity:0;transition:opacity .18s ease;}" +
-            "#__wo_dock .wo-scan-btn.is-spinning{width:40px;border-radius:50%;}" +
+            "#__wo_dock .wo-scan-btn.is-spinning{width:31px;height:31px;padding:0;border-radius:50%;}" +
             "#__wo_dock .wo-scan-btn.is-spinning .wo-scan-label{opacity:0;}" +
             "#__wo_dock .wo-scan-btn.is-spinning .wo-scan-spin{opacity:1;}" +
             /* #__wo_status/#__wo_scanlog/#__wo_groups/#__wo_footer_area layout is kept fully inline at creation (see buildPanel()) — not duplicated here. */
@@ -5640,7 +5775,7 @@
             "#__wo_dock .wo-act-fill{position:absolute;inset:0;clip-path:inset(0 100% 0 0);transition:clip-path .5s cubic-bezier(.65,0,.35,1);pointer-events:none;}" +
             "#__wo_dock .wo-btn-danger .wo-act-fill{background:var(--wo-fail);}" +
             "#__wo_dock .wo-btn-pass .wo-act-fill{background:#4fcd74;}" +
-            "#__wo_dock .wo-act-over{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:7px;color:#fff;clip-path:inset(0 100% 0 0);transition:clip-path .5s cubic-bezier(.65,0,.35,1);pointer-events:none;white-space:nowrap;}" +
+            "#__wo_dock .wo-act-over{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:7px;color:#fff;clip-path:inset(0 100% 0 0);transition:clip-path .5s cubic-bezier(.65,0,.35,1),opacity .2s ease;pointer-events:none;white-space:nowrap;}" +
             "#__wo_dock .wo-act-badge{position:absolute;top:50%;left:50%;width:24px;height:24px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;transform:translate(-50%,-50%) scale(0);transition:transform .3s cubic-bezier(.34,1.56,.64,1);color:var(--wo-pass);pointer-events:none;}" +
             "#__wo_dock .wo-btn-pass{background:var(--wo-pass);color:#04210c;border-color:var(--wo-pass);}" +
             "#__wo_dock .wo-btn-warn{background:var(--wo-warn);color:#241900;border-color:var(--wo-warn);}" +
@@ -5702,7 +5837,7 @@
         // reachable without scrolling, no matter how many groups are
         // expanded above, even if the groups region's own scroll behavior
         // is ever fighting something on the host page.
-        panel.style.cssText = 'position:fixed;top:0;right:0;width:' + (startCollapsed ? 0 : PANEL_W) + 'px;height:100vh;background:#0d1117;z-index:999999;font-size:12px;display:flex;flex-direction:column;box-shadow:-4px 0 14px rgba(0,0,0,.5);';
+        panel.style.cssText = 'position:fixed;top:0;right:0;width:' + (startCollapsed ? 0 : PANEL_W) + 'px;height:100vh;background:#0d1117;z-index:999999;font-size:12px;display:flex;flex-direction:column;box-shadow:-4px 0 14px rgba(0,0,0,.5);overflow:hidden;transition:width .22s ease;';
         panel.style.setProperty('--wo-header-h', getHostHeaderHeight() + 'px');
         panel.innerHTML =
             '<button id="__wo_collapse_btn" class="wo-collapse-btn" type="button" aria-label="' + (startCollapsed ? 'Expand panel' : 'Collapse panel') + '">' + (startCollapsed ? '◀' : '▶') + '</button>' +
@@ -5712,7 +5847,7 @@
             '<div class="wo-head-actions">' +
             '<button id="__wo_rescan" type="button" class="wo-btn wo-btn-primary wo-scan-btn">' +
             '<span class="wo-scan-label">Scan</span>' +
-            '<svg class="wo-scan-spin" viewBox="0 0 40 40" width="30" height="30" aria-hidden="true">' +
+            '<svg class="wo-scan-spin" viewBox="0 0 40 40" width="22" height="22" aria-hidden="true">' +
             '<path class="wo-scan-stroke" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" d=""/>' +
             '</svg>' +
             '</button>' +
@@ -6749,6 +6884,7 @@
         approveBtn.className = 'wo-btn wo-btn-pass wo-btn-block wo-btn-icon';
         approveBtn.innerHTML = '<span class="wo-act-fill"></span>' +
             '<span class="wo-act-row">✓ Approve</span>' +
+            '<span class="wo-act-over">✓ Approve</span>' +
             '<span class="wo-act-badge"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.5 8.5L6.5 11.5L12.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
         approveBtn.disabled = actionsBusy();
         approveBtn.onclick = function() {
@@ -6759,15 +6895,20 @@
                 setActionsLocked(true);
                 var fill = approveBtn.querySelector('.wo-act-fill'),
                     row = approveBtn.querySelector('.wo-act-row'),
+                    over = approveBtn.querySelector('.wo-act-over'),
                     badge = approveBtn.querySelector('.wo-act-badge');
                 fill.style.clipPath = 'inset(0 0 0 0)';
+                over.style.clipPath = 'inset(0 0 0 0)';
                 onceActionsUnlocked(function() {
                     row.style.opacity = '0';
+                    over.style.opacity = '0';
                     badge.style.transform = 'translate(-50%,-50%) scale(1)';
                     setTimeout(function() {
                         badge.style.transform = 'translate(-50%,-50%) scale(0)';
                         row.style.opacity = '';
+                        over.style.opacity = '';
                         fill.style.clipPath = 'inset(0 100% 0 0)';
+                        over.style.clipPath = 'inset(0 100% 0 0)';
                     }, 1100);
                 });
                 routeWorkflow('approve');
@@ -6879,6 +7020,166 @@
         styleEl.id = '__wo_fb_style';
         styleEl.textContent = css;
         document.head.appendChild(styleEl);
+    }
+
+    // Table-like JSON viewer/editor for a profile's config — a nested
+    // key/value table (objects/arrays expand inline) instead of a raw JSON
+    // textarea, with every leaf value directly editable. Works on a deep
+    // copy (`working`) so nothing touches the caller's data until Save;
+    // onSave(working) only fires then. Structural edits (add/remove a key
+    // or array item) are deliberately out of scope — this is for quickly
+    // fixing/inspecting existing values, not building config from scratch
+    // (Rules/Groups/Variables/Scan tabs already do that with real editors).
+    function openProfileConfigViewer(profileData, onSave) {
+        var old = document.getElementById('__wo_cfg_viewer');
+        if (old) old.remove();
+        var css = "#__wo_cfg_viewer{--wo-bg:#0d1117;--wo-surface-2:#1f2630;--wo-border:#30363d;--wo-text:#f0f3f6;--wo-muted:#9aa4af;--wo-accent:#58a6ff;}" +
+            "#__wo_cfg_viewer table.wo-cv-table{border-collapse:collapse;width:100%;margin:2px 0;}" +
+            "#__wo_cfg_viewer table.wo-cv-table td{border:1px solid var(--wo-border);padding:4px 6px;vertical-align:top;font-size:11px;}" +
+            "#__wo_cfg_viewer td.wo-cv-key{color:var(--wo-accent);font-family:ui-monospace,Consolas,monospace;white-space:nowrap;width:1%;font-weight:700;}" +
+            "#__wo_cfg_viewer td.wo-cv-val{width:100%;}" +
+            "#__wo_cfg_viewer .wo-cv-input{width:100%;box-sizing:border-box;font:inherit;font-size:11px;background:var(--wo-bg);border:1px solid var(--wo-border);border-radius:4px;padding:3px 5px;color:var(--wo-text);}" +
+            "#__wo_cfg_viewer textarea.wo-cv-input{min-height:44px;resize:vertical;}" +
+            "#__wo_cfg_viewer .wo-cv-toggle{font:inherit;font-size:10.5px;font-weight:700;background:var(--wo-surface-2);border:1px solid var(--wo-border);border-radius:4px;padding:2px 7px;color:var(--wo-muted);cursor:pointer;}" +
+            "#__wo_cfg_viewer .wo-cv-toggle:hover{color:var(--wo-text);border-color:var(--wo-accent);}" +
+            "#__wo_cfg_viewer .wo-cv-toggle.is-open{color:var(--wo-accent);}";
+        var styleEl = document.getElementById('__wo_cfg_viewer_style');
+        if (!styleEl) {
+            styleEl = document.createElement('style');
+            styleEl.id = '__wo_cfg_viewer_style';
+            document.head.appendChild(styleEl);
+        }
+        styleEl.textContent = css;
+
+        var pop = document.createElement('div');
+        pop.id = '__wo_cfg_viewer';
+        pop.style.cssText = 'position:fixed;top:4%;left:10%;width:80%;height:90%;z-index:10000000;background:var(--wo-bg);color:var(--wo-text);border:1px solid var(--wo-border);border-radius:10px;box-shadow:0 6px 30px rgba(0,0,0,.8);display:flex;flex-direction:column;font-family:"Segoe UI",system-ui,sans-serif;font-size:12px;padding:10px;';
+
+        var working = JSON.parse(JSON.stringify(profileData));
+
+        pop.innerHTML = '<div id="__cv_titlebar" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex:0 0 auto;cursor:move;user-select:none;">' +
+            '<b style="font-size:13px;">Config Viewer — ' + woEscHtml(working.name || working.id || '') + '</b>' +
+            '<span style="display:flex;gap:6px;align-items:center;">' +
+            '<button id="__cv_save" type="button" class="wo-btn wo-btn-primary" style="font:inherit;font-weight:700;font-size:11px;padding:6px 12px;border-radius:6px;border:1px solid var(--wo-accent);background:var(--wo-accent);color:#04101f;cursor:pointer;">Save</button>' +
+            '<button id="__cv_close" type="button" class="wo-btn-ghost" aria-label="Close" style="background:none;border:1px solid transparent;color:var(--wo-muted);cursor:pointer;padding:6px 8px;border-radius:6px;">' +
+            '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 3L13 13M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>' +
+            '</button>' +
+            '</span>' +
+            '</div>' +
+            '<div id="__cv_body" style="flex:1;overflow:auto;border:1px solid var(--wo-border);border-radius:6px;padding:6px;"></div>';
+        document.body.appendChild(pop);
+
+        // Draggable — same simple free-drag pattern as the Formula
+        // Reference popup (no edge-snap, just centered-transform ->
+        // absolute left/top on first drag).
+        (function() {
+            var tbEl = pop.querySelector('#__cv_titlebar');
+            var ox = 0,
+                oy = 0,
+                mx = 0,
+                my = 0;
+            tbEl.addEventListener('mousedown', function(e) {
+                if (e.target.closest('button')) return;
+                e.preventDefault();
+                var r = pop.getBoundingClientRect();
+                pop.style.left = r.left + 'px';
+                pop.style.top = r.top + 'px';
+                pop.style.transform = 'none';
+                ox = r.left;
+                oy = r.top;
+                mx = e.clientX;
+                my = e.clientY;
+                startPointerCapture(function(mv) {
+                    pop.style.left = Math.max(0, ox + mv.clientX - mx) + 'px';
+                    pop.style.top = Math.max(0, oy + mv.clientY - my) + 'px';
+                }, null, 'grabbing');
+            });
+        })();
+
+        function setAtPath(root, path, value) {
+            var obj = root;
+            for (var i = 0; i < path.length - 1; i++) obj = obj[path[i]];
+            obj[path[path.length - 1]] = value;
+        }
+
+        function coerce(str, origType) {
+            if (origType === 'number') {
+                var n = Number(str);
+                return isNaN(n) ? str : n;
+            }
+            if (origType === 'boolean') return str === 'true';
+            if (origType === 'null') return str === '' ? null : str;
+            return str;
+        }
+
+        function renderCell(value, path, cell) {
+            if (value && typeof value === 'object') {
+                var isArr = Array.isArray(value);
+                var count = isArr ? value.length : Object.keys(value).length;
+                var toggle = document.createElement('button');
+                toggle.type = 'button';
+                toggle.className = 'wo-cv-toggle';
+                toggle.textContent = (isArr ? 'Array' : 'Object') + ' (' + count + ')' + (count ? ' ▾' : '');
+                var nested = document.createElement('div');
+                nested.style.display = 'none';
+                nested.style.marginTop = '4px';
+                if (count) {
+                    toggle.onclick = function() {
+                        var open = nested.style.display !== 'none';
+                        nested.style.display = open ? 'none' : 'block';
+                        toggle.classList.toggle('is-open', !open);
+                    };
+                } else {
+                    toggle.disabled = true;
+                    toggle.style.cursor = 'default';
+                }
+                cell.appendChild(toggle);
+                cell.appendChild(nested);
+                renderNode(value, path, nested);
+            } else {
+                var isLong = typeof value === 'string' && value.length > 60;
+                var input = document.createElement(isLong ? 'textarea' : 'input');
+                if (!isLong) input.type = 'text';
+                input.value = value == null ? '' : String(value);
+                input.className = 'wo-cv-input';
+                var origType = value === null ? 'null' : typeof value;
+                input.oninput = function() {
+                    setAtPath(working, path, coerce(input.value, origType));
+                };
+                cell.appendChild(input);
+            }
+        }
+
+        function renderNode(value, path, container) {
+            var tbl = document.createElement('table');
+            tbl.className = 'wo-cv-table';
+            var keys = Array.isArray(value) ? value.map(function(_, i) {
+                return i;
+            }) : Object.keys(value);
+            keys.forEach(function(k) {
+                var tr = document.createElement('tr');
+                var tdK = document.createElement('td');
+                tdK.className = 'wo-cv-key';
+                tdK.textContent = Array.isArray(value) ? '[' + k + ']' : k;
+                var tdV = document.createElement('td');
+                tdV.className = 'wo-cv-val';
+                tr.appendChild(tdK);
+                tr.appendChild(tdV);
+                tbl.appendChild(tr);
+                renderCell(value[k], path.concat(k), tdV);
+            });
+            container.appendChild(tbl);
+        }
+
+        renderNode(working, [], pop.querySelector('#__cv_body'));
+
+        pop.querySelector('#__cv_close').onclick = function() {
+            pop.remove();
+        };
+        pop.querySelector('#__cv_save').onclick = function() {
+            pop.remove();
+            onSave(working);
+        };
     }
 
     function openFieldBrowser(cfg, opts, onSave) {
@@ -7222,6 +7523,21 @@
             "#__wo_setup_modal svg [stroke]{stroke:currentColor;}" +
             "#__wo_setup_modal{--wo-bg:#0d1117;--wo-surface:#161b22;--wo-surface-2:#1f2630;--wo-field:#1f2630;--wo-border:#30363d;--wo-text:#f0f3f6;--wo-muted:#9aa4af;--wo-accent:#58a6ff;--wo-on-accent:#04101f;--wo-pass:#3fb950;--wo-fail:#f85149;--wo-warn:#d29922;--wo-r-panel:10px;--wo-r-card:6px;--wo-r-ctl:6px;font-family:'Segoe UI',system-ui,sans-serif;background:var(--wo-bg);color:var(--wo-text);}" +
             "#__wo_setup_modal .wo-mono{font-family:Consolas,'Cascadia Mono',monospace;}" +
+            // Minimize-to-strip (only reachable while snapped left/right/
+            // beside-panel — see MINI_ELIGIBLE_ZONES). overflow:hidden is
+            // scoped to just .is-mini rather than the modal generally, so
+            // nothing that deliberately overflows the modal in normal use
+            // (kebab menus etc., all position:fixed and unaffected by this
+            // regardless) is put at risk by a change aimed only at this one
+            // state.
+            "#__wo_setup_modal.is-mini{overflow:hidden;}" +
+            "#__wo_setup_modal.is-mini .wo-modal-titlebar,#__wo_setup_modal.is-mini .wo-modal-tabs,#__wo_setup_modal.is-mini .wo-modal-content,#__wo_setup_modal.is-mini .wo-resize-handle{display:none;}" +
+            "#__wo_setup_modal #__s_mini_strip{display:none;flex-direction:column;align-items:center;gap:4px;padding:10px 0;overflow-y:auto;height:100%;}" +
+            "#__wo_setup_modal.is-mini #__s_mini_strip{display:flex;}" +
+            "#__wo_setup_modal .wo-s-mini-btn{width:32px;height:32px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:none;border:1px solid transparent;border-radius:var(--wo-r-ctl);color:var(--wo-muted);cursor:pointer;}" +
+            "#__wo_setup_modal .wo-s-mini-btn:hover{background:var(--wo-field);color:var(--wo-text);}" +
+            "#__wo_setup_modal .wo-s-mini-btn.is-active{color:var(--wo-accent);background:var(--wo-field);}" +
+            "#__wo_setup_modal .wo-s-mini-expand{color:var(--wo-text);margin-bottom:4px;padding-bottom:8px;border-bottom:1px solid var(--wo-border);border-radius:0;width:28px;}" +
             // Title bar
             "#__wo_setup_modal .wo-modal-titlebar{height:var(--wo-header-h,48px);box-sizing:border-box;flex-shrink:0;display:flex;justify-content:space-between;align-items:center;cursor:move;user-select:none;padding:0 12px;background:var(--wo-surface-2);border-radius:var(--wo-r-panel) var(--wo-r-panel) 0 0;border-bottom:1px solid var(--wo-border);margin:-10px -10px 0;}" +
             "#__wo_setup_modal .wo-modal-title{font-size:13px;font-weight:800;color:#fff;}" +
@@ -7316,11 +7632,15 @@
             // icon-only rounded square once a save completes (stays that
             // way until updateSaveButtonState() sees a new change to undo
             // it — see the .is-collapsed handling there).
-            "#__wo_setup_modal .wo-save-btn{position:relative;overflow:hidden;gap:7px;padding:8px 16px 8px 13px;font-size:13px;width:92px;box-sizing:border-box;transition:width .45s cubic-bezier(.4,0,.2,1),padding .45s cubic-bezier(.4,0,.2,1),background .2s ease,border-color .2s ease;}" +
-            "#__wo_setup_modal .wo-save-row{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;}" +
+            // Same font-size/padding as base .wo-btn (11.5px/6px 12px) — not
+            // the bigger override this had before, which made Save visibly
+            // taller/larger-text than its own titlebar siblings (Formula
+            // reference, Close).
+            "#__wo_setup_modal .wo-save-btn{position:relative;overflow:hidden;gap:6px;font-size:11.5px;padding:6px 12px;width:78px;box-sizing:border-box;transition:width .45s cubic-bezier(.4,0,.2,1),padding .45s cubic-bezier(.4,0,.2,1),background .2s ease,border-color .2s ease;}" +
+            "#__wo_setup_modal .wo-save-row{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;}" +
             "#__wo_setup_modal .wo-save-icon{flex-shrink:0;}" +
             "#__wo_setup_modal .wo-save-label{transition:opacity .2s ease;}" +
-            "#__wo_setup_modal .wo-save-btn.is-collapsed{width:34px;padding:8px;}" +
+            "#__wo_setup_modal .wo-save-btn.is-collapsed{width:29px;padding:6px;}" +
             "#__wo_setup_modal .wo-save-btn.is-collapsed .wo-save-label{opacity:0;}" +
             "#__wo_setup_modal .wo-save-btn.is-pulsing .wo-save-row{animation:woSavePulse .5s ease-in-out;}" +
             "@keyframes woSavePulse{45%{transform:scale(1.1);}}" +
@@ -7530,7 +7850,7 @@
         // --- make modal draggable ---
         var modal = document.createElement('div');
         modal.id = '__wo_setup_modal';
-        modal.style.cssText = 'position:fixed;top:3%;left:10%;width:75%;height:92%;z-index:9999999;padding:10px;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);display:flex;flex-direction:column;font-size:12px;';
+        modal.style.cssText = 'position:fixed;top:3%;left:10%;width:75%;height:92%;z-index:9999999;padding:10px;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);display:flex;flex-direction:column;font-size:12px;transition:width .2s ease;';
         modal.style.setProperty('--wo-header-h', getHostHeaderHeight() + 'px');
         // Minimalist line-icon per tab, keyed by the same id used for the
         // per-tab display-mode override (icon-only / word-only / both).
@@ -7575,10 +7895,11 @@
             '<div class="wo-modal-titlebar" id="__s_titlebar">' +
             '<span class="wo-modal-title">Setup</span>' +
             '<span class="wo-modal-title-actions">' +
+            '<button id="__s_minimize" type="button" class="wo-btn-ghost" aria-label="Minimize Setup" style="display:none;"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
             '<button id="__s_formulas" type="button" class="wo-btn-ghost" aria-label="Formula reference"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2.5 3.5C2.5 3 2.9 2.7 3.4 2.8C5 3 6.5 3.6 8 4.6C9.5 3.6 11 3 12.6 2.8C13.1 2.7 13.5 3 13.5 3.5V11.5C13.5 12 13.1 12.3 12.6 12.4C11 12.6 9.5 13.2 8 14.2C6.5 13.2 5 12.6 3.4 12.4C2.9 12.3 2.5 12 2.5 11.5V3.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 4.6V14.2" stroke="currentColor" stroke-width="1.2"/></svg></button>' +
             '<button id="__s_save" type="button" class="wo-btn wo-btn-primary wo-save-btn">' +
             '<span class="wo-save-row">' +
-            '<svg class="wo-save-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">' +
+            '<svg class="wo-save-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">' +
             '<defs><clipPath id="__wo_save_clip"><path class="wo-save-mask" d="M0,0"/></clipPath></defs>' +
             '<path d="M6 3 Q6 2 7 2 H17 Q18 2 18 3 V21 L12 17 L6 21 Z" clip-path="url(#__wo_save_clip)" fill="currentColor"/>' +
             '<path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M6 3 Q6 2 7 2 H17 Q18 2 18 3 V21 L12 17 L6 21 Z"/>' +
@@ -7606,10 +7927,8 @@
             (hasGrant('admin') ? tabBtn('__s_admin', 'admin', 'Admin', 'wo-tab-btn-ghost') : '') +
             tabBtn('__s_guide', 'guide', 'Guide', 'wo-tab-btn-ghost') +
             tabBtn('__s_feedback', 'feedback', 'Feedback', 'wo-tab-btn-ghost') +
-            tabBtn('__s_exp', 'exp', 'Export', 'wo-tab-btn-ghost') +
-            tabBtn('__s_imp', 'imp', 'Import', 'wo-tab-btn-ghost') +
             // Hidden until applyResponsiveTabFit() decides even icon-only
-            // mode isn't enough room — then it replaces all 4 buttons above,
+            // mode isn't enough room — then it replaces the buttons above,
             // same "..." overflow treatment as a kebab "More actions" menu.
             '<button id="__s_more" type="button" class="wo-tab-btn wo-tab-btn-ghost wo-tab-more-btn" aria-label="More" aria-haspopup="true" style="display:none;">' +
             '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="3" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="13" r="0.7" stroke="currentColor" stroke-width="1.4"/></svg>' +
@@ -7619,6 +7938,7 @@
             '<div class="wo-tabs-scroll-shadow wo-tabs-scroll-shadow-right"></div>' +
             '</div>' +
             '<div id="__s_content" class="wo-modal-content"></div>' +
+            '<div id="__s_mini_strip"></div>' +
             // Bottom-right keeps the visible grab-icon affordance; the other
             // 3 corners + 4 edges are plain invisible hit zones — showing 8
             // icons around the frame would be more visual noise than a
@@ -7984,6 +8304,14 @@
                         height: rect.height
                     };
                 }
+                if (zone === 'left-of-panel' && currentSnap !== 'left-of-panel') {
+                    rect = {
+                        left: Math.max(0, window.innerWidth - getMainPanelWidth() - MODAL_MIN_W),
+                        top: 0,
+                        width: MODAL_MIN_W,
+                        height: rect.height
+                    };
+                }
                 if (!preview) {
                     preview = document.createElement('div');
                     preview.id = '__wo_snap_preview';
@@ -8055,7 +8383,7 @@
                     // from a floating/unsnapped state. Re-confirming an
                     // already-active left snap (currentSnap is already
                     // 'left') is unaffected, so mid-snap resizing survives.
-                    if (hoverZone === 'left' && currentSnap !== 'left') {
+                    if ((hoverZone === 'left' || hoverZone === 'left-of-panel') && currentSnap !== hoverZone) {
                         saveLeftSnapWidth(MODAL_MIN_W);
                     }
                     applySnap(hoverZone);
@@ -8293,15 +8621,34 @@
                 width: vw,
                 height: vh
             };
+            // Docks immediately to the left of the (still-visible) WO Tool
+            // panel — side by side, neither overlapping the other — instead
+            // of 'right', which deliberately sits exactly ON TOP of where
+            // that panel already is. Falls back to plain 'right' behavior
+            // when the main panel is collapsed/absent (mw===0, nothing to
+            // sit left of).
+            if (zone === 'left-of-panel') return {
+                left: Math.max(0, vw - mw - leftSnapWidth),
+                top: 0,
+                width: leftSnapWidth,
+                height: vh
+            };
             return null;
         }
 
         // Windows-Aero-style zones: top strip is split left/right half into
-        // the two "top" snaps; otherwise a plain side edge is left/right.
+        // the two "top" snaps; a plain side edge is left/right; dragging
+        // right up against the main WO Tool panel's own left edge (when
+        // it's visible) offers docking beside it instead.
         function detectSnapZone(x, y) {
             var EDGE = 40;
             var vw = window.innerWidth;
             if (y <= EDGE) return x < vw / 2 ? 'top-left' : 'top-right';
+            var mw = getMainPanelWidth();
+            if (mw > 0) {
+                var panelLeftEdge = vw - mw;
+                if (x >= panelLeftEdge - EDGE && x <= panelLeftEdge + EDGE) return 'left-of-panel';
+            }
             if (x <= EDGE) return 'left';
             if (x >= vw - EDGE) return 'right';
             return null;
@@ -8326,17 +8673,96 @@
             modal.style.width = rect.width + 'px';
             modal.style.height = rect.height + 'px';
             document.body.style.marginLeft = zone === 'left' ? leftSnapWidth + 'px' : '';
+            // 'left-of-panel' sits inside Maximo's own already-narrowed
+            // content area (the main panel's pushLayout() already reserves
+            // its own width on the right) — push the SAME right margin
+            // further left by this modal's width too, or Setup would just
+            // cover live Maximo content instead of making room for itself.
+            if (zone === 'left-of-panel') {
+                var mwPush = getMainPanelWidth();
+                document.body.style.marginRight = (mwPush + leftSnapWidth) + 'px';
+            } else if (currentSnap === 'left-of-panel') {
+                var mwRestore = getMainPanelWidth();
+                document.body.style.marginRight = mwRestore ? mwRestore + 'px' : '';
+            }
             currentSnap = zone;
             modal.classList.add('is-snapped');
             saveSetupSnap(zone);
+            syncMiniToggleVisibility();
         }
 
         function clearSnap() {
             if (!currentSnap) return;
+            if (currentSnap === 'left-of-panel') {
+                var mwRestore2 = getMainPanelWidth();
+                document.body.style.marginRight = mwRestore2 ? mwRestore2 + 'px' : '';
+            }
             currentSnap = null;
             modal.classList.remove('is-snapped');
             document.body.style.marginLeft = '';
             saveSetupSnap(null);
+            setSetupMinimized(false);
+            syncMiniToggleVisibility();
+        }
+
+        // Minimize-to-strip only makes sense while docked left/right/beside
+        // the panel — a floating or top-snapped window has no fixed edge
+        // for a narrow icon rail to make sense against.
+        var MINI_ELIGIBLE_ZONES = { left: true, right: true, 'left-of-panel': true };
+
+        function saveSetupMinimized(minimized) {
+            st.setupMinimized = minimized;
+            var liveSt = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
+            liveSt.setupMinimized = minimized;
+            localStorage.setItem('__wo_settings', JSON.stringify(liveSt));
+        }
+
+        // Rebuilds the vertical icon rail from whatever real .wo-tab-btn
+        // elements are currently in the DOM (reading their own icon/label/
+        // key rather than re-deriving the tab list), so it always exactly
+        // matches whichever tabs are actually present for this user's
+        // grants/beta flags — and reuses each button's own click handler
+        // (tb.click()) to switch tabs instead of re-implementing that.
+        function buildMiniStrip() {
+            var stripEl = modal.querySelector('#__s_mini_strip');
+            if (!stripEl) return;
+            stripEl.innerHTML = '<button type="button" class="wo-s-mini-btn wo-s-mini-expand" aria-label="Expand Setup"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3L11 8L6 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>';
+            stripEl.querySelector('.wo-s-mini-expand').onclick = function() {
+                setSetupMinimized(false);
+            };
+            attachTooltip(stripEl.querySelector('.wo-s-mini-expand'), 'Expand Setup');
+            modal.querySelectorAll('.wo-modal-tabs .wo-tab-btn:not(.wo-tab-more-btn)').forEach(function(tb) {
+                var label = tb.getAttribute('data-tab-label');
+                var iconEl = tb.querySelector('.wo-tab-icon');
+                if (!label || !iconEl) return;
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'wo-s-mini-btn' + (tb.classList.contains('is-active') ? ' is-active' : '');
+                btn.appendChild(iconEl.cloneNode(true));
+                btn.onclick = function() {
+                    setSetupMinimized(false);
+                    tb.click();
+                };
+                attachTooltip(btn, label);
+                stripEl.appendChild(btn);
+            });
+        }
+
+        function setSetupMinimized(minimized) {
+            if (minimized && !MINI_ELIGIBLE_ZONES[currentSnap]) return;
+            modal.classList.toggle('is-mini', minimized);
+            if (minimized) {
+                buildMiniStrip();
+                modal.style.width = '44px';
+            } else if (currentSnap) {
+                applySnap(currentSnap);
+            }
+            saveSetupMinimized(minimized);
+        }
+
+        function syncMiniToggleVisibility() {
+            var btn = modal.querySelector('#__s_minimize');
+            if (btn) btn.style.display = MINI_ELIGIBLE_ZONES[currentSnap] ? '' : 'none';
         }
 
         // Matches the modal's own initial (never-snapped) cssText rect —
@@ -8357,6 +8783,12 @@
         }
         window.addEventListener('resize', onWindowResizeReapplySnap);
         if (currentSnap) applySnap(currentSnap);
+        syncMiniToggleVisibility();
+        if (st.setupMinimized && MINI_ELIGIBLE_ZONES[currentSnap]) setSetupMinimized(true);
+        modal.querySelector('#__s_minimize').onclick = function() {
+            setSetupMinimized(!modal.classList.contains('is-mini'));
+        };
+        attachTooltip(modal.querySelector('#__s_minimize'), 'Minimize to icon strip');
 
         // Both the resize handle and the titlebar drag capture the pointer
         // via a full-viewport overlay rather than listening on `document`
@@ -8896,39 +9328,6 @@
             }, 150);
         };
 
-        modal.querySelector('#__s_exp').onclick = function() {
-            // Persist in-memory cfg/scan first so the backup blob reflects current edits
-            saveCfg(cfg);
-            saveScan(scan);
-            var ta = document.createElement('textarea');
-            ta.value = buildBackupBlob();
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand('copy');
-            ta.remove();
-            woAlert('Config copied to clipboard — save it as a text file.');
-        };
-        modal.querySelector('#__s_imp').onclick = function() {
-            woPrompt('Paste exported config JSON:').then(function(raw) {
-                if (!raw) return;
-                try {
-                    var b = JSON.parse(raw);
-                    validateBackupShape(b);
-                    if (b.rules) saveCfg(b.rules);
-                    if (b.scan) saveScan(b.scan);
-                    if (b.fields) saveFieldCfg(b.fields);
-                    if (b.state) saveGS(b.state);
-                    if (b.vars) saveVars(b.vars);
-
-                    woAlert('Imported. Reopen Setup.').then(function() {
-                        modal.remove();
-                        render();
-                    });
-                } catch (e) {
-                    woAlert((e instanceof SyntaxError ? 'Invalid JSON: ' : '') + e.message);
-                }
-            });
-        };
 
         function formulaBox(obj, prop) {
             return '<textarea data-f class="wo-code" style="width:100%;height:80px;margin-top:6px;">' + String(obj[prop]).replace(/</g, '&lt;') + '</textarea>';
@@ -10085,10 +10484,6 @@
                         return '<option value="' + r.id + '"' + (group.headerMsg && group.headerMsg.value === r.id ? ' selected' : '') + '>' + r.label + '</option>';
                     }).join('') +
                     '</select>' +
-                    '<div style="margin-top:4px;"><label style="font-size:10px;">Short pass message (leave blank to use rule\'s Pass Message):</label><br>' +
-                    '<input type="text" id="__hm_short_pass_' + idx + '" value="' + ((group.headerMsg && group.headerMsg.shortPassMsg) ? group.headerMsg.shortPassMsg.replace(/"/g, '&quot;') : '') + '" style="width:100%;margin-top:2px;"></div>' +
-                    '<div style="margin-top:4px;"><label style="font-size:10px;">Short fail message (leave blank to use rule\'s Fail Messages):</label><br>' +
-                    '<input type="text" id="__hm_short_fail_' + idx + '" value="' + ((group.headerMsg && group.headerMsg.shortFailMsg) ? group.headerMsg.shortFailMsg.replace(/"/g, '&quot;') : '') + '" style="width:100%;margin-top:2px;"></div>' +
                     '</div>' +
                     '<div id="__hm_var_wrap_' + idx + '" style="' + (group.headerMsg && group.headerMsg.type === 'variable' ? '' : 'display:none;') + '">' +
                     'Variable: <select id="__hm_var_' + idx + '" style="color:var(--wo-accent);max-width:100%;">' +
@@ -10278,11 +10673,8 @@
                     var rWrap = box.querySelector('#__hm_rule_wrap_' + i);
                     var fSel = box.querySelector('#__hm_field_' + i);
                     var rSel = box.querySelector('#__hm_rule_' + i);
-                    var spInp = box.querySelector('#__hm_short_pass_' + i);
-                    var sfInp = box.querySelector('#__hm_short_fail_' + i);
                     var vWrap = box.querySelector('#__hm_var_wrap_' + i);
                     var vSel = box.querySelector('#__hm_var_' + i);
-
 
                     function syncHM() {
                         if (!grp.headerMsg) grp.headerMsg = {};
@@ -10291,8 +10683,6 @@
                         grp.headerMsg.value = typeSel.value === 'rule' ? rSel.value :
                             typeSel.value === 'variable' ? (vSel ? vSel.value : '') :
                             fSel.value;
-                        grp.headerMsg.shortPassMsg = spInp ? spInp.value : '';
-                        grp.headerMsg.shortFailMsg = sfInp ? sfInp.value : '';
                     }
 
                     // update typeSel.onchange to also toggle vWrap:
@@ -10445,8 +10835,7 @@
                 cfg.groups.push({
                     id: 'g_' + Date.now(),
                     title: 'New Group',
-                    layout: 'vertical',
-                    fields: [],
+                            fields: [],
                     fieldRows: [],
                     table: null,
                     ruleRefs: [],
@@ -11263,7 +11652,11 @@
                 box.innerHTML =
                     '<div data-coll-header class="wo-card-head">' +
                     '<code class="wo-mono" style="font-size:11px;">' + String(id).replace(/</g, '&lt;') + '</code>' +
-                    '<button type="button" class="__at_del wo-btn-ghost wo-kebab-item-danger" style="margin-left:auto;" aria-label="Delete table" onclick="event.stopPropagation()">' + TRASH_SVG + '</button>' +
+                    '<span class="wo-kebab-wrap" style="margin-left:auto;" onclick="event.stopPropagation()">' +
+                    '<button data-kebab type="button" class="wo-kebab-btn" aria-label="API table actions" aria-haspopup="true">' +
+                    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="3" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="13" r="0.7" stroke="currentColor" stroke-width="1.4"/></svg>' +
+                    '</button>' +
+                    '</span>' +
                     '</div>' +
                     '<div data-coll-body style="margin-top:7px;">' +
                     '<div>' +
@@ -11276,8 +11669,13 @@
                     '</div>' +
                     (t.source === 'domain' ?
                         '<div style="margin-top:6px;">' +
-                        '<label style="color:var(--wo-muted);font-size:11px;">Domain name (e.g. ABBWPRIORITY) — exact key, matched against what Maximo has already cached in this browser</label><br>' +
-                        '<input type="text" data-at-domainkey value="' + String(t.domainKey || '').replace(/"/g, '&quot;') + '" style="width:100%;margin-top:2px;">' +
+                        '<label style="color:var(--wo-muted);font-size:11px;">Domain name — pick from what Maximo has already cached in this browser, or type an exact key</label><br>' +
+                        '<input type="text" data-at-domainkey list="__at_domainlist_' + String(id).replace(/"/g, '&quot;') + '" value="' + String(t.domainKey || '').replace(/"/g, '&quot;') + '" style="width:100%;margin-top:2px;">' +
+                        '<datalist id="__at_domainlist_' + String(id).replace(/"/g, '&quot;') + '">' +
+                        discoverCachedDomainKeys().map(function(k) {
+                            return '<option value="' + k.replace(/"/g, '&quot;') + '">';
+                        }).join('') +
+                        '</datalist>' +
                         '</div>'
                         :
                         '<div style="margin-top:6px;">' +
@@ -11298,12 +11696,64 @@
                     apiTableExpandState[id] = expandedNow;
                 });
 
-                box.querySelector('.__at_del').onclick = function() {
-                    woConfirm('Delete API table "' + id + '"? Any formula referencing it will start returning empty results.').then(function(ok) {
-                        if (!ok) return;
-                        delete cfg.apiTables[id];
-                        tablesTab();
-                    });
+                attachTooltip(box.querySelector('[data-kebab]'), 'More actions');
+                var apiKebabBtn = box.querySelector('[data-kebab]');
+                apiKebabBtn.onclick = function() {
+                    var wasOpen = !!openRuleMenu;
+                    closeRuleMenu();
+                    if (wasOpen) return;
+                    var menu = document.createElement('div');
+                    menu.className = 'wo-kebab-menu';
+                    menu.innerHTML =
+                        '<button data-rename type="button" class="wo-kebab-item">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M11 2.5L13.5 5L5.5 13H3V10.5L11 2.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
+                        '<span>Rename</span>' +
+                        '</button>' +
+                        '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 4.5H13" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M6 4.5V3.2C6 2.8 6.3 2.5 6.7 2.5H9.3C9.7 2.5 10 2.8 10 3.2V4.5" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 4.5L5 12.7C5 13.1 5.4 13.5 5.8 13.5H10.2C10.6 13.5 11 13.1 11 12.7L11.5 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
+                        '<span>Delete</span>' +
+                        '</button>';
+                    menu.style.position = 'fixed';
+                    var btnRect = apiKebabBtn.getBoundingClientRect();
+                    menu.style.top = (btnRect.bottom + 4) + 'px';
+                    menu.style.right = (window.innerWidth - btnRect.right) + 'px';
+                    modal.appendChild(menu);
+                    var mr = menu.getBoundingClientRect();
+                    if (mr.bottom > window.innerHeight) menu.style.top = Math.max(4, btnRect.top - mr.height - 4) + 'px';
+                    menu.querySelector('[data-rename]').onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        woPrompt('New ID for this table (letters, numbers, underscores only). Any formula referencing "' + id + '" via T()/lookup() will need to be updated by hand — renaming does not rewrite formulas.', id).then(function(newId) {
+                            if (!newId) return;
+                            newId = newId.trim();
+                            if (!/^[A-Za-z0-9_]+$/.test(newId)) {
+                                woAlert('Table ID can only contain letters, numbers, and underscores.');
+                                return;
+                            }
+                            if (newId === id) return;
+                            if (cfg.apiTables[newId]) {
+                                woAlert('A table with ID "' + newId + '" already exists.');
+                                return;
+                            }
+                            cfg.apiTables[newId] = cfg.apiTables[id];
+                            delete cfg.apiTables[id];
+                            if (apiTableExpandState[id] !== undefined) {
+                                apiTableExpandState[newId] = apiTableExpandState[id];
+                                delete apiTableExpandState[id];
+                            }
+                            tablesTab();
+                        });
+                    };
+                    menu.querySelector('[data-del]').onclick = function(ev) {
+                        ev.stopPropagation();
+                        closeRuleMenu();
+                        woConfirm('Delete API table "' + id + '"? Any formula referencing it will start returning empty results.').then(function(ok) {
+                            if (!ok) return;
+                            delete cfg.apiTables[id];
+                            tablesTab();
+                        });
+                    };
+                    openRuleMenu = menu;
                 };
                 box.querySelector('[data-at-source]').onchange = function(e) {
                     t.source = e.target.value;
@@ -11324,9 +11774,14 @@
                     t.limit = (+e.target.value) || 10;
                 };
                 var domainKeyInput = box.querySelector('[data-at-domainkey]');
-                if (domainKeyInput) domainKeyInput.oninput = function(e) {
-                    t.domainKey = e.target.value.trim();
-                };
+                if (domainKeyInput) {
+                    domainKeyInput.oninput = function(e) {
+                        t.domainKey = e.target.value.trim();
+                    };
+                    attachTooltip(domainKeyInput, function() {
+                        return domainPreviewTooltipText(domainKeyInput.value.trim());
+                    });
+                }
             });
 
             apiHeader.querySelector('#__at_add').onclick = function() {
@@ -12073,6 +12528,7 @@
                 '</select></div>' +
                 '<textarea id="__fb_body" placeholder="What happened, or what would help?" style="width:100%;height:140px;"></textarea>' +
                 '<label style="display:block;margin-top:6px;font-size:11px;color:var(--wo-muted);"><input type="checkbox" id="__fb_pii"> Include name and personal identifying details</label>' +
+                '<label id="__fb_cfg_wrap" style="display:none;margin-top:4px;font-size:11px;color:var(--wo-muted);"><input type="checkbox" id="__fb_cfg"> Include my current config (rules/groups/scan/variables/settings — helps reproduce the bug)</label>' +
                 '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;">' +
                 '<button id="__fb_send" type="button" class="wo-btn wo-btn-primary">Send</button>' +
                 '<span id="__fb_status" style="color:var(--wo-muted);font-size:10px;"></span>' +
@@ -12081,10 +12537,19 @@
             content.appendChild(div);
             makeCollapsible(div, 'Bug / Suggestion', false);
 
+            var fbTypeSel = div.querySelector('#__fb_type');
+            var fbCfgWrap = div.querySelector('#__fb_cfg_wrap');
+            function syncFbCfgVisibility() {
+                fbCfgWrap.style.display = fbTypeSel.value === 'Bug' ? '' : 'none';
+            }
+            fbTypeSel.onchange = syncFbCfgVisibility;
+            syncFbCfgVisibility();
+
             div.querySelector('#__fb_send').onclick = function() {
                 var type = div.querySelector('#__fb_type').value;
                 var body = div.querySelector('#__fb_body').value.trim();
                 var includePii = div.querySelector('#__fb_pii').checked;
+                var includeConfig = type === 'Bug' && div.querySelector('#__fb_cfg').checked;
                 var statusSpan = div.querySelector('#__fb_status');
                 var sendBtn = div.querySelector('#__fb_send');
                 if (!body) {
@@ -12092,12 +12557,30 @@
                     return;
                 }
                 var stCtx = JSON.parse(localStorage.getItem('__wo_settings') || '{}');
-                var context = 'Tool version: v' + TOOL_VERSION +
+                // Version AND build always included (build wasn't before —
+                // channel/pinned-version alone doesn't pin down which exact
+                // dev build a report came from).
+                var context = 'Tool version: v' + TOOL_VERSION + ' (build ' + BUILD_ID + ')' +
                     '\nGrants: ' + (getGrants().join(', ') || 'user') +
                     '\nChannel: ' + (stCtx.channel || 'stable') + (stCtx.pinnedVersion ? ' (pinned: ' + stCtx.pinnedVersion + ')' : '') +
                     '\nLast status: ' + (statusEl ? statusEl.textContent : '') +
                     '\nBrowser: ' + navigator.userAgent +
                     '\nURL: ' + location.href;
+                if (includeConfig) {
+                    // Just this profile's own data (rules/scan/fields/vars/
+                    // settings) — not buildBackupBlob()'s full device
+                    // backup, which also carries the entire installed tool
+                    // source (src) and every OTHER saved profile, neither
+                    // of which helps reproduce a bug in the current one.
+                    var cfgAttachment = JSON.stringify({
+                        rules: getCfg(),
+                        scan: getScan(),
+                        fields: JSON.parse(localStorage.getItem(FKEY) || '{}'),
+                        vars: getVars(),
+                        settings: JSON.parse(localStorage.getItem('__wo_settings') || '{}')
+                    }, null, 2);
+                    context += '\n\n--- Attached config ---\n' + cfgAttachment;
+                }
 
                 function openEmailDraft(recipient, subject, fullContext) {
                     var mailBody = body + '\n\n---\n' + fullContext;
@@ -12214,6 +12697,7 @@
                 '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">' +
                 '<button id="__pf_save_new" type="button" class="wo-btn wo-btn-primary" style="font-size:11px;">Save As New</button>' +
                 '<button id="__pf_blank" type="button" class="wo-btn" style="font-size:11px;">Start Blank</button>' +
+                '<button id="__pf_import" type="button" class="wo-btn" style="font-size:11px;">Import…</button>' +
                 '</div>' +
                 '</div>';
             localDiv.innerHTML = localHtml;
@@ -12242,9 +12726,21 @@
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5L6.5 12L13 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
                         '<span>Switch</span>' +
                         '</button>' +
+                        '<button data-rename type="button" class="wo-kebab-item">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M11 2.5L13.5 5L5.5 13H3V10.5L11 2.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
+                        '<span>Rename</span>' +
+                        '</button>' +
                         '<button data-dup type="button" class="wo-kebab-item">' +
                         '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 10.2V3.8C3.5 3.1 4.1 2.5 4.8 2.5H10.2" stroke="currentColor" stroke-width="1.3"/></svg>' +
                         '<span>Duplicate</span>' +
+                        '</button>' +
+                        '<button data-view type="button" class="wo-kebab-item">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M1.5 8C1.5 8 4 3.5 8 3.5C12 3.5 14.5 8 14.5 8C14.5 8 12 12.5 8 12.5C4 12.5 1.5 8 1.5 8Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.2"/></svg>' +
+                        '<span>View</span>' +
+                        '</button>' +
+                        '<button data-export type="button" class="wo-kebab-item">' +
+                        '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 10V2.5M8 2.5L5.5 5M8 2.5L10.5 5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.5 10V12.5C2.5 13.1 2.9 13.5 3.5 13.5H12.5C13.1 13.5 13.5 13.1 13.5 12.5V10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+                        '<span>Export</span>' +
                         '</button>' +
                         '<button data-del type="button" class="wo-kebab-item wo-kebab-item-danger"' + (deleteDisabled ? ' disabled title="' + deleteReason + '"' : '') + '>' +
                         TRASH_SVG +
@@ -12280,6 +12776,20 @@
                             });
                         });
                     };
+                    menu.querySelector('[data-rename]').onclick = function(e) {
+                        e.stopPropagation();
+                        closeRuleMenu();
+                        woPrompt('New name for this profile:', profiles[id].name || id).then(function(newName) {
+                            if (!newName) return;
+                            newName = newName.trim();
+                            if (!newName) return;
+                            var p4 = getProfiles();
+                            if (!p4[id]) return;
+                            p4[id].name = newName;
+                            saveProfiles(p4);
+                            profilesTab();
+                        });
+                    };
                     menu.querySelector('[data-dup]').onclick = function(e) {
                         e.stopPropagation();
                         closeRuleMenu();
@@ -12301,6 +12811,32 @@
                         woAlert('Duplicated as "' + copy.name + '".').then(function() {
                             profilesTab();
                         });
+                    };
+                    menu.querySelector('[data-view]').onclick = function(e) {
+                        e.stopPropagation();
+                        closeRuleMenu();
+                        var p5 = getProfiles();
+                        var data = isActive ? snapshotProfile(p5[id]) : p5[id];
+                        openProfileConfigViewer(data, function(edited) {
+                            var p6 = getProfiles();
+                            if (!p6[id]) return;
+                            edited.id = id;
+                            edited.savedAt = new Date().toISOString();
+                            p6[id] = edited;
+                            saveProfiles(p6);
+                            if (isActive) applyProfile(edited);
+                            woAlert('Profile "' + (edited.name || id) + '" updated.' + (isActive ? ' Reopen Setup to see the changes reflected everywhere.' : '')).then(function() {
+                                profilesTab();
+                            });
+                        });
+                    };
+                    menu.querySelector('[data-export]').onclick = function(e) {
+                        e.stopPropagation();
+                        closeRuleMenu();
+                        var p7 = getProfiles();
+                        var data2 = isActive ? snapshotProfile(p7[id]) : p7[id];
+                        var fname = (data2.name || id).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '.json';
+                        woExportChoice(JSON.stringify(data2, null, 2), fname);
                     };
                     var delBtn = menu.querySelector('[data-del]');
                     if (!deleteDisabled) delBtn.onclick = function(e) {
@@ -12374,6 +12910,53 @@
                                 modal.remove();
                                 render();
                             });
+                        });
+                    });
+                });
+            };
+
+            localDiv.querySelector('#__pf_import').onclick = function() {
+                woImportChoice().then(function(raw) {
+                    if (!raw || !raw.trim()) return;
+                    var b;
+                    try {
+                        b = JSON.parse(raw);
+                        validateBackupShape(b);
+                    } catch (e) {
+                        woAlert((e instanceof SyntaxError ? 'Invalid JSON: ' : '') + e.message);
+                        return;
+                    }
+                    // Two shapes accepted: a full multi-profile backup blob
+                    // (has .profiles — the shape the old top-level Export
+                    // produced), or a single profile blob (this tab's own
+                    // per-profile Export, or "rules"/"scan" pasted directly)
+                    // — imported as one new profile either way, never
+                    // silently overwriting whatever's currently active.
+                    if (b.profiles && isPlainObj(b.profiles)) {
+                        var importedNames = [];
+                        Object.keys(b.profiles).forEach(function(pid) {
+                            var p = migrateProfile(b.profiles[pid]);
+                            var newId = pid;
+                            while (getProfiles()[newId]) newId = pid + '-imported-' + Date.now();
+                            p.id = newId;
+                            registerProfile(p);
+                            importedNames.push(p.name || newId);
+                        });
+                        woAlert('Imported ' + importedNames.length + ' profile(s): ' + importedNames.join(', ') + '.').then(function() {
+                            profilesTab();
+                        });
+                        return;
+                    }
+                    woPrompt('Name for the imported profile:', b.name || '').then(function(name) {
+                        if (!name) return;
+                        name = name.trim();
+                        if (!name) return;
+                        var id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || ('profile-' + Date.now());
+                        while (getProfiles()[id]) id = id + '-' + Date.now();
+                        var p2 = Object.assign({}, b, { id: id, name: name, savedAt: new Date().toISOString() });
+                        registerProfile(p2);
+                        woAlert('Imported as "' + name + '".').then(function() {
+                            profilesTab();
                         });
                     });
                 });
