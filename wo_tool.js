@@ -26,7 +26,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.26.0';
+    var TOOL_VERSION = '0.27.0';
     // Format YYDDD.HHMMz (2-digit year, day-of-year, UTC hour+minute) —
     // computed via `date -u +"%y%j.%H%M"z` and substituted in right before
     // every commit that touches this file, on ANY channel/repo (unlike
@@ -38,7 +38,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26202.0046z';
+    var BUILD_ID = '26202.0145z';
     // Ultimate fallback ONLY — same key/contract as loader.js's
     // CONTACT_EMAIL_KEY (kept in sync manually, independent files). Real
     // value comes from /check-access's bucket-resolved contactEmail
@@ -5848,7 +5848,7 @@
             '<button id="__wo_rescan" type="button" class="wo-btn wo-btn-primary wo-scan-btn">' +
             '<span class="wo-scan-label">Scan</span>' +
             '<svg class="wo-scan-spin" viewBox="0 0 40 40" width="22" height="22" aria-hidden="true">' +
-            '<path class="wo-scan-stroke" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" d=""/>' +
+            '<path class="wo-scan-stroke" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" d=""/>' +
             '</svg>' +
             '</button>' +
             '<button id="__wo_setup" class="wo-btn">Setup</button>' +
@@ -5936,6 +5936,13 @@
             var curAngle = 0,
                 curSweep = 40,
                 lastT = 0;
+            // finish() fires the moment the real scan completes, which can
+            // be well under one rotation for a fast scan — pendingFinishAt
+            // lets spinLoop keep the circle turning until curAngle has
+            // actually covered at least 2 full rotations (720°) before it's
+            // allowed to settle, so the spin always reads as a spin rather
+            // than a flash cut short by a fast scan.
+            var pendingFinishAt = null;
 
             function spinLoop(now) {
                 if (!spinning) return;
@@ -5946,6 +5953,11 @@
                 curAngle += omega * 340 * dt;
                 curSweep = 18 + omega * 150;
                 strokeEl.setAttribute('d', arcPath(curAngle, curSweep));
+                if (pendingFinishAt !== null && curAngle >= pendingFinishAt) {
+                    spinning = false;
+                    settleAndDrawTick();
+                    return;
+                }
                 raf = requestAnimationFrame(spinLoop);
             }
 
@@ -5971,24 +5983,33 @@
                 spinning = true;
                 lastT = 0;
                 curAngle = 0;
+                pendingFinishAt = null;
                 strokeEl.setAttribute('stroke-dasharray', '');
                 strokeEl.setAttribute('stroke-dashoffset', '0');
                 raf = requestAnimationFrame(spinLoop);
             }
 
-            function finish() {
-                spinning = false;
+            function settleAndDrawTick() {
                 if (raf) cancelAnimationFrame(raf);
                 var from = curAngle % 360;
                 if (from < 0) from += 360;
                 var target = Math.ceil((from - 270) / 360) * 360 + 270;
-                easeSettle(from, target, curSweep, 26, 360).then(function() {
+                var settledSweep = 26;
+                easeSettle(from, target, curSweep, settledSweep, 360).then(function() {
                     var west = ptAt(270);
                     strokeEl.setAttribute('d', tickPathFrom(west));
                     var len = strokeEl.getTotalLength();
                     strokeEl.setAttribute('stroke-dasharray', len);
-                    strokeEl.setAttribute('stroke-dashoffset', len);
-                    strokeEl.style.transition = 'stroke-dashoffset .32s ease';
+                    // Starting fully hidden (dashoffset = len) made the just-
+                    // settled arc vanish for a frame before the tick began
+                    // drawing in — the "jump" this was reported as. Instead,
+                    // start already showing the same stroke length the
+                    // settled arc had (converted from degrees to path
+                    // units), so the swap from arc -> tick reads as one
+                    // continuous line reaching the same point, not a blink.
+                    var alreadyVisible = Math.min(len, r * (settledSweep * Math.PI / 180));
+                    strokeEl.setAttribute('stroke-dashoffset', len - alreadyVisible);
+                    strokeEl.style.transition = 'stroke-dashoffset .65s ease';
                     requestAnimationFrame(function() {
                         strokeEl.setAttribute('stroke-dashoffset', '0');
                     });
@@ -5996,8 +6017,21 @@
                         strokeEl.style.transition = '';
                         strokeEl.setAttribute('d', '');
                         scanBtn.classList.remove('is-spinning');
-                    }, 650);
+                    }, 950);
                 });
+            }
+
+            function finish() {
+                // If the real scan finished before the circle has done at
+                // least 2 full turns (720°), let spinLoop keep spinning and
+                // only settle once it catches up, rather than cutting a
+                // fast scan's spin short.
+                if (spinning && curAngle < 720) {
+                    pendingFinishAt = 720;
+                    return;
+                }
+                spinning = false;
+                settleAndDrawTick();
             }
             panel.querySelector('#__wo_rescan').onclick = function() {
                 if (actionsBusy()) return;
@@ -7694,7 +7728,13 @@
             // fixed-height/overflow guard that solves the original
             // uneven-header-thickness problem.
             "#__wo_setup_modal .wo-card-head{display:flex;align-items:center;gap:6px;padding:6px 10px;height:34px;max-height:34px;box-sizing:border-box;overflow:hidden;line-height:34px;cursor:pointer;user-select:none;background:var(--wo-surface-2);}" +
-            "#__wo_setup_modal .wo-card-head:hover{background:var(--wo-field);}" +
+            // Was var(--wo-field), which is the exact same hex as this
+            // header's own resting background (--wo-surface-2) — the
+            // "hover highlight" was a real CSS rule that produced a
+            // literal no-op. --wo-border matches the shade already used
+            // for kebab-menu-item/tab hovers, so this now actually reads
+            // as the same highlight language everywhere.
+            "#__wo_setup_modal .wo-card-head:hover{background:var(--wo-border);}" +
             "#__wo_setup_modal .wo-card>[data-coll-body]{padding:0 10px 10px;}" +
             "#__wo_setup_modal .wo-card-arrow{font-size:9px;color:var(--wo-muted);min-width:9px;}" +
             "#__wo_setup_modal .wo-rule-title{flex:1;min-width:0;font-weight:700;font-size:12px;color:var(--wo-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}" +
@@ -7705,14 +7745,9 @@
             // its own ad hoc bordered div.
             "#__wo_setup_modal .wo-subbox{border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:8px;background:var(--wo-field);}" +
             "#__wo_setup_modal .wo-subbox-accent{border-color:var(--wo-accent);}" +
-            // Scan Order's fixed start/end markers — not real cards (no
-            // drag handle, kebab, or delete), just framing.
-            "#__wo_setup_modal .wo-scan-bookend{display:flex;align-items:center;gap:7px;padding:7px 10px;color:var(--wo-muted);font-size:11px;flex-wrap:wrap;}" +
-            "#__wo_setup_modal .wo-scan-bookend-icon{display:flex;flex-shrink:0;color:var(--wo-accent);}" +
-            "#__wo_setup_modal .wo-scan-bookend-label{font-weight:700;color:var(--wo-text);flex-shrink:0;}" +
-            "#__wo_setup_modal .wo-scan-bookend-sub{font-weight:400;color:var(--wo-muted);}" +
-            "#__wo_setup_modal .wo-scan-bookend-note{font-size:10px;font-style:italic;}" +
-            "#__wo_setup_modal .wo-scan-bookend-input{margin-left:auto;width:160px;font-size:11px;}" +
+            // Scan Order's start/end markers are real .wo-card entries now
+            // (see scanTab()) — only the return-icon badge on the end
+            // card's header needs its own rule.
             "#__wo_setup_modal .wo-scan-return-symbol{display:inline-flex;align-items:center;color:var(--wo-accent);margin-left:6px;flex-shrink:0;}" +
             // Shared editable-rows table (Scan tab's Row Detail Fields /
             // Post-Scan Actions) — one header row instead of repeating each
@@ -7867,7 +7902,12 @@
             // stroke-only.
             settings: '<path d="M12.57 6.9L14.24 6.56L14.24 9.44L12.57 9.1L12.01 10.46L13.43 11.39L11.39 13.43L10.46 12.01L9.1 12.57L9.44 14.24L6.56 14.24L6.9 12.57L5.54 12.01L4.61 13.43L2.57 11.39L3.99 10.46L3.43 9.1L1.76 9.44L1.76 6.56L3.43 6.9L3.99 5.54L2.57 4.61L4.61 2.57L5.54 3.99L6.9 3.43L6.56 1.76L9.44 1.76L9.1 3.43L10.46 3.99L11.39 2.57L13.43 4.61L12.01 5.54Z" stroke="currentColor" stroke-width="0.9" stroke-linejoin="round"/><circle cx="8" cy="8" r="2.4" stroke="currentColor" stroke-width="1.2"/>',
             update: '<path d="M12.8 5.2A5 5 0 1 0 13.5 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M12.8 2.5V5.2H10.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>',
-            guide: '<path d="M2.5 3.5C2.5 3 2.9 2.7 3.4 2.8C5 3 6.5 3.6 8 4.6C9.5 3.6 11 3 12.6 2.8C13.1 2.7 13.5 3 13.5 3.5V11.5C13.5 12 13.1 12.3 12.6 12.4C11 12.6 9.5 13.2 8 14.2C6.5 13.2 5 12.6 3.4 12.4C2.9 12.3 2.5 12 2.5 11.5V3.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 4.6V14.2" stroke="currentColor" stroke-width="1.2"/>',
+            // Compass — circle + off-axis needle, standard "find your way
+            // around" glyph.
+            guide: '<circle cx="8" cy="8" r="5.8" stroke="currentColor" stroke-width="1.2"/><path d="M10.3 5.7L8.7 8.9L5.7 10.3L7.3 7.1L10.3 5.7Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><circle cx="8" cy="8" r="0.6" fill="currentColor" stroke="none"/>',
+            // Clipboard — a reference sheet you glance at, not a book you
+            // sit down and read (that association is now Guide's compass).
+            formulas: '<rect x="4.3" y="3" width="7.4" height="11" rx="1.1" stroke="currentColor" stroke-width="1.2"/><rect x="6" y="2" width="4" height="2" rx="0.6" stroke="currentColor" stroke-width="1.1"/><path d="M6 7.3H10" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M6 9.7H10" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M6 12.1H8.4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>',
             // Shield — links out to the Worker-hosted admin management page.
             admin: '<path d="M8 2.4L13 4.2V7.6C13 10.8 10.9 13 8 13.7C5.1 13 3 10.8 3 7.6V4.2L8 2.4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5.7 8L7.2 9.5L10.3 6.3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>',
             feedback: '<path d="M2.5 3.7C2.5 3.1 3 2.6 3.6 2.6H12.4C13 2.6 13.5 3.1 13.5 3.7V9.3C13.5 9.9 13 10.4 12.4 10.4H6.5L3.8 12.7C3.5 12.9 3 12.7 3 12.3V10.4H3.6C3 10.4 2.5 9.9 2.5 9.3V3.7Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><circle cx="5.8" cy="6.5" r="0.55" fill="none" stroke="currentColor" stroke-width="1.1"/><circle cx="8" cy="6.5" r="0.55" fill="none" stroke="currentColor" stroke-width="1.1"/><circle cx="10.2" cy="6.5" r="0.55" fill="none" stroke="currentColor" stroke-width="1.1"/>',
@@ -7896,7 +7936,6 @@
             '<span class="wo-modal-title">Setup</span>' +
             '<span class="wo-modal-title-actions">' +
             '<button id="__s_minimize" type="button" class="wo-btn-ghost" aria-label="Minimize Setup" style="display:none;"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
-            '<button id="__s_formulas" type="button" class="wo-btn-ghost" aria-label="Formula reference"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2.5 3.5C2.5 3 2.9 2.7 3.4 2.8C5 3 6.5 3.6 8 4.6C9.5 3.6 11 3 12.6 2.8C13.1 2.7 13.5 3 13.5 3.5V11.5C13.5 12 13.1 12.3 12.6 12.4C11 12.6 9.5 13.2 8 14.2C6.5 13.2 5 12.6 3.4 12.4C2.9 12.3 2.5 12 2.5 11.5V3.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 4.6V14.2" stroke="currentColor" stroke-width="1.2"/></svg></button>' +
             '<button id="__s_save" type="button" class="wo-btn wo-btn-primary wo-save-btn">' +
             '<span class="wo-save-row">' +
             '<svg class="wo-save-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">' +
@@ -7925,6 +7964,7 @@
             '</div>' +
             '<div class="wo-tab-group wo-tab-group-end">' +
             (hasGrant('admin') ? tabBtn('__s_admin', 'admin', 'Admin', 'wo-tab-btn-ghost') : '') +
+            tabBtn('__s_formulas', 'formulas', 'Formulas', 'wo-tab-btn-ghost') +
             tabBtn('__s_guide', 'guide', 'Guide', 'wo-tab-btn-ghost') +
             tabBtn('__s_feedback', 'feedback', 'Feedback', 'wo-tab-btn-ghost') +
             // Hidden until applyResponsiveTabFit() decides even icon-only
@@ -7958,9 +7998,9 @@
         document.body.appendChild(modal);
         attachTooltip(modal.querySelector('#__s_resize'), 'Drag to resize');
         attachTooltip(modal.querySelector('#__s_close'), 'Close');
-        attachTooltip(modal.querySelector('#__s_formulas'), 'Formula reference');
         modal.querySelectorAll('.wo-tab-btn[data-tab-key]').forEach(function(b) {
-            var isLinkOutTab = b.getAttribute('data-tab-key') === 'guide' || b.getAttribute('data-tab-key') === 'admin';
+            var key = b.getAttribute('data-tab-key');
+            var isLinkOutTab = key === 'guide' || key === 'admin';
             attachTooltip(b, function() {
                 var label = b.classList.contains('wo-tab-mode-icon') ? b.getAttribute('data-tab-label') : '';
                 if (isLinkOutTab) return (label ? label + ' — ' : '') + 'Opens in a new browser tab';
@@ -9267,9 +9307,6 @@
             var fr = document.getElementById('__wo_formula_ref');
             if (fr) fr.remove();
         }
-        modal.querySelector('#__s_formulas').onclick = function() {
-            openFormulaReferencePopup();
-        };
         modal.querySelector('#__s_close').onclick = function() {
             closeTabCtxMenu();
             closeRuleMenu();
@@ -9294,10 +9331,11 @@
             checkForUpdate();
             // Stays open and refreshes in place instead of closing — lets you
             // keep working, and re-draws the active tab in case saving itself
-            // changed anything relevant (e.g. update-check status). Guide is
-            // skipped since it just opens a new browser tab, not a re-render;
-            // Feedback is skipped so an in-progress draft doesn't get wiped.
-            if (currentTabId !== '__s_guide' && currentTabId !== '__s_feedback' && tabFns[currentTabId]) {
+            // changed anything relevant (e.g. update-check status). Guide and
+            // Formulas are skipped since they just open a new browser tab/
+            // popup, not a re-render; Feedback is skipped so an in-progress
+            // draft doesn't get wiped.
+            if (currentTabId !== '__s_guide' && currentTabId !== '__s_feedback' && currentTabId !== '__s_formulas' && tabFns[currentTabId]) {
                 var savedScroll = content.scrollTop;
                 tabFns[currentTabId]();
                 content.scrollTop = savedScroll;
@@ -9379,7 +9417,33 @@
         // reference that existed before this was the external Guide page
         // (williamzitzmann.github.io/.../#s17), which meant leaving Setup
         // entirely and cross-referencing in a separate tab mid-edit.
+        // Standalone popup appended to document.body (like openFieldBrowser/
+        // openProfileConfigViewer) — none of #__wo_setup_modal's scoped CSS
+        // reaches it, so it needs its own injected stylesheet or its
+        // buttons/input just render as unstyled browser defaults, which is
+        // what "doesn't fit the theme" actually was here.
+        function injectFormulaRefStyles() {
+            if (document.getElementById('__wo_fr_style')) return;
+            var css = "#__wo_formula_ref,#__wo_formula_ref *:not(svg,svg *){box-sizing:border-box;}" +
+                "#__wo_formula_ref svg{fill:none;color:inherit;}" +
+                "#__wo_formula_ref svg [stroke]{stroke:currentColor;}" +
+                "#__wo_formula_ref{--wo-bg:#0d1117;--wo-surface-2:#1f2630;--wo-field:#1f2630;--wo-border:#30363d;--wo-text:#f0f3f6;--wo-muted:#9aa4af;--wo-accent:#58a6ff;--wo-r-ctl:6px;}" +
+                "#__wo_formula_ref input[type=text]{font:inherit;font-size:11.5px;background:var(--wo-field);color:var(--wo-text);border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:6px 9px;width:100%;box-sizing:border-box;}" +
+                "#__wo_formula_ref input[type=text]::placeholder{color:var(--wo-muted);}" +
+                "#__wo_formula_ref input[type=text]:focus{outline:2px solid var(--wo-accent);outline-offset:-1px;border-color:var(--wo-accent);}" +
+                "#__wo_formula_ref .wo-btn-ghost{background:none;border:1px solid transparent;color:var(--wo-muted);cursor:pointer;font:inherit;padding:6px 8px;border-radius:var(--wo-r-ctl);display:inline-flex;align-items:center;justify-content:center;}" +
+                "#__wo_formula_ref .wo-btn-ghost:hover{color:var(--wo-text);background:var(--wo-field);}" +
+                "#__fr_list{scrollbar-width:none;}" +
+                "#__fr_list::-webkit-scrollbar{display:none;}" +
+                "#__wo_formula_ref .wo-mono{font-family:Consolas,'Cascadia Mono',monospace;}";
+            var styleEl = document.createElement('style');
+            styleEl.id = '__wo_fr_style';
+            styleEl.textContent = css;
+            document.head.appendChild(styleEl);
+        }
+
         function openFormulaReferencePopup() {
+            injectFormulaRefStyles();
             var old = document.getElementById('__wo_formula_ref');
             if (old) old.remove();
             var pop = document.createElement('div');
@@ -10892,38 +10956,22 @@
 
         // ── SCAN TAB ──
         function scanTab() {
-            // Bookend rows aren't real scan.scans entries (nothing to drag,
-            // rename, or delete) — they're a fixed visual frame making the
-            // implicit start/end of every scan explicit: a scan always
-            // begins by switching to the WO tab (regardless of where the
-            // page happens to be) and always finishes back on it. Both
-            // read/write the SAME scan.woTabId this used to be a bare
-            // "WO Tab ID:" field for — only the framing changed.
-            function woBookendHtml(kind) {
-                var isStart = kind === 'start';
-                var icon = isStart ?
-                    '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2.5 3.5C2.5 3 2.9 2.7 3.4 2.8C5 3 6.5 3.6 8 4.6C9.5 3.6 11 3 12.6 2.8C13.1 2.7 13.5 3 13.5 3.5V11.5C13.5 12 13.1 12.3 12.6 12.4C11 12.6 9.5 13.2 8 14.2C6.5 13.2 5 12.6 3.4 12.4C2.9 12.3 2.5 12 2.5 11.5V3.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>' :
-                    '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 4.5V2.8L6 6.3L10 9.8V8.1C11.9 8.1 13.4 8.9 14.4 10.5C14.2 8 12.9 5.1 10 4.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>';
-                return '<div class="wo-scan-bookend">' +
-                    '<span class="wo-scan-bookend-icon">' + icon + '</span>' +
-                    '<span class="wo-scan-bookend-label">Work Order <span class="wo-scan-bookend-sub">(main page)</span></span>' +
-                    '<span class="wo-scan-bookend-note">' + (isStart ? 'Scan always starts here, even if this isn\'t the current tab' : 'Scan always returns here when finished') + '</span>' +
-                    (isStart ? '<input type="text" data-wt value="' + String(scan.woTabId).replace(/"/g, '&quot;') + '" class="wo-scan-bookend-input">' : '') +
-                    '</div>';
-            }
-            content.innerHTML = '<div style="margin-bottom:10px;">' +
-                '<div style="margin-bottom:8px;font-weight:700;color:var(--wo-text);">Scan Order</div>' +
-                woBookendHtml('start') +
-                '<div id="__scan_order_list"></div>' +
-                woBookendHtml('end') +
+            // First/last are just the real scan.scans entries at index 0
+            // and length-1 — same markup, same full editing (Type/Tab ID/
+            // Wait for/Condition/kebab/drag), nothing special about them
+            // structurally. The ONLY special treatment is the return-icon
+            // badge on whichever entry currently sits last (see inside the
+            // forEach below) — it moves with reordering, since it's read
+            // off idx/length each render, not tied to a fixed synthetic
+            // "end" entry.
+            var RETURN_ICON_SVG = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 4.5V2.8L6 6.3L10 9.8V8.1C11.9 8.1 13.4 8.9 14.4 10.5C14.2 8 12.9 5.1 10 4.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>';
+            content.innerHTML = '<div style="margin-bottom:10px;font-size:11px;">WO Tab ID: <input type="text" data-wt value="' + String(scan.woTabId).replace(/"/g, '&quot;') + '"> <span style="color:var(--wo-muted);">(tab returned to after scan)</span>' +
+                '<div style="margin-top:8px;font-weight:700;color:var(--wo-text);">Scan Order</div>' +
                 '</div>';
-            content.querySelectorAll('[data-wt]').forEach(function(inp) {
-                attachTooltip(inp, 'Tab ID/event for the Work Order tab itself');
-                inp.oninput = function(e) {
-                    scan.woTabId = e.target.value;
-                };
-            });
-            var scanOrderList = content.querySelector('#__scan_order_list');
+            content.querySelector('[data-wt]').oninput = function(e) {
+                scan.woTabId = e.target.value;
+            };
+            var scanOrderList = content;
             scan.scans.forEach(function(s, idx) {
                 var box = document.createElement('div');
                 box.className = 'wo-card';
@@ -10936,6 +10984,7 @@
                     DRAG_HANDLE_HTML +
                     titleHtml +
                     (s.skipped ? '<span class="wo-skip-tag">Skipped</span>' : '') +
+                    (idx === scan.scans.length - 1 ? '<span class="wo-scan-return-symbol">' + RETURN_ICON_SVG + '</span>' : '') +
                     entryTipIconHtml(s) +
                     moveButtonsHtml(idx === 0, idx === scan.scans.length - 1) +
                     '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
@@ -11147,17 +11196,13 @@
                 });
                 wireEntryTipIcon(box, s);
                 attachTooltip(box.querySelector('[data-kebab]'), 'More actions');
+                if (box.querySelector('.wo-scan-return-symbol')) {
+                    attachTooltip(box.querySelector('.wo-scan-return-symbol'), 'Last item — scan returns to the Work Order tab after this');
+                }
                 wireMoveButtons(box, scan.scans, idx, scanTab);
                 attachCardDrag(box.querySelector('[data-coll-header]'), box, scanOrderList, scan.scans, idx, scanTab, function(item) {
                     return item.id;
                 }, scanExpandState);
-                if (idx === scan.scans.length - 1) {
-                    var backSym = document.createElement('span');
-                    backSym.className = 'wo-scan-return-symbol';
-                    backSym.innerHTML = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 4.5V2.8L6 6.3L10 9.8V8.1C11.9 8.1 13.4 8.9 14.4 10.5C14.2 8 12.9 5.1 10 4.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>';
-                    box.querySelector('[data-coll-header]').appendChild(backSym);
-                    attachTooltip(backSym, 'Last item — scan returns to the Work Order tab after this');
-                }
 
                 var titleInput = box.querySelector('[data-l]');
                 if (titleInput) {
@@ -11333,7 +11378,7 @@
                 var displayLabel = cfg.tableNames[id] || (isKnownDefault ? KNOWN_TABLE_NAMES[id] : id);
                 box.innerHTML =
                     '<div data-coll-header class="wo-card-head">' +
-                    '<code class="wo-mono" style="font-size:10.5px;">' + String(displayLabel).replace(/</g, '&lt;') + '</code>' +
+                    '<span class="wo-rule-title">' + String(displayLabel).replace(/</g, '&lt;') + '</span>' +
                     '</div>' +
                     '<div data-coll-body style="margin-top:7px;">' +
                     '<div>' +
@@ -11460,7 +11505,7 @@
                 var box = document.createElement('div');
                 box.className = 'wo-card';
                 var head = '<div data-coll-header class="wo-card-head">' +
-                    '<code class="wo-mono" style="font-size:11px;">' + String(id).replace(/</g, '&lt;') + '</code>' +
+                    '<span class="wo-rule-title">' + String(id).replace(/</g, '&lt;') + '</span>' +
                     '<div style="display:flex;gap:6px;margin-left:auto;" onclick="event.stopPropagation()">' +
                     '<button type="button" class="__ct_addrow wo-btn-ghost" style="font-size:11px;" title="Add row">+ Row</button>' +
                     '<button type="button" class="__ct_addcol wo-btn-ghost" style="font-size:11px;" title="Add column">+ Col</button>' +
@@ -11651,7 +11696,7 @@
                 box.className = 'wo-card';
                 box.innerHTML =
                     '<div data-coll-header class="wo-card-head">' +
-                    '<code class="wo-mono" style="font-size:11px;">' + String(id).replace(/</g, '&lt;') + '</code>' +
+                    '<span class="wo-rule-title">' + String(id).replace(/</g, '&lt;') + '</span>' +
                     '<span class="wo-kebab-wrap" style="margin-left:auto;" onclick="event.stopPropagation()">' +
                     '<button data-kebab type="button" class="wo-kebab-btn" aria-label="API table actions" aria-haspopup="true">' +
                     '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="3" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="0.7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="13" r="0.7" stroke="currentColor" stroke-width="1.4"/></svg>' +
@@ -12500,6 +12545,14 @@
             window.open('https://williamzitzmann.github.io/WO-Review-Tool/', '_blank');
         }
 
+        // Same "link out, don't touch #__s_content" shape as guideTab() —
+        // opens its own top-level popup instead of populating the tab
+        // content area, so it's excluded from the same places Guide/
+        // Feedback are (see the Save handler's tab-refresh skip list).
+        function formulasTab() {
+            openFormulaReferencePopup();
+        }
+
         // ── ADMIN TAB ── Only rendered when the server granted 'admin' (see
         // loadAdminAccountEmails/handleCheckAccess in worker.js — cross-
         // references the logged-in whoami email against every admin
@@ -13061,6 +13114,7 @@
             };
         }
         bindTab('__s_admin', adminTab);
+        bindTab('__s_formulas', formulasTab);
         bindTab('__s_guide', guideTab);
         bindTab('__s_feedback', feedbackTab);
         bindTab('__s_rules', rulesTab, function() {

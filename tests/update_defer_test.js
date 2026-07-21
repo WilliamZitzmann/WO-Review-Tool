@@ -146,9 +146,9 @@ async function testBannerShowsWhenAutoUpdateOff() {
     }));
 
     var versionJson = JSON.stringify({
-        latest: '0.27.0',
-        channels: { stable: '0.27.0', beta: '0.27.0' },
-        versions: [{ version: '0.27.0', name: 'Test Bump', changes: ['A change.'] }]
+        latest: '0.28.0',
+        channels: { stable: '0.28.0', beta: '0.28.0' },
+        versions: [{ version: '0.28.0', name: 'Test Bump', changes: ['A change.'] }]
     });
     w.XMLHttpRequest = function() {
         var self = this;
@@ -173,7 +173,7 @@ async function testBannerShowsWhenAutoUpdateOff() {
     var banner = w.document.getElementById('__wo_update_banner');
     check('update banner appears for a minor bump with auto-update off (not silently auto-installed)',
         !!banner, banner && banner.textContent.slice(0, 80));
-    check('banner mentions the available version', !!banner && banner.textContent.indexOf('0.27.0') !== -1);
+    check('banner mentions the available version', !!banner && banner.textContent.indexOf('0.28.0') !== -1);
 }
 
 (async function main() {
