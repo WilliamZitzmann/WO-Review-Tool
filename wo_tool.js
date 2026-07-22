@@ -26,7 +26,7 @@
     }
 
     var PANEL_W = 360;
-    var TOOL_VERSION = '0.27.0';
+    var TOOL_VERSION = '0.27.1';
     // Format YYDDD.HHMMz (2-digit year, day-of-year, UTC hour+minute) —
     // computed via `date -u +"%y%j.%H%M"z` and substituted in right before
     // every commit that touches this file, on ANY channel/repo (unlike
@@ -38,7 +38,7 @@
     // grantsStatusLine() so it rides along on every status message that
     // already reports "running vX" or "up to date", plus a standalone line
     // in Settings > Updates.
-    var BUILD_ID = '26202.0145z';
+    var BUILD_ID = '26203.1846z';
     // Ultimate fallback ONLY — same key/contract as loader.js's
     // CONTACT_EMAIL_KEY (kept in sync manually, independent files). Real
     // value comes from /check-access's bucket-resolved contactEmail
@@ -458,7 +458,6 @@
         apiTables: {}
     };
     var DEFAULT_SCAN = {
-        woTabId: 'mbf28cd64-tab',
         scans: [{
             id: 's_actuals',
             title: 'Actuals',
@@ -2755,7 +2754,7 @@
         betaAssetWoCache[key] = [];
         fetchAssetWOHistoryRaw(assetnum, siteid, limit).then(function(rows) {
             betaAssetWoCache[key] = rows;
-            render();
+            reRenderPreservingReturnBoxFocus();
         }).catch(function() {
             // Leave the [] placeholder in place — swallow rather than retry
             // on every subsequent render, same reasoning as whoami's cache.
@@ -2771,7 +2770,7 @@
         betaAssetDowntimeCache[key] = [];
         fetchAssetDowntimeHistoryRaw(assetnum, siteid).then(function(rows) {
             betaAssetDowntimeCache[key] = rows;
-            render();
+            reRenderPreservingReturnBoxFocus();
         }).catch(function() {});
         return betaAssetDowntimeCache[key];
     }
@@ -2886,7 +2885,7 @@
             fetchAssetWOHistoryRaw(assetnum, siteid, limit);
         fetchPromise.then(function(rows) {
             betaApiTableCache[key] = rows;
-            render();
+            reRenderPreservingReturnBoxFocus();
         }).catch(function() {});
         return betaApiTableCache[key];
     }
@@ -4496,39 +4495,18 @@
         }
 
         function finish() {
-            setStatus('Returning to WO tab...');
+            // No forced navigation back to any particular tab — the scan
+            // ends wherever the last configured step left off. Add a lazy
+            // (no-op) step targeting the WO tab as the last scan-order entry
+            // if you want the scan to land there.
             hasScanned = true;
             var lastScannedWO = cache.fields['Work Order :: Work Order'] || '';
             localStorage.setItem('__wo_last_scanned_wo', lastScannedWO);
-            // Check first — WO tab DOM is almost always already present
-            if (textMarkerExists('Reported By Name') || textMarkerExists('Work Type')) {
-                if (sew) {
-                    try {
-                        sew.sendEvent('click', scan.woTabId, '');
-                    } catch (e) {}
-                }
-                mergeSnapshot(extractSnapshotFull());
-                scanning = false;
-                setActionsLocked(false);
-                setStatus('Complete ' + new Date().toLocaleTimeString());
-                done();
-                return;
-            }
-            // Tab click first, then wait for markers
-            if (sew) {
-                try {
-                    sew.sendEvent('click', scan.woTabId, '');
-                } catch (e) {}
-            }
-            poll(function() {
-                return textMarkerExists('Reported By Name') || textMarkerExists('Work Type');
-            }, 2000, function() {
-                mergeSnapshot(extractSnapshotFull());
-                scanning = false;
-                setActionsLocked(false);
-                setStatus('Complete ' + new Date().toLocaleTimeString());
-                done();
-            });
+            mergeSnapshot(extractSnapshotFull());
+            scanning = false;
+            setActionsLocked(false);
+            setStatus('Complete ' + new Date().toLocaleTimeString());
+            done();
         }
 
 
@@ -5561,7 +5539,6 @@
     }
 
     function injectPanelStyles() {
-        if (document.getElementById('__wo_panel_style')) return;
         var css = "" +
             // Host pages (esp. IBM Maximo/Carbon) ship their own aggressive,
             // broadly-targeted CSS for plain elements (button/input/svg/div)
@@ -6170,6 +6147,28 @@
         }
         box.focus();
         box.setSelectionRange(cursorPos, cursorPos);
+    }
+
+    // assetWOHistoryFn/assetDowntimeHistoryFn (beta_2) resolve asynchronously,
+    // well after the scan's own render()+focus() already ran, and need to
+    // re-render once their fetch lands so the new rows show up. A bare
+    // render() rebuilds the return-message textarea from scratch
+    // (footerAreaEl.innerHTML = ''), which silently steals focus/cursor out
+    // from under the user if they'd already started editing it — this
+    // preserves that focus/selection across the rebuild when it was there.
+    function reRenderPreservingReturnBoxFocus() {
+        var box = panel && panel.querySelector('.wo-qr-box');
+        var hadFocus = !!box && document.activeElement === box;
+        var selStart = hadFocus ? box.selectionStart : null;
+        var selEnd = hadFocus ? box.selectionEnd : null;
+        render();
+        if (hadFocus) {
+            var newBox = panel && panel.querySelector('.wo-qr-box');
+            if (newBox && !newBox.disabled) {
+                newBox.focus();
+                newBox.setSelectionRange(selStart, selEnd);
+            }
+        }
     }
     function runScanThenFocusReturnBox(mode) {
         runScan(function() {
@@ -7100,7 +7099,7 @@
             '</button>' +
             '</span>' +
             '</div>' +
-            '<div id="__cv_body" style="flex:1;overflow:auto;border:1px solid var(--wo-border);border-radius:6px;padding:6px;"></div>';
+            '<div id="__cv_body" style="flex:1;overflow:auto;"></div>';
         document.body.appendChild(pop);
 
         // Draggable — same simple free-drag pattern as the Formula
@@ -7398,6 +7397,7 @@
                 }
                 // add to group if one selected
                 if (grp) {
+                    if (!grp.fields) grp.fields = [];
                     if (grp.fields.indexOf(key) < 0) {
                         grp.fields.push(key);
                         if (!grp.fieldRows) grp.fieldRows = [];
@@ -7540,7 +7540,6 @@
     // large surface and — like the docked panel redesign — needs to ship in
     // reviewable pieces rather than one unverifiable megachange.
     function injectSetupStyles() {
-        if (document.getElementById('__wo_setup_style')) return;
         var css = "" +
             // See the matching comments in injectPanelStyles() — isolates us
             // from host-page CSS (button/input/svg resets, aggressive
@@ -7564,14 +7563,21 @@
             // (kebab menus etc., all position:fixed and unaffected by this
             // regardless) is put at risk by a change aimed only at this one
             // state.
-            "#__wo_setup_modal.is-mini{overflow:hidden;}" +
+            "#__wo_setup_modal.is-mini{overflow:hidden;padding:0!important;}" +
             "#__wo_setup_modal.is-mini .wo-modal-titlebar,#__wo_setup_modal.is-mini .wo-modal-tabs,#__wo_setup_modal.is-mini .wo-modal-content,#__wo_setup_modal.is-mini .wo-resize-handle{display:none;}" +
-            "#__wo_setup_modal #__s_mini_strip{display:none;flex-direction:column;align-items:center;gap:4px;padding:10px 0;overflow-y:auto;height:100%;}" +
+            // overflow-x:hidden — the vertical scrollbar track can otherwise
+            // force a horizontal bar at the bottom of the narrow strip.
+            "#__wo_setup_modal #__s_mini_strip{display:none;flex-direction:column;align-items:center;gap:6px;padding:10px 0;overflow-x:hidden;overflow-y:auto;height:100%;scrollbar-width:none;}" +
+            "#__wo_setup_modal #__s_mini_strip::-webkit-scrollbar{width:0;height:0;}" +
             "#__wo_setup_modal.is-mini #__s_mini_strip{display:flex;}" +
-            "#__wo_setup_modal .wo-s-mini-btn{width:32px;height:32px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:none;border:1px solid transparent;border-radius:var(--wo-r-ctl);color:var(--wo-muted);cursor:pointer;}" +
+            "#__wo_setup_modal .wo-s-mini-btn{width:36px;height:36px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:none;border:1px solid transparent;border-radius:var(--wo-r-ctl);color:var(--wo-muted);cursor:pointer;}" +
             "#__wo_setup_modal .wo-s-mini-btn:hover{background:var(--wo-field);color:var(--wo-text);}" +
             "#__wo_setup_modal .wo-s-mini-btn.is-active{color:var(--wo-accent);background:var(--wo-field);}" +
-            "#__wo_setup_modal .wo-s-mini-expand{color:var(--wo-text);margin-bottom:4px;padding-bottom:8px;border-bottom:1px solid var(--wo-border);border-radius:0;width:28px;}" +
+            // Tab icons in the strip are enlarged; expand/collapse keeps its
+            // smaller chevron so it stays visually distinct as a control.
+            "#__wo_setup_modal .wo-s-mini-btn:not(.wo-s-mini-expand) svg{width:18px;height:18px;}" +
+            "#__wo_setup_modal .wo-s-mini-expand{color:var(--wo-text);margin-bottom:4px;padding-bottom:8px;border-bottom:1px solid var(--wo-border);border-radius:0;width:28px;height:28px;}" +
+            "#__wo_setup_modal .wo-s-mini-expand svg{width:15px;height:15px;}" +
             // Title bar
             "#__wo_setup_modal .wo-modal-titlebar{height:var(--wo-header-h,48px);box-sizing:border-box;flex-shrink:0;display:flex;justify-content:space-between;align-items:center;cursor:move;user-select:none;padding:0 12px;background:var(--wo-surface-2);border-radius:var(--wo-r-panel) var(--wo-r-panel) 0 0;border-bottom:1px solid var(--wo-border);margin:-10px -10px 0;}" +
             "#__wo_setup_modal .wo-modal-title{font-size:13px;font-weight:800;color:#fff;}" +
@@ -7745,10 +7751,6 @@
             // its own ad hoc bordered div.
             "#__wo_setup_modal .wo-subbox{border:1px solid var(--wo-border);border-radius:var(--wo-r-ctl);padding:8px;background:var(--wo-field);}" +
             "#__wo_setup_modal .wo-subbox-accent{border-color:var(--wo-accent);}" +
-            // Scan Order's start/end markers are real .wo-card entries now
-            // (see scanTab()) — only the return-icon badge on the end
-            // card's header needs its own rule.
-            "#__wo_setup_modal .wo-scan-return-symbol{display:inline-flex;align-items:center;color:var(--wo-accent);margin-left:6px;flex-shrink:0;}" +
             // Shared editable-rows table (Scan tab's Row Detail Fields /
             // Post-Scan Actions) — one header row instead of repeating each
             // field's label inside every entry.
@@ -7860,17 +7862,28 @@
             "#__wo_setup_modal .wo-resize-corner-nw{top:-3px;left:-3px;cursor:nwse-resize;}" +
             "#__wo_setup_modal .wo-resize-corner-ne{top:-3px;right:-3px;cursor:nesw-resize;}" +
             "#__wo_setup_modal .wo-resize-corner-sw{bottom:-3px;left:-3px;cursor:nesw-resize;}";
-        var styleEl = document.createElement('style');
-        styleEl.id = '__wo_setup_style';
+        var styleEl = document.getElementById('__wo_setup_style');
+        if (!styleEl) {
+            styleEl = document.createElement('style');
+            styleEl.id = '__wo_setup_style';
+            document.head.appendChild(styleEl);
+        }
         styleEl.textContent = css;
-        document.head.appendChild(styleEl);
     }
 
     function openSetup() {
         var old = document.getElementById('__wo_setup_modal');
         if (old) {
-            if (old._woCleanup) old._woCleanup();
-            old.remove();
+            // Already open but minimized to the icon strip — expand in place
+            // instead of tearing down and rebuilding the whole modal.
+            if (old.classList.contains('is-mini') && typeof old._woExpandIfMini === 'function') {
+                old._woExpandIfMini();
+                return;
+            }
+            // Already open and expanded — leave it put. Rebuilding used to
+            // flash the default 75%-width floating rect before re-applying
+            // the saved snap.
+            return;
         }
         injectSetupStyles();
         var opts = fieldKeyOptions();
@@ -7885,7 +7898,12 @@
         // --- make modal draggable ---
         var modal = document.createElement('div');
         modal.id = '__wo_setup_modal';
-        modal.style.cssText = 'position:fixed;top:3%;left:10%;width:75%;height:92%;z-index:9999999;padding:10px;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);display:flex;flex-direction:column;font-size:12px;transition:width .2s ease;';
+        // left is transitioned alongside width so minimize/expand keeps the
+        // docked edge fixed for right / left-of-panel snaps (only width
+        // would make those zones animate like a far-left snap).
+        // visibility:hidden until the saved snap/mini rect is applied so the
+        // default 75% floating size never paints for a frame first.
+        modal.style.cssText = 'position:fixed;top:3%;left:10%;width:75%;height:92%;z-index:9999999;padding:10px;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);display:flex;flex-direction:column;font-size:12px;transition:width .2s ease,left .2s ease;visibility:hidden;';
         modal.style.setProperty('--wo-header-h', getHostHeaderHeight() + 'px');
         // Minimalist line-icon per tab, keyed by the same id used for the
         // per-tab display-mode override (icon-only / word-only / both).
@@ -8352,6 +8370,19 @@
                         height: rect.height
                     };
                 }
+                if (zone === 'right' && currentSnap !== 'right') {
+                    // Preview matches computeSnapRect('right'): window edge
+                    // through to the WO tool's left edge (tool sits inset by
+                    // the mini-strip width).
+                    var mwPrev = getMainPanelWidth();
+                    var rwPrev = (mwPrev || MODAL_MIN_W) + MINI_STRIP_W;
+                    rect = {
+                        left: Math.max(0, window.innerWidth - rwPrev),
+                        top: 0,
+                        width: rwPrev,
+                        height: rect.height
+                    };
+                }
                 if (!preview) {
                     preview = document.createElement('div');
                     preview.id = '__wo_snap_preview';
@@ -8370,12 +8401,7 @@
                     preview = null;
                 }
             }
-            tb.addEventListener('mousedown', function(e) {
-                // Let the title bar's own Save/Close buttons behave like
-                // normal buttons — the pointer-capture overlay below would
-                // otherwise swallow their mouseup and eat the click.
-                if (e.target.closest('button')) return;
-                e.preventDefault();
+            function beginTitlebarDrag(e) {
                 if (currentSnap) {
                     clearSnap();
                     var std = getStandardRect();
@@ -8393,6 +8419,42 @@
                 tbH = r.height;
                 hoverZone = null;
                 startPointerCapture(drag, stopdrag, 'grabbing');
+            }
+            tb.addEventListener('mousedown', function(e) {
+                // Let the title bar's own Save/Close buttons behave like
+                // normal buttons — the pointer-capture overlay below would
+                // otherwise swallow their mouseup and eat the click.
+                if (e.target.closest('button')) return;
+                e.preventDefault();
+                if (!currentSnap) {
+                    // Nothing to accidentally unsnap — keep the original
+                    // instant-drag feel for a floating modal.
+                    beginTitlebarDrag(e);
+                    return;
+                }
+                // Snapped: a plain click on the titlebar (e.g. its "Setup"
+                // label) must not unsnap the panel. Only treat this as a
+                // real drag — and only then clear the snap — once the
+                // cursor has actually moved past a small threshold, same
+                // arm-gating as attachCardDrag's onEarlyMove.
+                var startX = e.clientX,
+                    startY = e.clientY;
+
+                function onEarlyMove(mv) {
+                    var dx = mv.clientX - startX,
+                        dy = mv.clientY - startY;
+                    if ((dx * dx + dy * dy) < 25) return; // ~5px threshold
+                    document.removeEventListener('mousemove', onEarlyMove);
+                    document.removeEventListener('mouseup', onEarlyUp);
+                    beginTitlebarDrag(mv);
+                }
+
+                function onEarlyUp() {
+                    document.removeEventListener('mousemove', onEarlyMove);
+                    document.removeEventListener('mouseup', onEarlyUp);
+                }
+                document.addEventListener('mousemove', onEarlyMove);
+                document.addEventListener('mouseup', onEarlyUp);
             });
 
             function drag(e) {
@@ -8423,7 +8485,7 @@
                     // from a floating/unsnapped state. Re-confirming an
                     // already-active left snap (currentSnap is already
                     // 'left') is unaffected, so mid-snap resizing survives.
-                    if ((hoverZone === 'left' || hoverZone === 'left-of-panel') && currentSnap !== hoverZone) {
+                    if ((hoverZone === 'left' || hoverZone === 'left-of-panel' || hoverZone === 'right') && currentSnap !== hoverZone) {
                         saveLeftSnapWidth(MODAL_MIN_W);
                     }
                     applySnap(hoverZone);
@@ -8630,6 +8692,12 @@
             return getPanelCollapsed() ? 0 : PANEL_W;
         }
 
+        // Width of the minimized icon strip. While snapped 'right', the WO
+        // tool is shifted left by this amount so the strip can own the far
+        // edge; expanded Setup then spans from that same window edge across
+        // to the tool's left edge.
+        var MINI_STRIP_W = 44;
+
         // Same geometry used both for the live drag preview and the
         // committed snap, so the window ends up exactly where the preview
         // showed it would.
@@ -8643,12 +8711,19 @@
                 width: leftSnapWidth,
                 height: vh
             };
-            if (zone === 'right') return {
-                left: Math.max(0, vw - (mw || MODAL_MIN_W)),
-                top: 0,
-                width: mw || MODAL_MIN_W,
-                height: vh
-            };
+            if (zone === 'right') {
+                // Far-right snap: WO tool sits at right:MINI_STRIP_W, and
+                // Setup covers from the window's right edge to the tool's
+                // left edge (strip slot + tool width). When the tool is
+                // collapsed, fall back to a usable Setup width.
+                var rw = (mw || leftSnapWidth) + MINI_STRIP_W;
+                return {
+                    left: Math.max(0, vw - rw),
+                    top: 0,
+                    width: rw,
+                    height: vh
+                };
+            }
             if (zone === 'top-left') return {
                 left: 0,
                 top: 0,
@@ -8663,10 +8738,9 @@
             };
             // Docks immediately to the left of the (still-visible) WO Tool
             // panel — side by side, neither overlapping the other — instead
-            // of 'right', which deliberately sits exactly ON TOP of where
-            // that panel already is. Falls back to plain 'right' behavior
-            // when the main panel is collapsed/absent (mw===0, nothing to
-            // sit left of).
+            // of 'right', which overlays the shifted tool out to the far
+            // edge. Falls back to plain 'right' behavior when the main
+            // panel is collapsed/absent (mw===0, nothing to sit left of).
             if (zone === 'left-of-panel') return {
                 left: Math.max(0, vw - mw - leftSnapWidth),
                 top: 0,
@@ -8701,10 +8775,43 @@
             localStorage.setItem('__wo_settings', JSON.stringify(liveSt));
         }
 
-        // Only 'left' displaces Maximo's own layout (mirroring how the main
-        // tool panel docks) — 'right' exactly covers where that panel
-        // already sits, and the two 'top' zones simply overlay on top of
-        // everything, so none of those need an extra push of their own.
+        // WO Tool docking. Normally pinned at right:0. While Setup is
+        // snapped 'right', shift it left by MINI_STRIP_W so the collapsed
+        // Setup strip owns the far edge and the tool abuts that strip.
+        // Always set an explicit right (never '') — clearing the inline
+        // value removes the original right:0 from cssText and strands the
+        // fixed panel on the left.
+        function syncMainPanelDock(forRightSnap) {
+            var dock = document.getElementById('__wo_dock');
+            if (!dock) return;
+            dock.style.right = forRightSnap ? (MINI_STRIP_W + 'px') : '0px';
+        }
+
+        // Chevron points toward the edge the strip collapses into.
+        // Far-left snap collapses left; right / left-of-panel collapse
+        // toward the tool / far-right, so those arrows are mirrored.
+        var CHEVRON_LEFT_PATH = 'M10 3L5 8L10 13';
+        var CHEVRON_RIGHT_PATH = 'M6 3L11 8L6 13';
+
+        function snapCollapsesTowardRight() {
+            return currentSnap === 'right' || currentSnap === 'left-of-panel';
+        }
+
+        function syncSnapChevrons() {
+            var towardRight = snapCollapsesTowardRight();
+            var minBtn = modal.querySelector('#__s_minimize');
+            if (minBtn) {
+                var minPath = minBtn.querySelector('path');
+                if (minPath) minPath.setAttribute('d', towardRight ? CHEVRON_RIGHT_PATH : CHEVRON_LEFT_PATH);
+            }
+            var expandBtn = modal.querySelector('.wo-s-mini-expand');
+            if (expandBtn) {
+                var expPath = expandBtn.querySelector('path');
+                // Expand points the opposite way — toward where content grows.
+                if (expPath) expPath.setAttribute('d', towardRight ? CHEVRON_LEFT_PATH : CHEVRON_RIGHT_PATH);
+            }
+        }
+
         function applySnap(zone) {
             var rect = computeSnapRect(zone);
             if (!rect) return;
@@ -8713,36 +8820,43 @@
             modal.style.width = rect.width + 'px';
             modal.style.height = rect.height + 'px';
             document.body.style.marginLeft = zone === 'left' ? leftSnapWidth + 'px' : '';
-            // 'left-of-panel' sits inside Maximo's own already-narrowed
-            // content area (the main panel's pushLayout() already reserves
-            // its own width on the right) — push the SAME right margin
-            // further left by this modal's width too, or Setup would just
-            // cover live Maximo content instead of making room for itself.
+            var mw = getMainPanelWidth();
             if (zone === 'left-of-panel') {
-                var mwPush = getMainPanelWidth();
-                document.body.style.marginRight = (mwPush + leftSnapWidth) + 'px';
-            } else if (currentSnap === 'left-of-panel') {
-                var mwRestore = getMainPanelWidth();
-                document.body.style.marginRight = mwRestore ? mwRestore + 'px' : '';
+                // Sits inside Maximo's own already-narrowed content area
+                // (the main panel's pushLayout() already reserves its own
+                // width on the right) — push that SAME right margin further
+                // left by this modal's width too, or Setup would just cover
+                // live Maximo content instead of making room for itself.
+                document.body.style.marginRight = (mw + rect.width) + 'px';
+                syncMainPanelDock(false);
+            } else if (zone === 'right') {
+                // Reserve strip + tool: tool is shifted left by MINI_STRIP_W,
+                // Setup covers that whole band out to the window edge.
+                document.body.style.marginRight = (mw + MINI_STRIP_W) + 'px';
+                syncMainPanelDock(true);
+            } else {
+                document.body.style.marginRight = mw ? mw + 'px' : '';
+                syncMainPanelDock(false);
             }
             currentSnap = zone;
             modal.classList.add('is-snapped');
             saveSetupSnap(zone);
             syncMiniToggleVisibility();
+            syncSnapChevrons();
         }
 
         function clearSnap() {
             if (!currentSnap) return;
-            if (currentSnap === 'left-of-panel') {
-                var mwRestore2 = getMainPanelWidth();
-                document.body.style.marginRight = mwRestore2 ? mwRestore2 + 'px' : '';
-            }
+            var mwRestore = getMainPanelWidth();
+            document.body.style.marginRight = mwRestore ? mwRestore + 'px' : '';
+            syncMainPanelDock(false);
             currentSnap = null;
             modal.classList.remove('is-snapped');
             document.body.style.marginLeft = '';
             saveSetupSnap(null);
             setSetupMinimized(false);
             syncMiniToggleVisibility();
+            syncSnapChevrons();
         }
 
         // Minimize-to-strip only makes sense while docked left/right/beside
@@ -8778,7 +8892,10 @@
                 var btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = 'wo-s-mini-btn' + (tb.classList.contains('is-active') ? ' is-active' : '');
-                btn.appendChild(iconEl.cloneNode(true));
+                var iconClone = iconEl.cloneNode(true);
+                iconClone.setAttribute('width', '18');
+                iconClone.setAttribute('height', '18');
+                btn.appendChild(iconClone);
                 btn.onclick = function() {
                     setSetupMinimized(false);
                     tb.click();
@@ -8786,19 +8903,62 @@
                 attachTooltip(btn, label);
                 stripEl.appendChild(btn);
             });
+            syncSnapChevrons();
         }
 
         function setSetupMinimized(minimized) {
             if (minimized && !MINI_ELIGIBLE_ZONES[currentSnap]) return;
-            modal.classList.toggle('is-mini', minimized);
             if (minimized) {
+                modal.classList.add('is-mini');
                 buildMiniStrip();
-                modal.style.width = '44px';
-            } else if (currentSnap) {
-                applySnap(currentSnap);
+                // Reposition/reflow for the NARROW width per zone, rather
+                // than just shrinking width from whatever left/margin the
+                // full-size snap left in place — that's what used to leave
+                // a stale gap (body margin still reserving the old, wider
+                // snap width; a left-of-panel strip staying anchored at its
+                // old, far-away left edge instead of sliding over to sit
+                // flush against the tool). left + width both transition so
+                // the docked edge stays fixed during the animation.
+                var vw = window.innerWidth;
+                var mw = getMainPanelWidth();
+                modal.style.width = MINI_STRIP_W + 'px';
+                if (currentSnap === 'left') {
+                    modal.style.left = '0px';
+                    document.body.style.marginLeft = MINI_STRIP_W + 'px';
+                } else if (currentSnap === 'left-of-panel') {
+                    modal.style.left = Math.max(0, vw - mw - MINI_STRIP_W) + 'px';
+                    document.body.style.marginRight = (mw + MINI_STRIP_W) + 'px';
+                } else if (currentSnap === 'right') {
+                    // Strip owns the far-right edge; WO tool abuts its left
+                    // (right:MINI_STRIP_W). Expanding covers strip+tool again.
+                    modal.style.left = Math.max(0, vw - MINI_STRIP_W) + 'px';
+                    document.body.style.marginRight = (mw + MINI_STRIP_W) + 'px';
+                    syncMainPanelDock(true);
+                }
+                syncSnapChevrons();
+            } else {
+                // Expand: size to the snap rect BEFORE revealing chrome, with
+                // transitions suppressed so we never paint an intermediate
+                // wrong size (or animate from the strip through the default
+                // floating rect).
+                var prevTransition = modal.style.transition;
+                modal.style.transition = 'none';
+                if (currentSnap) applySnap(currentSnap);
+                modal.classList.remove('is-mini');
+                // Force reflow so re-enabling transition doesn't interpolate
+                // from the pre-expand strip size on the next style change.
+                void modal.offsetWidth;
+                modal.style.transition = prevTransition;
+                syncSnapChevrons();
             }
             saveSetupMinimized(minimized);
         }
+
+        // Lets the dock's Setup button expand an already-open minimized
+        // strip without tearing the modal down (see openSetup()).
+        modal._woExpandIfMini = function() {
+            setSetupMinimized(false);
+        };
 
         function syncMiniToggleVisibility() {
             var btn = modal.querySelector('#__s_minimize');
@@ -8819,12 +8979,27 @@
         }
 
         function onWindowResizeReapplySnap() {
-            if (currentSnap) applySnap(currentSnap);
+            if (!currentSnap) return;
+            // A resize while minimized needs the SAME re-derivation
+            // setSetupMinimized(true) already does (left/margins depend on
+            // window width and the main panel's width) — calling
+            // applySnap() here directly would re-expand it back to full
+            // size mid-resize instead of keeping it collapsed.
+            if (modal.classList.contains('is-mini')) setSetupMinimized(true);
+            else applySnap(currentSnap);
         }
         window.addEventListener('resize', onWindowResizeReapplySnap);
+        syncMainPanelDock(false);
+        // Suppress width/left transition for the initial snap/mini layout so
+        // opening never animates from the placeholder 75% floating rect.
+        var __woOpenTransition = modal.style.transition;
+        modal.style.transition = 'none';
         if (currentSnap) applySnap(currentSnap);
         syncMiniToggleVisibility();
         if (st.setupMinimized && MINI_ELIGIBLE_ZONES[currentSnap]) setSetupMinimized(true);
+        void modal.offsetWidth;
+        modal.style.transition = __woOpenTransition;
+        modal.style.visibility = '';
         modal.querySelector('#__s_minimize').onclick = function() {
             setSetupMinimized(!modal.classList.contains('is-mini'));
         };
@@ -9262,12 +9437,16 @@
 
         // Torn down both on an explicit Close/Save and, defensively, if a
         // second openSetup() call ever replaces this modal without one of
-        // those firing first — otherwise the resize listener and the
-        // left-snap body margin would leak past the modal's own lifetime.
+        // those firing first — otherwise the resize listener and any
+        // snap-induced body margins / dock offsets would leak past the
+        // modal's own lifetime (leaving the tool stranded mid-viewport).
         modal._woCleanup = function() {
             window.removeEventListener('resize', onWindowResizeReapplySnap);
             tabBarResizeObserver.disconnect();
             document.body.style.marginLeft = '';
+            var mwRestore = getMainPanelWidth();
+            document.body.style.marginRight = mwRestore ? mwRestore + 'px' : '';
+            syncMainPanelDock(false);
         };
         // Custom-styled (not native confirm()) prompt shown only when closing
         // with unsaved changes — nested inside #__wo_setup_modal so it picks
@@ -10469,7 +10648,7 @@
                 var box = document.createElement('div');
                 box.className = 'wo-card';
                 var fc = opts.fields.map(function(f) {
-                    return '<label style="display:block;"><input type="checkbox" data-fd="' + f.replace(/"/g, '&quot;') + '" ' + (group.fields.indexOf(f) >= 0 ? 'checked' : '') + '>' + f + '</label>';
+                    return '<label style="display:block;"><input type="checkbox" data-fd="' + f.replace(/"/g, '&quot;') + '" ' + ((group.fields || []).indexOf(f) >= 0 ? 'checked' : '') + '>' + f + '</label>';
                 }).join('');
                 // Reads through groupTables() (not group.table/group.tables
                 // directly) so a group still on the old single-table shape
@@ -10488,7 +10667,7 @@
                 // Build row layout editor
                 var rowsConfig = group.fieldRows || [];
                 // flatten group.fields into rows if no rowsConfig exists
-                if (!rowsConfig.length && group.fields.length) {
+                if (!rowsConfig.length && group.fields && group.fields.length) {
                     rowsConfig = group.fields.map(function(f) {
                         return [f];
                     });
@@ -10759,8 +10938,6 @@
                     if (vSel) vSel.onchange = syncHM;
                     if (fSel) fSel.onchange = syncHM;
                     if (rSel) rSel.onchange = syncHM;
-                    if (spInp) spInp.oninput = syncHM;
-                    if (sfInp) sfInp.oninput = syncHM;
                     enCb.onchange = function() {
                         opts2.style.display = enCb.checked ? '' : 'none';
                         syncHM();
@@ -10945,6 +11122,7 @@
                 var gi = parseInt(content.querySelector('#__new_field_grp').value, 10);
                 if (!f || isNaN(gi)) return;
                 var grp = cfg.groups[gi];
+                if (!grp.fields) grp.fields = [];
                 if (grp.fields.indexOf(f) < 0) {
                     grp.fields.push(f);
                     if (!grp.fieldRows) grp.fieldRows = [];
@@ -10958,19 +11136,11 @@
         function scanTab() {
             // First/last are just the real scan.scans entries at index 0
             // and length-1 — same markup, same full editing (Type/Tab ID/
-            // Wait for/Condition/kebab/drag), nothing special about them
-            // structurally. The ONLY special treatment is the return-icon
-            // badge on whichever entry currently sits last (see inside the
-            // forEach below) — it moves with reordering, since it's read
-            // off idx/length each render, not tied to a fixed synthetic
-            // "end" entry.
-            var RETURN_ICON_SVG = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 4.5V2.8L6 6.3L10 9.8V8.1C11.9 8.1 13.4 8.9 14.4 10.5C14.2 8 12.9 5.1 10 4.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>';
-            content.innerHTML = '<div style="margin-bottom:10px;font-size:11px;">WO Tab ID: <input type="text" data-wt value="' + String(scan.woTabId).replace(/"/g, '&quot;') + '"> <span style="color:var(--wo-muted);">(tab returned to after scan)</span>' +
-                '<div style="margin-top:8px;font-weight:700;color:var(--wo-text);">Scan Order</div>' +
-                '</div>';
-            content.querySelector('[data-wt]').oninput = function(e) {
-                scan.woTabId = e.target.value;
-            };
+            // Wait for/Condition/kebab/drag), nothing special about them.
+            // The scan ends wherever the last entry leaves it — there's no
+            // separate forced return-to-tab step, so add a lazy (no-op) nav
+            // entry targeting whatever tab you want the scan to end on.
+            content.innerHTML = '<div style="margin-bottom:10px;font-weight:700;color:var(--wo-text);">Scan Order</div>';
             var scanOrderList = content;
             scan.scans.forEach(function(s, idx) {
                 var box = document.createElement('div');
@@ -10984,7 +11154,6 @@
                     DRAG_HANDLE_HTML +
                     titleHtml +
                     (s.skipped ? '<span class="wo-skip-tag">Skipped</span>' : '') +
-                    (idx === scan.scans.length - 1 ? '<span class="wo-scan-return-symbol">' + RETURN_ICON_SVG + '</span>' : '') +
                     entryTipIconHtml(s) +
                     moveButtonsHtml(idx === 0, idx === scan.scans.length - 1) +
                     '<span class="wo-kebab-wrap" onclick="event.stopPropagation()">' +
@@ -11023,7 +11192,7 @@
                 actWrap.className = 'wo-subbox';
                 actWrap.style.cssText = 'margin-top:9px;';
                 if (!actionsBetaOn) {
-                    actWrap.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><b style="color:var(--wo-pass);font-size:11px;">Post-Scan Actions</b> <span class="wo-beta-pill" data-beta-pill-tip="Beta feature">BETA</span></div>' +
+                    actWrap.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><b style="color:var(--wo-pass);font-size:11px;">Post-Scan Actions</b> <span class="wo-beta-pill" data-beta-pill-tip="Beta feature">BETA_1</span></div>' +
                         '<div style="color:var(--wo-muted);font-size:10px;margin-top:6px;">Enable the "Fix" beta feature in the Beta tab to configure or run Post-Scan Actions' + ((s.actions && s.actions.length) ? ' — you have ' + s.actions.length + ' saved, left untouched.' : '.') + '</div>';
                     box.querySelector('[data-coll-body]').appendChild(actWrap);
                     actWrap.querySelectorAll('[data-beta-pill-tip]').forEach(function(el) {
@@ -11032,7 +11201,7 @@
                 } else {
                     actWrap.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><b style="color:var(--wo-pass);font-size:11px;">Post-Scan Actions</b> ' +
                         '<span style="color:var(--wo-muted);font-size:10px;">(fill fields after this tab is scanned)</span>' +
-                        '<span class="wo-beta-pill" data-beta-pill-tip="Beta feature">BETA</span>' +
+                        '<span class="wo-beta-pill" data-beta-pill-tip="Beta feature">BETA_1</span>' +
                         '<button id="__act_add_' + idx + '" type="button" class="wo-btn-ghost" style="margin-left:auto;font-size:15px;line-height:1;padding:4px 10px;">+</button></div>' +
                         '<div id="__act_list_' + idx + '" style="margin-top:6px;overflow-x:auto;"></div>';
                     box.querySelector('[data-coll-body]').appendChild(actWrap);
@@ -11054,7 +11223,7 @@
                                 '<th style="width:18%;">' + thWithTip('Field Element ID', 'The Maximo element ID of the field to fill, e.g. m12345678-tb') + '</th>' +
                                 '<th style="width:26%;">' + thWithTip('Value Expression', "What to put in the field — a variable (V('v_core')) or a formula (F('...'))") + '</th>' +
                                 '<th>' + thWithTip('Condition', 'Optional formula — leave blank to always run this action') + '</th>' +
-                                (showRunOn ? '<th style="width:15%;">' + thWithTip('Run on', 'Both Scan and Fix (default), Scan only, or Fix only') + ' <span class="wo-beta-pill" data-beta-pill-tip="Beta feature">BETA</span></th>' : '') +
+                                (showRunOn ? '<th style="width:15%;">' + thWithTip('Run on', 'Both Scan and Fix (default), Scan only, or Fix only') + ' <span class="wo-beta-pill" data-beta-pill-tip="Beta feature">BETA_1</span></th>' : '') +
                                 '<th class="wo-edit-table-del"></th>' +
                                 '</tr></thead><tbody>' +
                                 rows.map(function(act) {
@@ -11196,9 +11365,6 @@
                 });
                 wireEntryTipIcon(box, s);
                 attachTooltip(box.querySelector('[data-kebab]'), 'More actions');
-                if (box.querySelector('.wo-scan-return-symbol')) {
-                    attachTooltip(box.querySelector('.wo-scan-return-symbol'), 'Last item — scan returns to the Work Order tab after this');
-                }
                 wireMoveButtons(box, scan.scans, idx, scanTab);
                 attachCardDrag(box.querySelector('[data-coll-header]'), box, scanOrderList, scan.scans, idx, scanTab, function(item) {
                     return item.id;
@@ -11669,7 +11835,7 @@
             if (!cfg.apiTables) cfg.apiTables = {};
             var apiHeader = document.createElement('div');
             apiHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin:14px 0 8px;';
-            apiHeader.innerHTML = '<span class="wo-rule-title">API Tables</span> <span class="wo-beta-pill" data-beta-pill-tip="Beta feature — Setup > Beta">BETA</span>' +
+            apiHeader.innerHTML = '<span class="wo-rule-title">API Tables</span> <span class="wo-beta-pill" data-beta-pill-tip="Beta feature — Setup > Beta">BETA_2</span>' +
                 '<button type="button" id="__at_add" class="wo-btn wo-btn-primary" style="font-size:11px;margin-left:auto;">+ Add API Table</button>';
             content.appendChild(apiHeader);
             apiHeader.querySelectorAll('[data-beta-pill-tip]').forEach(function(el) {
@@ -11924,6 +12090,13 @@
                 '</div>';
             content.appendChild(qrDiv);
             makeCollapsible(qrDiv, 'Return Message');
+            // Same F(/T(/V( completion + signature tooltip as any other
+            // {{expr}}-capable field — parseFormulaContext() only looks for
+            // an identifier( pattern near the cursor, so it works fine on
+            // plain text with embedded {{}} tokens, not just a field whose
+            // entire value is one formula.
+            attachFormulaAssist(qrDiv.querySelector('#__st_prefix'));
+            attachFormulaAssist(qrDiv.querySelector('#__st_suffix'));
 
             // Hotkeys (Scan / Return / Approve / ...) — all registered
             // actions live under ONE collapsible card now (not one card
@@ -11943,7 +12116,7 @@
                     var hkDiv = document.createElement('div');
                     hkDiv.style.cssText = ai > 0 ? 'margin-top:12px;padding-top:12px;border-top:1px solid var(--wo-border);' : '';
                     var hkCurrent = hotkeyFor(action, st);
-                    hkDiv.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><b style="font-size:11px;">' + action.label + '</b>' + (action.betaFeature ? ' <span class="wo-beta-pill">BETA</span>' : '') + '</div>' +
+                    hkDiv.innerHTML = '<div style="display:flex;align-items:center;gap:6px;"><b style="font-size:11px;">' + action.label + '</b>' + (action.betaFeature ? ' <span class="wo-beta-pill">' + String(action.betaFeature).toUpperCase() + '</span>' : '') + '</div>' +
                         '<div style="color:var(--wo-muted);font-size:11px;margin-top:4px;">Current: <b class="__st_hk_display" style="color:var(--wo-accent);">' + (hkCurrent || 'not set') + '</b></div>' +
                         '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;"><input class="__st_hk_input" type="text" readonly placeholder="Click here, then press your key combo..." style="flex:1;font-size:11px;cursor:pointer;">' +
                         '<button type="button" class="wo-btn-ghost __st_hk_clear">Clear</button></div>' +
@@ -12191,12 +12364,12 @@
                 '<div style="margin-top:6px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_upd_auto_patch" ' + (st.autoUpdatePatch !== false ? 'checked' : '') + '>' +
-                '<span style="color:var(--wo-text);font-size:11px;">Auto-install patches (same line, on by default)</span>' +
+                '<span style="color:var(--wo-text);font-size:11px;">Auto-install patches (same line)</span>' +
                 '</label></div>' +
                 '<div style="margin-top:6px;">' +
                 '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
                 '<input type="checkbox" id="__st_upd_auto" ' + (st.autoUpdate ? 'checked' : '') + '>' +
-                '<span style="color:var(--wo-text);font-size:11px;">Also auto-install new features (off by default)</span>' +
+                '<span style="color:var(--wo-text);font-size:11px;">Also auto-install new features</span>' +
                 '</label></div>' +
                 '<div style="margin-top:8px;">' +
                 '<button id="__st_check_now" type="button" class="wo-btn">Check Now</button>' +
@@ -12945,7 +13118,6 @@
                                 rules: []
                             },
                             scan: {
-                                woTabId: DEFAULT_SCAN.woTabId,
                                 scans: []
                             },
                             fields: {},
