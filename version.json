@@ -17,7 +17,7 @@
       "Removed: redundant WO Tab ID field from Scan setup and removed the forced return to the last WO tab after scanning. Scans now finish on the tab where the configured process leaves them.",
       "Verified: browser-tested and full test suite passing (11 core tests + 16 additional tests)."
       ]
-    }
+    },
     {
       "version": "0.26.0",
       "name": "Organization Configs, Instant Launch",
