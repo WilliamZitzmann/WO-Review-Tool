@@ -5,17 +5,41 @@
     "beta": "0.27.1"
   },
   "versions": [
-      {
+    {
       "version": "0.27.1",
-      "name": "UI Fixes, Scan Workflow Improvements",
+      "name": "Scan Workflow and UI Reliability Fixes",
       "changes": [
-      "Fixed: Setup window minimize/snap sizing issue - verified that the apparent width lock was caused by a stale style read during the same update tick, not an actual layout problem.",
-      "Fixed: Groups tab only showing the first group - removed leftover references from the removed short pass/fail message feature that were causing the render loop to stop early. All groups now render correctly, with safer handling of missing group fields.",
-      "Fixed: Setup titlebar clicks unexpectedly clearing snap position - added a drag threshold so normal clicks keep the current snap state while actual dragging still works.",
-      "Fixed: return message cursor/focus disappearing after scans - asynchronous asset history, downtime history, and API table lookups now re-render while preserving the return message box focus and cursor position.",
-      "Improved: beta feature labels now identify the specific beta feature (BETA_1 Post-Scan Actions and BETA_2 API Tables) instead of showing a generic beta label.",
-      "Removed: redundant WO Tab ID field from Scan setup and removed the forced return to the last WO tab after scanning. Scans now finish on the tab where the configured process leaves them.",
-      "Verified: browser-tested and full test suite passing (11 core tests + 16 additional tests)."
+        "Fixed: Setup minimize/snap sizing behaviour - resolved an issue where the panel could appear stuck at an incorrect width during snap operations.",
+        "Fixed: Groups tab rendering - removed leftover references from the retired short pass/fail message feature that could stop group rendering early. All groups now display correctly, with safer handling of missing group fields.",
+        "Fixed: Setup titlebar clicks no longer unexpectedly clear snap position. Snapping is now only cleared after an actual drag, not a normal click.",
+        "Fixed: Return message focus disappearing after scans. Async asset history, downtime history, and API table lookups now preserve the return message cursor and focus during updates.",
+        "Improved: Beta feature labels now identify the specific feature (BETA_1 Post-Scan Actions and BETA_2 API Tables) instead of showing only a generic beta label.",
+        "Removed: Redundant WO Tab ID field from Scan setup and removed the forced return to the last WO tab after scanning. Scans now finish on the tab where the configured process leaves them.",
+        "Verified: Browser-tested with the full test suite passing (11 core tests + 16 additional tests)."
+      ]
+    },
+    {
+      "version": "0.27.0",
+      "name": "Setup Improvements, Profiles, Animations, and Domain Tools",
+      "changes": [
+        "New: Save, Scan, Return, and Approve buttons now have improved animations. Save collapses to an icon after saving and re-expands after edits, Scan transitions smoothly from loading to completion, and Return/Approve show progress while actions are running.",
+        "New: API Tables now support Rename and Delete actions through the kebab menu.",
+        "New: Local Profiles now support Rename and View. The View editor allows inspecting and editing the complete profile configuration with expandable objects and arrays.",
+        "Changed: Profile export and import have been redesigned. Export is now available from each profile menu, while imports create a new profile instead of silently overwriting the active one.",
+        "New: Domain List API tables automatically discover available Maximo domains cached in the browser and provide a preview of available values.",
+        "New: Bug reports now include the tool version and build number, with an optional ability to attach the current configuration.",
+        "New: Setup can minimize into a narrow tab strip when snapped to an edge and can snap beside the WO Tool panel. Minimize and snap transitions now animate smoothly.",
+        "New: Added a non-destructive Skip action for scan steps through the kebab menu, allowing steps to be skipped without deleting configuration.",
+        "Fixed: Entry cards now correctly show hover highlighting without visual changes when the hover colour matches the background.",
+        "Fixed: Save no longer incorrectly shows unsaved changes immediately after a successful save.",
+        "Fixed: Variables tab Set Tooltip changes now persist correctly.",
+        "Fixed: Popup visibility no longer unnecessarily rerenders after every checkbox change.",
+        "Fixed: Cards no longer collapse unexpectedly after drag-and-drop operations.",
+        "Fixed: Setup Scan and header buttons now have consistent sizing, fonts, and styling across tabs.",
+        "Changed: Return messages now support the same {{F()}} and {{V()}} field and variable tokens as other messages. New installs default the suffix using the current user's initials.",
+        "Changed: Formula Reference moved from the titlebar into its own dedicated tab beside Guide.",
+        "Removed: Unused group layout settings and unused per-group short pass/fail message configuration that had no effect.",
+        "Renamed: The tool name was updated from \"Will's WO Review Manager\" throughout the interface."
       ]
     },
     {
