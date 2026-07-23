@@ -2,7 +2,7 @@
   "name": "wo-review-tool-tests",
   "private": true,
   "version": "1.0.0",
-  "description": "Black-box jsdom tests for worker.js/loader.js/wo_tool.js — load the REAL source files, mock only fetch/XHR/caches, drive them with real requests/events. Not reimplementations of the logic under test.",
+  "description": "Black-box jsdom test for access-control/worker.js — loads the REAL source file, mocks only fetch/the GitHub API, drives it with real requests. Not a reimplementation of the logic under test. (loader.js/wo_tool.js/admin.html's tests moved to the private repo alongside the files they test.)",
   "type": "commonjs",
   "scripts": {
     "test": "node run-all.js"
