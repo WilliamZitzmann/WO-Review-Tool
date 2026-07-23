@@ -123,6 +123,12 @@
  *     DELETE /admin/groups/:id
  *     GET    /admin/version
  *     POST   /admin/version
+ *     GET    /admin/packages                   — packages.json (private issue #3, Phase 4)
+ *     POST   /admin/packages                   — body {doc} — the same array shape
+ *                                                loadPackagesCached()/resolvePackagesForUser()
+ *                                                already read at runtime; root-only, since a
+ *                                                package's grant requirement applies to every
+ *                                                bucket, not one admin's own scope.
  *   Every admin write does its own fresh (uncached) read of the file it's
  *   about to change immediately before writing — see loadPermissionsLive/
  *   loadBucketsDoc/loadAdminGroupsDoc — so no client-supplied sha is
@@ -2439,6 +2445,47 @@ async function handleAdminPostVersion(request, env) {
     return json({ ok: true });
 }
 
+// ── /admin/packages (private repo, root-only — private issue #3, Phase 4) ──
+// Same shape resolvePackagesForUser() reads at runtime: {packages:
+// [{id, name, grant, entry}]}. Root-only because a package's grant
+// requirement applies globally across every bucket, not one admin's own
+// scoped subtree — there's no per-bucket "this package needs a different
+// grant here" concept, unlike buckets/groups.
+async function handleAdminGetPackages(request, env) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireRoot(identity);
+    var f = await fetchPrivateFileWithSha(env, 'packages.json');
+    if (!f.exists) return notFound('packages.json not found');
+    return json({ doc: JSON.parse(f.text) });
+}
+
+async function handleAdminPostPackages(request, env) {
+    var identity = await resolveAdminIdentity(request, env);
+    requireRoot(identity);
+    var body;
+    try { body = await request.json(); } catch (e) { return badRequest('bad request body'); }
+    var doc = body.doc;
+    if (!doc || !Array.isArray(doc.packages)) badRequest('invalid packages document');
+    var seenIds = {};
+    doc.packages.forEach(function(p) {
+        if (!p.id || typeof p.id !== 'string') badRequest('every package needs a non-empty string id');
+        if (seenIds[p.id]) badRequest('duplicate package id "' + p.id + '"');
+        seenIds[p.id] = true;
+        if (!p.name || typeof p.name !== 'string') badRequest('package "' + p.id + '" needs a non-empty name');
+        if (!p.entry || typeof p.entry !== 'string') badRequest('package "' + p.id + '" needs a non-empty entry path');
+        // Not enforcing a "grant must already exist elsewhere" check — a
+        // package's grant is just a string, same convention as any other
+        // grant (admin/dev/beta_N), and root is trusted to type it right,
+        // same as bucket/group grant assignment already is.
+        if (!p.grant || typeof p.grant !== 'string') badRequest('package "' + p.id + '" needs a non-empty grant (e.g. "admin", "dev", "beta_1", or a new "beta_N"/"pkg:*"-style grant)');
+    });
+
+    var f = await fetchPrivateFileWithSha(env, 'packages.json');
+    await writePrivateFile(env, 'packages.json', JSON.stringify(doc, null, 2), f.sha,
+        'admin: ' + identity.label + ' updated packages.json');
+    return json({ ok: true });
+}
+
 // ── Admin shell ──
 async function handleAdminShell(env, ctx) {
     try {
@@ -2503,6 +2550,9 @@ async function routeAdmin(request, env, ctx, pathname) {
 
     if (pathname === '/admin/version' && method === 'GET') return handleAdminGetVersion(request, env);
     if (pathname === '/admin/version' && method === 'POST') return handleAdminPostVersion(request, env);
+
+    if (pathname === '/admin/packages' && method === 'GET') return handleAdminGetPackages(request, env);
+    if (pathname === '/admin/packages' && method === 'POST') return handleAdminPostPackages(request, env);
 
     return json({ error: 'not found' }, 404);
 }

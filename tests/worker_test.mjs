@@ -1245,6 +1245,42 @@ seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'wo_tool.js', '// wo_tool.js readable so
         noBetaCheck.body.granted === true && Array.isArray(noBetaCheck.body.packages) && !noBetaCheck.body.packages.some(function(p) { return p.id === 'post-scan-actions'; }),
         noBetaCheck.body);
 
+    // ── packages.json admin endpoint (private issue #3, Phase 4 — root-
+    // only, same posture as version.json above: a package's grant applies
+    // globally, not to one admin's own scoped subtree). ──
+    var scopedPackagesAttempt = await call('GET', '/admin/packages', { headers: bearerHeaders(avwpToken) });
+    check('scoped admin cannot access packages.json', scopedPackagesAttempt.status === 403, scopedPackagesAttempt.body);
+
+    var rootPackagesGet = await call('GET', '/admin/packages', { headers: rootHeaders() });
+    check('root can read packages.json', rootPackagesGet.status === 200 && rootPackagesGet.body.doc.packages.some(function(p) { return p.id === 'post-scan-actions'; }), rootPackagesGet.body);
+
+    var badPackagesPost = await call('POST', '/admin/packages', {
+        headers: rootHeaders(),
+        body: { doc: { packages: [{ id: 'x', name: 'X', entry: 'packages/x.min.js' }] } }, // no grant
+    });
+    check('packages.json write rejects an entry missing a grant', badPackagesPost.status === 400, badPackagesPost.body);
+
+    var dupIdPackagesPost = await call('POST', '/admin/packages', {
+        headers: rootHeaders(),
+        body: { doc: { packages: [
+            { id: 'x', name: 'X', grant: 'dev', entry: 'packages/x.min.js' },
+            { id: 'x', name: 'X2', grant: 'admin', entry: 'packages/x2.min.js' },
+        ] } },
+    });
+    check('packages.json write rejects a duplicate package id', dupIdPackagesPost.status === 400, dupIdPackagesPost.body);
+
+    var goodPackagesPost = await call('POST', '/admin/packages', {
+        headers: rootHeaders(),
+        body: { doc: { packages: [
+            { id: 'post-scan-actions', name: 'Post-Scan Actions', grant: 'beta_1', entry: 'packages/post-scan-actions.min.js' },
+            { id: 'new-thing', name: 'New Thing', grant: 'beta_3', entry: 'packages/new-thing.min.js' },
+        ] } },
+    });
+    check('valid packages.json write succeeds', goodPackagesPost.status === 200, goodPackagesPost.body);
+
+    var rootPackagesGetAfter = await call('GET', '/admin/packages', { headers: rootHeaders() });
+    check('the newly-added package persisted', rootPackagesGetAfter.body.doc.packages.some(function(p) { return p.id === 'new-thing' && p.grant === 'beta_3'; }), rootPackagesGetAfter.body);
+
     await testOldShapeMigration();
 
     const failed = results.filter(function(r) { return !r.ok; });
