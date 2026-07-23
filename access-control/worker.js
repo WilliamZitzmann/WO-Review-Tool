@@ -353,6 +353,28 @@ function evalCondition(user, cond) {
     }
 }
 
+// admin.html's condition editors (bucket own-condition, permission entry
+// ownConditions, config ownConditions/orConditions) all offer 'in'/'notIn'
+// as selectable ops, but every one of those UI panels only ever submits a
+// single plain-string value — never an array. evalCondition's 'in'/'notIn'
+// cases require Array.isArray(target), so those ops silently evaluate to
+// false whenever the value arrived as-typed from the UI. Rather than fix
+// every panel's markup individually, every admin write path that accepts a
+// condition object runs it through this first: for 'in'/'notIn', a string
+// value is comma-split and trimmed into an array (already-array values pass
+// through untouched, so a future array-aware UI keeps working too).
+function normalizeCondition(c) {
+    if (!c || typeof c !== 'object') return c;
+    var out = { field: c.field, op: c.op, value: c.value };
+    if ((c.op === 'in' || c.op === 'notIn') && typeof c.value === 'string') {
+        out.value = c.value.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s.length > 0; });
+    }
+    return out;
+}
+function normalizeConditions(list) {
+    return Array.isArray(list) ? list.map(normalizeCondition) : list;
+}
+
 // A missing/empty conditions array must NEVER match — an override/allow/
 // blacklist entry with no conditions is a data bug (e.g. a pre-migration
 // record), not "matches everyone." Array.prototype.every() on [] is
@@ -468,6 +490,56 @@ function computeConfigRequiredFields(configsDoc) {
 function matchesConfigConditions(user, conditions) {
     return Array.isArray(conditions) && conditions.every(function(c) { return evalCondition(user, c); });
 }
+
+// ── OR logic for config matching (private issue #7) ──
+// A config entry can now target MULTIPLE buckets and/or carry extra
+// standalone OR-branches (orConditions) alongside the bucket(s) it's
+// scoped to — the entry matches if ANY one branch matches, satisfying
+// both of the issue's written examples: "Site = Westport OR Sligo" (two
+// bucketIds, or a single bucket whose OWN condition uses op:'in' with
+// multiple values — both already work via evalCondition's existing 'in'
+// case) and "Site = Westport OR user = specific person" (bucketIds:
+// [westport], orConditions: [[{field:'username',...}]] — a branch with NO
+// bucket chain at all).
+//
+// Stored shape going forward: entry.conditionGroups (array of AND-groups,
+// OR'd). Reads the OLD flat entry.conditions (a single implicit AND-group)
+// for anything not yet re-saved under the new shape — zero data migration
+// needed, exactly the same "handle both shapes forever" pattern used
+// throughout this codebase (isNewRuleShape, extractPackageSectionsFromLegacyShape).
+function configEntryMatchGroups(entry) {
+    if (Array.isArray(entry.conditionGroups)) return entry.conditionGroups;
+    return [entry.conditions || []];
+}
+// Same "read either shape" fallback as configEntryMatchGroups(), for the
+// admin-scope (isAtOrBelow) checks rather than the whoami-matching ones —
+// a scoped admin can see/touch a multi-bucket config if ANY of its target
+// buckets is within their scope, not only the first.
+function configEntryBucketIds(entry) {
+    return Array.isArray(entry.bucketIds) ? entry.bucketIds : [entry.bucketId !== undefined ? entry.bucketId : null];
+}
+function matchesConfigEntry(user, entry) {
+    return configEntryMatchGroups(entry).some(function(group) { return matchesConfigConditions(user, group); });
+}
+
+// Builds the full conditionGroups for a config entry from admin input:
+// one AND-group per target bucket (that bucket's own ancestor chain +
+// the shared ownConditions), plus any additional standalone orConditions
+// groups (no bucket chain prepended at all). bucketIds is an ARRAY here
+// deliberately (not a single id) — passing [] means "no bucket-scoped
+// branch at all" (pure orConditions-only config), which is intentionally
+// different from passing [null] (one branch scoped to the root/global
+// bucket, matching everyone in it).
+function buildConfigConditionGroups(bucketIds, ownConditions, orConditions, byId) {
+    var groups = bucketIds.map(function(bid) {
+        return bucketConditionChain(bid, byId).concat(ownConditions || []);
+    });
+    (orConditions || []).forEach(function(g) {
+        if (Array.isArray(g)) groups.push(g);
+    });
+    return groups;
+}
+
 // clientConfigVersion is the requesting wo_tool.js build's own
 // CURRENT_CONFIG_VERSION (private issue #3, Phase 5, "modular configs" —
 // configVersion-aware org-config filtering), sent on every /check-access
@@ -485,7 +557,7 @@ function matchesConfigConditions(user, conditions) {
 function resolveOrgConfigsForUser(user, configsDoc, clientConfigVersion) {
     var maxVersion = typeof clientConfigVersion === 'number' && clientConfigVersion > 0 ? clientConfigVersion : 1;
     return (configsDoc.configs || []).filter(function(entry) {
-        return matchesConfigConditions(user, entry.conditions) && (entry.configVersion || 1) <= maxVersion;
+        return matchesConfigEntry(user, entry) && (entry.configVersion || 1) <= maxVersion;
     });
 }
 
@@ -1581,7 +1653,7 @@ async function handleAdminUpsertPermissionEntry(request, env, section) {
 
     var bucketId = body.bucketId != null ? body.bucketId : null;
     if (!identity.isRoot && !isAtOrBelow(bucketId, identity.bucketIds, byId)) forbid('target bucket outside your scope');
-    var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions : [];
+    var ownConditions = normalizeConditions(Array.isArray(body.ownConditions) ? body.ownConditions : []);
     if (!ownConditions.length) badRequest('at least one condition is required');
     ownConditions.forEach(function(c) {
         if (!canUseFieldForIdentity(identity, c.field, byId)) forbid('field "' + c.field + '" not permitted for your admin tier');
@@ -1595,7 +1667,23 @@ async function handleAdminUpsertPermissionEntry(request, env, section) {
     // retarget a rule they don't control into their own branch.
     if (existing && !identity.isRoot && !isAtOrBelow(existing.bucketId, identity.bucketIds, byId)) forbid('existing entry outside your scope');
 
-    var conditions = buildEntryConditions(bucketId, ownConditions, byId);
+    // override/extraGrants are root-only (requireRoot above) — the
+    // ancestor-chain hardlock buildEntryConditions() applies exists purely
+    // to stop a SCOPED (non-root) admin's rule from silently reaching
+    // outside their own branch (see bucketConditionChain()'s own comment:
+    // "the mechanism that makes 'hardlocked above them' a structural
+    // guarantee"). Since a scoped admin can never reach this code path for
+    // these two sections at all, that hardlock serves no access-control
+    // purpose for them — it just means an override meant as a direct,
+    // explicit exception grant ("this ONE user, regardless of site") could
+    // silently fail to apply if the target user happens not to match
+    // whatever condition the chosen bucketId's own ancestor chain checks
+    // (private issue #7). bucketId is kept for UI/tree-placement purposes
+    // only for these two sections; blacklist/allow (scoped-admin-writable)
+    // keep the hardlock unchanged — it's load-bearing there.
+    var conditions = (section === 'override' || section === 'extraGrants') ?
+        ownConditions.slice() :
+        buildEntryConditions(bucketId, ownConditions, byId);
     var newEntry = {
         id: existing ? existing.id : genId(section.slice(0, 3)),
         bucketId: bucketId,
@@ -1680,9 +1768,10 @@ async function handleAdminCreateBucket(request, env) {
     var contactEmail = body.contactEmail != null ? String(body.contactEmail).trim() : '';
     if (contactEmail && !isValidEmail(contactEmail)) badRequest('contact email must be a valid email address');
 
+    var newCondition = normalizeCondition({ field: field, op: String(body.op || 'eq'), value: body.value != null ? body.value : '' });
     var newBucket = {
         id: genId('bkt'), parentId: parentId, label: String(body.label || field),
-        field: field, op: String(body.op || 'eq'), value: body.value != null ? body.value : '',
+        field: field, op: newCondition.op, value: newCondition.value,
         contactEmail: contactEmail || null,
         createdBy: identity.label, createdAt: new Date().toISOString(),
     };
@@ -1711,6 +1800,10 @@ async function handleAdminPatchBucket(request, env, id) {
     }
     if (body.op !== undefined) bucket.op = String(body.op);
     if (body.value !== undefined) bucket.value = body.value;
+    if (body.op !== undefined || body.value !== undefined) {
+        var normalizedOwn = normalizeCondition({ field: bucket.field, op: bucket.op, value: bucket.value });
+        bucket.value = normalizedOwn.value;
+    }
     if (body.label !== undefined) bucket.label = String(body.label);
     if (body.contactEmail !== undefined) {
         var newContactEmail = String(body.contactEmail || '').trim();
@@ -1809,6 +1902,15 @@ async function handleAdminDeleteBucket(request, env, id) {
 // access-control entries.
 function configEntryPublic(doc) {
     return { id: doc.id, name: doc.name, description: doc.description || '', bucketId: doc.bucketId, conditions: doc.conditions,
+        // bucketIds/conditionGroups (private issue #7, OR logic + multi-
+        // bucket configs) — bucketId/conditions are kept for backward
+        // compat (old admin.html builds, and any entry not yet re-saved
+        // under the new shape reads back with bucketIds defaulting to
+        // [bucketId] and conditionGroups computed from configEntryMatchGroups()
+        // so the admin UI always has a consistent array to render/edit,
+        // even for a pre-existing single-bucket entry).
+        bucketIds: Array.isArray(doc.bucketIds) ? doc.bucketIds : [doc.bucketId !== undefined ? doc.bucketId : null],
+        conditionGroups: configEntryMatchGroups(doc),
         createdBy: doc.createdBy, createdAt: doc.createdAt, updatedBy: doc.updatedBy, updatedAt: doc.updatedAt, size: doc.size || 0,
         // Metadata mirror of the content's own configVersion (private issue
         // #3, Phase 5) — resolveOrgConfigsForUser() filters on this WITHOUT
@@ -1825,7 +1927,9 @@ async function handleAdminGetConfigs(request, env) {
     var byId = bucketsById(bucketsLoad.doc.buckets);
     var indexLoad = await loadConfigsIndexDoc(env);
     var visible = identity.isRoot ? indexLoad.doc.configs :
-        indexLoad.doc.configs.filter(function(c) { return isAtOrBelow(c.bucketId, identity.bucketIds, byId); });
+        indexLoad.doc.configs.filter(function(c) {
+            return configEntryBucketIds(c).some(function(bid) { return isAtOrBelow(bid, identity.bucketIds, byId); });
+        });
     return json({ configs: visible.map(configEntryPublic) });
 }
 
@@ -1842,19 +1946,55 @@ async function handleAdminCreateConfig(request, env) {
 
     var bucketsLoad = await loadBucketsDoc(env);
     var byId = bucketsById(bucketsLoad.doc.buckets);
-    var bucketId = body.bucketId != null ? body.bucketId : null;
-    if (!identity.isRoot && !isAtOrBelow(bucketId, identity.bucketIds, byId)) forbid('target bucket outside your scope');
-    var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions : [];
+    // bucketIds (array) is the new, preferred targeting shape — OR across
+    // every listed bucket (private issue #7). Falls back to the legacy
+    // singular bucketId (still exactly one branch, possibly root/null) if
+    // the caller doesn't send bucketIds at all, so existing admin.html
+    // builds/API callers keep working unchanged. Passing bucketIds: []
+    // explicitly means "no bucket-scoped branch" (orConditions-only config)
+    // — deliberately different from omitting bucketIds entirely.
+    var bucketIds = Array.isArray(body.bucketIds) ? body.bucketIds :
+        [body.bucketId != null ? body.bucketId : null];
+    // An empty bucketIds[] means "no bucket-scoped branch at all" — the
+    // forEach containment check below never runs against it, so without
+    // this guard a scoped (non-root) admin could submit bucketIds:[] to
+    // create a config with NO bucket containment whatsoever, reaching
+    // users entirely outside their branch via orConditions alone. Only
+    // root may go bucket-less (root/global has always meant bucketId:null,
+    // a SINGLE root branch — bucketIds:[] is stronger: no branch at all).
+    if (!identity.isRoot && !bucketIds.length) forbid('at least one bucket (within your scope) is required');
+    bucketIds.forEach(function(bid) {
+        if (!identity.isRoot && !isAtOrBelow(bid, identity.bucketIds, byId)) forbid('target bucket outside your scope');
+    });
+    var ownConditions = normalizeConditions(Array.isArray(body.ownConditions) ? body.ownConditions : []);
     ownConditions.forEach(function(c) {
         if (!canUseFieldForIdentity(identity, c.field, byId)) forbid('field "' + c.field + '" not permitted for your admin tier');
     });
-    var conditions = buildEntryConditions(bucketId, ownConditions, byId);
+    // orConditions branches deliberately never get a bucket's ancestor
+    // chain prepended (that's what makes them useful for "Site = Westport
+    // OR a specific user" — see buildConfigConditionGroups) — which also
+    // means they carry NO structural containment at all. Letting a scoped
+    // admin add one would let them reach users completely outside their
+    // branch, defeating the entire hardlock model. Root-only, same
+    // reasoning as override/extraGrants.
+    var orConditions = (Array.isArray(body.orConditions) ? body.orConditions : []).map(normalizeConditions);
+    if (orConditions.length && !identity.isRoot) forbid('additional OR-condition branches (beyond your bucket-scoped ones) are root-only');
+    orConditions.forEach(function(group) {
+        (Array.isArray(group) ? group : []).forEach(function(c) {
+            if (!canUseFieldForIdentity(identity, c.field, byId)) forbid('field "' + c.field + '" not permitted for your admin tier');
+        });
+    });
+    var conditionGroups = buildConfigConditionGroups(bucketIds, ownConditions, orConditions, byId);
 
     var indexLoad = await loadConfigsIndexDoc(env);
     var now = new Date().toISOString();
     var entry = {
         id: genId('cfg'), name: name, description: String(body.description || ''),
-        bucketId: bucketId, conditions: conditions,
+        // bucketId kept as the FIRST target for backward-compat display
+        // (old admin.html reads a singular bucketId) — bucketIds is the
+        // real, authoritative target list going forward.
+        bucketId: bucketIds.length ? bucketIds[0] : null,
+        bucketIds: bucketIds, conditionGroups: conditionGroups,
         createdBy: identity.label, createdAt: now, updatedBy: identity.label, updatedAt: now,
         size: contentText.length,
         // Mirrors the uploaded content's own configVersion (untagged content
@@ -1878,7 +2018,7 @@ async function handleAdminGetConfigContent(request, env, id) {
     var indexLoad = await loadConfigsIndexDoc(env);
     var entry = indexLoad.doc.configs.find(function(c) { return c.id === id; });
     if (!entry) return notFound('config not found');
-    if (!identity.isRoot && !isAtOrBelow(entry.bucketId, identity.bucketIds, byId)) forbid('config outside your scope');
+    if (!identity.isRoot && !configEntryBucketIds(entry).some(function(bid) { return isAtOrBelow(bid, identity.bucketIds, byId); })) forbid('config outside your scope');
     var f = await fetchPrivateFileWithSha(env, 'configs/' + id + '.json');
     if (!f.exists) return notFound('config content missing (index/content out of sync)');
     return json({ config: configEntryPublic(entry), content: JSON.parse(f.text) });
@@ -1895,16 +2035,29 @@ async function handleAdminDuplicateConfig(request, env, id) {
     var indexLoad = await loadConfigsIndexDoc(env);
     var source = indexLoad.doc.configs.find(function(c) { return c.id === id; });
     if (!source) return notFound('config not found');
-    if (!identity.isRoot && !isAtOrBelow(source.bucketId, identity.bucketIds, byId)) forbid('source config outside your scope');
+    var sourceBucketIds = Array.isArray(source.bucketIds) ? source.bucketIds : [source.bucketId !== undefined ? source.bucketId : null];
+    if (!identity.isRoot && !sourceBucketIds.some(function(bid) { return isAtOrBelow(bid, identity.bucketIds, byId); })) forbid('source config outside your scope');
 
     var name = String(body.name || (source.name + ' (copy)')).trim();
-    var bucketId = body.bucketId !== undefined ? body.bucketId : source.bucketId;
-    if (!identity.isRoot && !isAtOrBelow(bucketId, identity.bucketIds, byId)) forbid('target bucket outside your scope');
-    var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions : [];
+    var bucketIds = Array.isArray(body.bucketIds) ? body.bucketIds :
+        (body.bucketId !== undefined ? [body.bucketId] : sourceBucketIds);
+    if (!identity.isRoot && !bucketIds.length) forbid('at least one bucket (within your scope) is required');
+    bucketIds.forEach(function(bid) {
+        if (!identity.isRoot && !isAtOrBelow(bid, identity.bucketIds, byId)) forbid('target bucket outside your scope');
+    });
+    var ownConditions = normalizeConditions(Array.isArray(body.ownConditions) ? body.ownConditions : []);
     ownConditions.forEach(function(c) {
         if (!canUseFieldForIdentity(identity, c.field, byId)) forbid('field "' + c.field + '" not permitted for your admin tier');
     });
-    var conditions = buildEntryConditions(bucketId, ownConditions, byId);
+    // See the identical guard + comment in handleAdminCreateConfig — an
+    // explicitly-resupplied orConditions is root-only; carrying the
+    // SOURCE's own orConditions forward untouched (the no-override branch
+    // below) is not a new grant, so it isn't gated here.
+    var orConditions = (Array.isArray(body.orConditions) ? body.orConditions : []).map(normalizeConditions);
+    if (body.orConditions !== undefined && orConditions.length && !identity.isRoot) forbid('additional OR-condition branches (beyond your bucket-scoped ones) are root-only');
+    var conditionGroups = (body.bucketIds !== undefined || body.bucketId !== undefined || body.ownConditions !== undefined || body.orConditions !== undefined) ?
+        buildConfigConditionGroups(bucketIds, ownConditions, orConditions, byId) :
+        configEntryMatchGroups(source); // no targeting override supplied — carry the source's own groups over exactly
 
     var f = await fetchPrivateFileWithSha(env, 'configs/' + id + '.json');
     if (!f.exists) return notFound('source config content missing (index/content out of sync)');
@@ -1912,7 +2065,8 @@ async function handleAdminDuplicateConfig(request, env, id) {
     var now = new Date().toISOString();
     var entry = {
         id: genId('cfg'), name: name, description: String(body.description !== undefined ? body.description : source.description || ''),
-        bucketId: bucketId, conditions: conditions,
+        bucketId: bucketIds.length ? bucketIds[0] : null,
+        bucketIds: bucketIds, conditionGroups: conditionGroups,
         createdBy: identity.label, createdAt: now, updatedBy: identity.label, updatedAt: now,
         size: f.text.length,
         // The content is byte-identical to the source, so its configVersion
@@ -1938,7 +2092,8 @@ async function handleAdminPatchConfig(request, env, id) {
     var indexLoad = await loadConfigsIndexDoc(env);
     var entry = indexLoad.doc.configs.find(function(c) { return c.id === id; });
     if (!entry) return notFound('config not found');
-    if (!identity.isRoot && !isAtOrBelow(entry.bucketId, identity.bucketIds, byId)) forbid('config outside your scope');
+    var entryBucketIds = Array.isArray(entry.bucketIds) ? entry.bucketIds : [entry.bucketId !== undefined ? entry.bucketId : null];
+    if (!identity.isRoot && !entryBucketIds.some(function(bid) { return isAtOrBelow(bid, identity.bucketIds, byId); })) forbid('config outside your scope');
 
     if (body.name !== undefined) {
         var name = String(body.name).trim();
@@ -1946,16 +2101,38 @@ async function handleAdminPatchConfig(request, env, id) {
         entry.name = name;
     }
     if (body.description !== undefined) entry.description = String(body.description);
-    if (body.bucketId !== undefined || body.ownConditions !== undefined) {
-        var newBucketId = body.bucketId !== undefined ? body.bucketId : entry.bucketId;
-        if (!identity.isRoot && !isAtOrBelow(newBucketId, identity.bucketIds, byId)) forbid('target bucket outside your scope');
-        var ownConditions = Array.isArray(body.ownConditions) ? body.ownConditions :
-            entry.conditions.slice(bucketConditionChain(entry.bucketId, byId).length);
+    if (body.bucketId !== undefined || body.bucketIds !== undefined || body.ownConditions !== undefined || body.orConditions !== undefined) {
+        var newBucketIds = Array.isArray(body.bucketIds) ? body.bucketIds :
+            (body.bucketId !== undefined ? [body.bucketId] : entryBucketIds);
+        if (!identity.isRoot && !newBucketIds.length) forbid('at least one bucket (within your scope) is required');
+        newBucketIds.forEach(function(bid) {
+            if (!identity.isRoot && !isAtOrBelow(bid, identity.bucketIds, byId)) forbid('target bucket outside your scope');
+        });
+        // ownConditions defaults to whatever was already stored for the
+        // FIRST bucket branch (stripping that branch's own ancestor
+        // chain back off) if the caller doesn't send a new value — same
+        // "recover the admin-authored portion from the flattened chain"
+        // approach the old single-bucket code used, applied to the first
+        // group in conditionGroups instead of the old flat conditions.
+        var existingGroups = configEntryMatchGroups(entry);
+        var firstBucketChainLen = bucketConditionChain(entryBucketIds[0], byId).length;
+        var ownConditions = normalizeConditions(Array.isArray(body.ownConditions) ? body.ownConditions :
+            (existingGroups[0] || []).slice(firstBucketChainLen));
         ownConditions.forEach(function(c) {
             if (!canUseFieldForIdentity(identity, c.field, byId)) forbid('field "' + c.field + '" not permitted for your admin tier');
         });
-        entry.bucketId = newBucketId;
-        entry.conditions = buildEntryConditions(newBucketId, ownConditions, byId);
+        // Past ALL of the (possibly multi-bucket) target's own groups, not
+        // just index 1 — slice(1) would misfile a second/third bucket's own
+        // ancestor-chain group as if it were an orConditions branch on any
+        // multi-bucket config whenever ownConditions/bucketIds get touched
+        // without also resupplying orConditions.
+        var orConditions = (Array.isArray(body.orConditions) ? body.orConditions :
+            existingGroups.slice(entryBucketIds.length)).map(normalizeConditions); // whatever extra OR-branches already existed, past the primary bucket-group(s)
+        if (body.orConditions !== undefined && orConditions.length && !identity.isRoot) forbid('additional OR-condition branches (beyond your bucket-scoped ones) are root-only');
+        entry.bucketId = newBucketIds.length ? newBucketIds[0] : null;
+        entry.bucketIds = newBucketIds;
+        entry.conditionGroups = buildConfigConditionGroups(newBucketIds, ownConditions, orConditions, byId);
+        delete entry.conditions; // superseded by conditionGroups — configEntryMatchGroups() only falls back to this for entries that HAVEN'T been re-saved under the new shape yet
     }
     var contentUpdated = false;
     if (body.content !== undefined) {
@@ -1990,7 +2167,7 @@ async function handleAdminDeleteConfig(request, env, id) {
     var idx = indexLoad.doc.configs.findIndex(function(c) { return c.id === id; });
     if (idx === -1) return notFound('config not found');
     var entry = indexLoad.doc.configs[idx];
-    if (!identity.isRoot && !isAtOrBelow(entry.bucketId, identity.bucketIds, byId)) forbid('config outside your scope');
+    if (!identity.isRoot && !configEntryBucketIds(entry).some(function(bid) { return isAtOrBelow(bid, identity.bucketIds, byId); })) forbid('config outside your scope');
 
     indexLoad.doc.configs.splice(idx, 1);
     await writePrivateFile(env, 'configs/index.json', JSON.stringify(indexLoad.doc, null, 2), indexLoad.sha,

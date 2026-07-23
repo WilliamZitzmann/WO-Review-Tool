@@ -490,6 +490,39 @@ seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'wo_tool.js', '// wo_tool.js readable so
         extraGrants: [{ id: 'ext_seed', bucketId: null, conditions: [{ field: 'username', op: 'eq', value: 'ZITZMWX' }], grants: ['dev', 'beta_0'] }],
     });
 
+    // ── Override/extraGrants no longer inherit the parent-bucket chain
+    // (private issue #7) — bucketId still scopes it in the admin tree UI,
+    // but the actual matching conditions are exactly ownConditions, so an
+    // override for one specific user works regardless of whether that user
+    // happens to match the target bucket's OWN condition (email/country/
+    // insertSite here). blacklist/allow are NOT touched by this — they
+    // keep the ancestor-chain hardlock, since scoped admins can write
+    // those and the hardlock is what confines them to their own branch. ──
+    var overrideUnderBucket = await call('POST', '/admin/permissions/override', {
+        headers: rootHeaders(),
+        body: { bucketId: 'abbvie-ie-avwp', ownConditions: [{ field: 'username', op: 'eq', value: 'REMOTEUSER' }], grants: ['user'] },
+    });
+    check('override under a bucket stores ONLY ownConditions, not the bucket\'s ancestor chain',
+        JSON.stringify(overrideUnderBucket.body.entry.conditions) === JSON.stringify([{ field: 'username', op: 'eq', value: 'REMOTEUSER' }]),
+        overrideUnderBucket.body.entry);
+
+    var remoteUserGranted = await call('POST', '/check-access', {
+        body: { fields: { username: 'REMOTEUSER', country: 'US', insertSite: 'ELSEWHERE', email: 'remoteuser@example.com' } },
+    });
+    check('...and that override actually grants access for a user who does NOT match the AVWP bucket\'s own condition at all',
+        remoteUserGranted.body.granted === true, remoteUserGranted.body);
+
+    var allowUnderBucketStillHardlocked = await call('POST', '/admin/permissions/allow', {
+        headers: rootHeaders(),
+        body: { bucketId: 'abbvie-ie-avwp', ownConditions: [{ field: 'username', op: 'eq', value: 'REMOTEUSER2' }], grants: ['user'] },
+    });
+    check('...but an ALLOW rule under the same bucket still gets the ancestor chain prepended (unchanged, scoped-admin-writable)',
+        allowUnderBucketStillHardlocked.body.entry.conditions.length === 4, // email/country/insertSite chain (3) + the one ownCondition
+        allowUnderBucketStillHardlocked.body.entry);
+
+    await call('DELETE', '/admin/permissions/override/' + overrideUnderBucket.body.entry.id, { headers: rootHeaders() });
+    await call('DELETE', '/admin/permissions/allow/' + allowUnderBucketStillHardlocked.body.entry.id, { headers: rootHeaders() });
+
     // ── Admin shell ──
     var shell = await call('GET', '/admin');
     check('admin shell loads with no token, Cache-Control no-store', shell.status === 200 && shell.headers.get('Cache-Control') === 'no-store', shell.headers.get('Cache-Control'));
@@ -798,16 +831,49 @@ seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'wo_tool.js', '// wo_tool.js readable so
     check('scoped (AVWP) admin can create a config at their own bucket with NO extra conditions (unlike permissions, blank is allowed)',
         mkConfigAsScoped.status === 200 && mkConfigAsScoped.body.config.id, mkConfigAsScoped.body);
     var avwpConfigId = mkConfigAsScoped.body.config && mkConfigAsScoped.body.config.id;
-    check('hardlock applies to configs too: stored conditions include the ancestor chain even though ownConditions was empty',
-        avwpConfigId && mkConfigAsScoped.body.config.conditions.length === 3 &&
-        mkConfigAsScoped.body.config.conditions[2].field === 'insertSite' && mkConfigAsScoped.body.config.conditions[2].value === 'AVWP',
-        mkConfigAsScoped.body.config.conditions);
+    check('hardlock applies to configs too: stored conditionGroups[0] includes the ancestor chain even though ownConditions was empty',
+        avwpConfigId && mkConfigAsScoped.body.config.conditionGroups.length === 1 &&
+        mkConfigAsScoped.body.config.conditionGroups[0].length === 3 &&
+        mkConfigAsScoped.body.config.conditionGroups[0][2].field === 'insertSite' && mkConfigAsScoped.body.config.conditionGroups[0][2].value === 'AVWP',
+        mkConfigAsScoped.body.config.conditionGroups);
 
     var mkConfigOutOfScope = await call('POST', '/admin/configs', {
         headers: bearerHeaders(avwpToken),
         body: { name: 'Sneaky', bucketId: null, ownConditions: [], content: sampleBlob },
     });
     check('scoped admin cannot create a config at root/outside their bucket', mkConfigOutOfScope.status === 403, mkConfigOutOfScope.body);
+
+    // ── Scope-escape guards on the new bucketIds/orConditions shape: a
+    // scoped admin must not be able to bypass the bucket hardlock entirely
+    // by submitting bucketIds:[] (skips the per-bucket containment loop) or
+    // an orConditions branch (which never gets a bucket chain prepended,
+    // by design — see buildConfigConditionGroups) ──
+    var mkConfigEmptyBucketIds = await call('POST', '/admin/configs', {
+        headers: bearerHeaders(avwpToken),
+        body: { name: 'No buckets at all', bucketIds: [], ownConditions: [], content: sampleBlob },
+    });
+    check('scoped admin cannot create a config with bucketIds:[] (no bucket containment at all)',
+        mkConfigEmptyBucketIds.status === 403, mkConfigEmptyBucketIds.body);
+
+    var mkConfigWithOrConditions = await call('POST', '/admin/configs', {
+        headers: bearerHeaders(avwpToken),
+        body: {
+            name: 'Sneaky OR branch', bucketId: 'abbvie-ie-avwp', ownConditions: [],
+            orConditions: [[{ field: 'country', op: 'eq', value: 'US' }]], content: sampleBlob,
+        },
+    });
+    check('scoped admin cannot add an orConditions branch even alongside a properly-scoped bucket (it has no containment of its own)',
+        mkConfigWithOrConditions.status === 403, mkConfigWithOrConditions.body);
+
+    var mkConfigRootOrConditions = await call('POST', '/admin/configs', {
+        headers: rootHeaders(),
+        body: {
+            name: 'Root can use OR branches', bucketId: 'abbvie-ie-avwp', ownConditions: [],
+            orConditions: [[{ field: 'country', op: 'eq', value: 'US' }]], content: sampleBlob,
+        },
+    });
+    check('...but root CAN create the exact same orConditions branch', mkConfigRootOrConditions.status === 200, mkConfigRootOrConditions.body);
+    await call('DELETE', '/admin/configs/' + mkConfigRootOrConditions.body.config.id, { headers: rootHeaders() });
 
     var mkConfigBadJson = await call('POST', '/admin/configs', {
         headers: rootHeaders(), body: { name: 'Broken', bucketId: null, ownConditions: [], content: '{not valid json' },
@@ -833,6 +899,126 @@ seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'wo_tool.js', '// wo_tool.js readable so
     var downloadOutOfScope = await call('GET', '/admin/configs/' + companyConfigId, { headers: bearerHeaders(avwpToken) });
     check('scoped admin cannot download a config outside their scope', downloadOutOfScope.status === 403, downloadOutOfScope.body);
 
+    // ── OR-of-AND-groups config targeting (private issue #7: "Site =
+    // Westport OR Sligo", "Site = Westport OR user = specific person") ──
+    // Configs are only reported by /check-access alongside a granted:true
+    // result, so first grant every test username below via one override
+    // rule (root-only, and per Task #21 does NOT inherit any bucket's
+    // ancestor chain) — this also doubles as an 'in'-op override test.
+    var orTestUsernames = ['sligouser', 'avwpuser', 'corkuser', 'SPECIALCASE', 'galwayuser', 'limerickuser', 'corkuser2', 'galwayuser2', 'corkuser3'];
+    var mkOrTestOverride = await call('POST', '/admin/permissions/override', {
+        headers: rootHeaders(),
+        body: { ownConditions: [{ field: 'username', op: 'in', value: orTestUsernames.join(',') }], grants: ['user'] },
+    });
+    check('root grants a batch of test usernames via a single override using op "in" (comma string)', mkOrTestOverride.status === 200, mkOrTestOverride.body);
+
+    var mkSligoBucket = await call('POST', '/admin/buckets', {
+        headers: rootHeaders(), body: { parentId: 'abbvie-ie', field: 'insertSite', op: 'eq', value: 'SLIGO', label: 'Sligo' },
+    });
+    check('root creates a sibling Sligo bucket for multi-bucket config targeting', mkSligoBucket.status === 200, mkSligoBucket.body);
+    var sligoBucketId = mkSligoBucket.body.bucket.id;
+
+    var mkMultiBucketConfig = await call('POST', '/admin/configs', {
+        headers: rootHeaders(),
+        body: { name: 'Westport or Sligo', bucketIds: ['abbvie-ie-avwp', sligoBucketId], ownConditions: [], content: sampleBlob },
+    });
+    check('root creates a config targeting TWO buckets via bucketIds', mkMultiBucketConfig.status === 200 &&
+        mkMultiBucketConfig.body.config.conditionGroups.length === 2, mkMultiBucketConfig.body);
+    var multiBucketConfigId = mkMultiBucketConfig.body.config.id;
+
+    var sligoUserMatch = await call('POST', '/check-access', {
+        body: { fields: { username: 'sligouser', email: 'sligouser@abbvie.com', country: 'IE', insertSite: 'SLIGO' } },
+    });
+    var avwpUserMatch = await call('POST', '/check-access', {
+        body: { fields: { username: 'avwpuser', email: 'avwpuser@abbvie.com', country: 'IE', insertSite: 'AVWP' } },
+    });
+    var corkUserNoMatch = await call('POST', '/check-access', {
+        body: { fields: { username: 'corkuser', email: 'corkuser@abbvie.com', country: 'IE', insertSite: 'CORK' } },
+    });
+    check('a Sligo user matches the multi-bucket config (OR across bucketIds)',
+        sligoUserMatch.body.configs.some(function(c) { return c.id === multiBucketConfigId; }), sligoUserMatch.body);
+    check('an AVWP user ALSO matches the same multi-bucket config',
+        avwpUserMatch.body.configs.some(function(c) { return c.id === multiBucketConfigId; }), avwpUserMatch.body);
+    check('a Cork user (neither branch) does NOT match the multi-bucket config',
+        !corkUserNoMatch.body.configs.some(function(c) { return c.id === multiBucketConfigId; }), corkUserNoMatch.body);
+
+    var mkOrConditionsConfig = await call('POST', '/admin/configs', {
+        headers: rootHeaders(),
+        body: {
+            name: 'Westport or specific user', bucketIds: ['abbvie-ie-avwp'], ownConditions: [],
+            orConditions: [[{ field: 'username', op: 'eq', value: 'SPECIALCASE' }]],
+            content: sampleBlob,
+        },
+    });
+    check('root creates a config with a bucket branch PLUS a standalone orConditions branch',
+        mkOrConditionsConfig.status === 200 && mkOrConditionsConfig.body.config.conditionGroups.length === 2, mkOrConditionsConfig.body);
+    var orConditionsConfigId = mkOrConditionsConfig.body.config.id;
+
+    var specialCaseUserMatch = await call('POST', '/check-access', {
+        body: { fields: { username: 'SPECIALCASE', email: 'nobody@example.com', country: 'US', insertSite: 'ELSEWHERE' } },
+    });
+    check('a user matching ONLY the standalone orConditions branch (not the bucket chain at all) still matches',
+        specialCaseUserMatch.body.configs.some(function(c) { return c.id === orConditionsConfigId; }), specialCaseUserMatch.body);
+
+    // ── 'in'/'notIn' condition ops: admin.html's editors only ever submit a
+    // plain string value for these ops, so the Worker must comma-split it
+    // into an array itself (normalizeCondition) or these ops silently never
+    // match (evalCondition/matchesConfigConditions require Array.isArray). ──
+    var mkInOpBucket = await call('POST', '/admin/buckets', {
+        headers: rootHeaders(),
+        body: { parentId: 'abbvie-ie', field: 'insertSite', op: 'in', value: 'GALWAY, LIMERICK', label: 'Galway or Limerick' },
+    });
+    check('creating a bucket with op "in" and a comma-separated STRING value is accepted',
+        mkInOpBucket.status === 200, mkInOpBucket.body);
+    check('...and the stored value is normalized into a trimmed array, not left as a string',
+        Array.isArray(mkInOpBucket.body.bucket.value) &&
+        JSON.stringify(mkInOpBucket.body.bucket.value) === JSON.stringify(['GALWAY', 'LIMERICK']),
+        mkInOpBucket.body.bucket.value);
+
+    var inOpBucketId = mkInOpBucket.body.bucket.id;
+    var mkInOpBucketConfig = await call('POST', '/admin/configs', {
+        headers: rootHeaders(), body: { name: 'Galway or Limerick config', bucketIds: [inOpBucketId], ownConditions: [], content: sampleBlob },
+    });
+    var inOpBucketConfigId = mkInOpBucketConfig.body.config.id;
+    var galwayUserViaInOp = await call('POST', '/check-access', {
+        body: { fields: { username: 'galwayuser', email: 'galwayuser@abbvie.com', country: 'IE', insertSite: 'GALWAY' } },
+    });
+    var limerickUserViaInOp = await call('POST', '/check-access', {
+        body: { fields: { username: 'limerickuser', email: 'limerickuser@abbvie.com', country: 'IE', insertSite: 'LIMERICK' } },
+    });
+    var corkUserViaInOp = await call('POST', '/check-access', {
+        body: { fields: { username: 'corkuser2', email: 'corkuser2@abbvie.com', country: 'IE', insertSite: 'CORK' } },
+    });
+    check('a bucket\'s own "in" condition (normalized from a comma string) matches Galway, via the bucket\'s ancestor chain in a config',
+        galwayUserViaInOp.body.configs.some(function(c) { return c.id === inOpBucketConfigId; }), galwayUserViaInOp.body);
+    check('...and matches Limerick too (the other value in the same "in" list)',
+        limerickUserViaInOp.body.configs.some(function(c) { return c.id === inOpBucketConfigId; }), limerickUserViaInOp.body);
+    check('...but does NOT match Cork (not in the list)',
+        !corkUserViaInOp.body.configs.some(function(c) { return c.id === inOpBucketConfigId; }), corkUserViaInOp.body);
+
+    var mkInOpConfig = await call('POST', '/admin/configs', {
+        headers: rootHeaders(),
+        body: {
+            name: 'In-op own condition', bucketIds: [], ownConditions: [],
+            orConditions: [[{ field: 'insertSite', op: 'in', value: 'GALWAY,LIMERICK' }]],
+            content: sampleBlob,
+        },
+    });
+    check('root creates a config whose orConditions branch uses op "in" with a comma string value', mkInOpConfig.status === 200, mkInOpConfig.body);
+    var inOpConfigId = mkInOpConfig.body.config.id;
+    var galwayOrgConfig = await call('POST', '/check-access', {
+        body: { fields: { username: 'galwayuser2', email: 'galwayuser2@abbvie.com', country: 'IE', insertSite: 'GALWAY' } },
+    });
+    var corkOrgConfigNoMatch = await call('POST', '/check-access', {
+        body: { fields: { username: 'corkuser3', email: 'corkuser3@abbvie.com', country: 'IE', insertSite: 'CORK' } },
+    });
+    check('"in" op with a comma string value actually matches one of the listed values through the full config-resolution path',
+        galwayOrgConfig.body.configs.some(function(c) { return c.id === inOpConfigId; }), galwayOrgConfig.body);
+    check('...and does NOT match a value outside the list',
+        !corkOrgConfigNoMatch.body.configs.some(function(c) { return c.id === inOpConfigId; }), corkOrgConfigNoMatch.body);
+
+    await call('DELETE', '/admin/permissions/override/' + mkOrTestOverride.body.entry.id, { headers: rootHeaders() });
+
     // ── Buckets deliberately DON'T follow the configs/permissions/groups
     // visibility pattern above — GET /admin/buckets returns the FULL tree
     // to every admin (scoped admins need their own branch's ancestors for
@@ -846,10 +1032,10 @@ seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'wo_tool.js', '// wo_tool.js readable so
         bucketsAsScoped.body.buckets.some(function(b) { return b.id === 'abbvie'; }) &&
         bucketsAsScoped.body.buckets.some(function(b) { return b.id === 'abbvie-ie'; }),
         bucketsAsScoped.body.buckets && bucketsAsScoped.body.buckets.map(function(b) { return b.id; }));
+    var bucketsAsRootNow = await call('GET', '/admin/buckets', { headers: rootHeaders() });
     check('...matches what root sees (same full tree, not a partial one)',
-        bucketsAsScoped.body.buckets.length === bucketsGet.body.buckets.length +
-            (mkWorkgroup.body.bucket ? 1 : 0), // +1 for the workgroup bucket created after bucketsGet was captured
-        { scoped: bucketsAsScoped.body.buckets.length, root: bucketsGet.body.buckets.length });
+        bucketsAsScoped.body.buckets.length === bucketsAsRootNow.body.buckets.length,
+        { scoped: bucketsAsScoped.body.buckets.length, root: bucketsAsRootNow.body.buckets.length });
 
     var scopedEditsAncestor = await call('PATCH', '/admin/buckets/abbvie-ie', {
         headers: bearerHeaders(avwpToken), body: { label: 'Hijacked' },
