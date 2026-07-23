@@ -307,6 +307,24 @@ async function loadBucketsDocCached(env, ctx) {
     }
 }
 
+// Cached, fail-open read of packages.json for the REGULAR-user path — same
+// reasoning as loadConfigsIndexCached()/loadBucketsDocCached() above. Backs
+// the package-eligibility resolution in handleCheckAccess() below (private
+// issue #3, "v1.0.0 — Modularisation"). A hiccup here just means no
+// packages resolve for this request, never blocks the underlying grant
+// decision — packages are additive to an already-granted session, exactly
+// like org configs.
+async function loadPackagesCached(env, ctx) {
+    try {
+        var raw = await cachedFetchPrivateFile(env, ctx, 'packages.json', null, PERMISSIONS_CACHE_TTL);
+        var doc = JSON.parse(raw);
+        doc.packages = doc.packages || [];
+        return doc;
+    } catch (e) {
+        return { packages: [] };
+    }
+}
+
 // ── Rule evaluation ──
 function evalCondition(user, cond) {
     var v = String(user[cond.field] || '').toLowerCase();
@@ -447,6 +465,21 @@ function matchesConfigConditions(user, conditions) {
 function resolveOrgConfigsForUser(user, configsDoc) {
     return (configsDoc.configs || []).filter(function(entry) {
         return matchesConfigConditions(user, entry.conditions);
+    });
+}
+
+// Package eligibility is a pure membership filter against the grants a user
+// ALREADY holds (result.grants, post override/blacklist/allow/extraGrants
+// resolution in handleCheckAccess) — deliberately NOT a new condition-
+// evaluation path. Package grants (`pkg:admin`, `pkg:dev-tools`, etc.) are
+// issued through the existing permissions.json allow/override/extraGrants
+// sections exactly like `admin`/`dev`/`beta_0` are today (see
+// PERMISSIONS_GUIDE.md). `pkg:*` is a wildcard mirroring today's `beta_0`
+// ("holding it satisfies any package"), for a root/dev-style blanket grant.
+function resolvePackagesForUser(grants, packagesDoc) {
+    var hasWildcard = grants.indexOf('pkg:*') !== -1;
+    return (packagesDoc.packages || []).filter(function(p) {
+        return hasWildcard || grants.indexOf(p.grant) !== -1;
     });
 }
 
@@ -628,6 +661,19 @@ async function handleCheckAccess(request, env, ctx) {
         matchedConfigs = [];
     }
 
+    // Packages this user's grants make them eligible for (private issue #3,
+    // Phase 1) — metadata only (id/name); content is fetched separately via
+    // /package-content using the SAME token below, mirroring matchedConfigs
+    // immediately above. Never blocks a grant decision: a packages-load
+    // hiccup just means an empty list, same fail-open reasoning as configs.
+    var eligiblePackages = [];
+    try {
+        var packagesDoc = await loadPackagesCached(env, ctx);
+        eligiblePackages = resolvePackagesForUser(result.grants, packagesDoc);
+    } catch (e) {
+        eligiblePackages = [];
+    }
+
     var contactEmail = await resolveContactEmailForUser(user, env, ctx);
     var configsWithLabels = await resolveConfigBucketLabels(matchedConfigs, env, ctx);
 
@@ -635,10 +681,12 @@ async function handleCheckAccess(request, env, ctx) {
         grants: result.grants,
         exp: Date.now() + TOKEN_TTL_MS,
         configIds: matchedConfigs.map(function(c) { return c.id; }),
+        packageIds: eligiblePackages.map(function(p) { return p.id; }),
     });
     return json({
         granted: true, grants: result.grants, token: token, contactEmail: contactEmail,
         configs: configsWithLabels,
+        packages: eligiblePackages.map(function(p) { return { id: p.id, name: p.name }; }),
     });
 }
 
@@ -793,6 +841,49 @@ async function handleGetOrgConfigContent(request, env, ctx) {
         results.push({ id: id, name: meta.name, description: meta.description || '', bucket: labeled ? labeled.bucket : null, content: content });
     }
     return json({ configs: results });
+}
+
+// Batch-fetches full package source for every id in the token's
+// packageIds (private issue #3, Phase 1) — mirrors
+// handleGetOrgConfigContent() exactly: re-derives eligibility from the
+// token itself rather than re-evaluating grants, so this can't be used to
+// probe packages the original /check-access grant didn't include. Shares
+// /tool's exact pin/channel `ref` derivation, so a version-pinned install
+// pins packages to the SAME git tag for free — core+packages are always
+// released together (lockstep versioning, see the private issue's
+// "Versioning" section), so there's no separate package-version tracking
+// to keep in sync here.
+async function handleGetPackageContent(request, env, ctx) {
+    var url = new URL(request.url);
+    var token = url.searchParams.get('token');
+    var data = await verifyToken(env.TOKEN_SECRET, token);
+    if (!data) {
+        return json({ error: 'invalid or expired token' }, 403);
+    }
+    var ids = Array.isArray(data.packageIds) ? data.packageIds : [];
+    if (!ids.length) return json({ packages: [] });
+
+    var packagesDoc = await loadPackagesCached(env, ctx);
+    var byId = {};
+    (packagesDoc.packages || []).forEach(function(p) { byId[p.id] = p; });
+
+    var version = url.searchParams.get('version');
+    var ref = version ? 'v' + version.replace(/^v/, '') : null;
+    var ttl = ref ? TOOL_SRC_CACHE_TTL_PINNED : TOOL_SRC_CACHE_TTL_UNPINNED;
+
+    var results = [];
+    for (var i = 0; i < ids.length; i++) {
+        var meta = byId[ids[i]];
+        if (!meta) continue; // package removed/renamed since the token was issued
+        var src;
+        try {
+            src = await cachedFetchPrivateFile(env, ctx, meta.entry, ref, ttl);
+        } catch (e) {
+            continue; // missing entry - skip rather than fail the whole batch
+        }
+        results.push({ id: meta.id, name: meta.name, src: src });
+    }
+    return json({ packages: results });
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -2426,6 +2517,9 @@ export default {
             }
             if (url.pathname === '/org-config-content' && request.method === 'GET') {
                 return await handleGetOrgConfigContent(request, env, ctx);
+            }
+            if (url.pathname === '/package-content' && request.method === 'GET') {
+                return await handleGetPackageContent(request, env, ctx);
             }
             if (url.pathname === '/feedback' && request.method === 'POST') {
                 return await handleFeedback(request, env);
