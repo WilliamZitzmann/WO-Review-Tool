@@ -476,10 +476,24 @@ function resolveOrgConfigsForUser(user, configsDoc) {
 // sections exactly like `admin`/`dev`/`beta_0` are today (see
 // PERMISSIONS_GUIDE.md). `pkg:*` is a wildcard mirroring today's `beta_0`
 // ("holding it satisfies any package"), for a root/dev-style blanket grant.
+//
+// Some packages reuse an EXISTING literal grant instead of a new `pkg:*`
+// one — e.g. private-repo issue #3's Admin/Dev Tools packages gate on the
+// plain `admin`/`dev` strings so current holders need zero re-provisioning,
+// and BETA_1/BETA_2 gate on `beta_1`/`beta_2`. For a `beta_N` grant
+// specifically, `beta_0` must also satisfy it — the exact same wildcard
+// rule hasGrant() already applies client-side in wo_tool.js ("beta_0 is a
+// wildcard: holding it satisfies any beta_N check") — otherwise a beta_0
+// holder's client would render the feature (hasGrant passes) while the
+// Worker silently withheld the package's actual code, a fail-open gap that
+// looks like a broken feature rather than a missing grant.
 function resolvePackagesForUser(grants, packagesDoc) {
     var hasWildcard = grants.indexOf('pkg:*') !== -1;
+    var hasBetaWildcard = grants.indexOf('beta_0') !== -1;
     return (packagesDoc.packages || []).filter(function(p) {
-        return hasWildcard || grants.indexOf(p.grant) !== -1;
+        if (hasWildcard) return true;
+        if (hasBetaWildcard && String(p.grant).indexOf('beta_') === 0) return true;
+        return grants.indexOf(p.grant) !== -1;
     });
 }
 

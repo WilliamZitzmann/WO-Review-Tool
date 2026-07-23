@@ -1206,6 +1206,45 @@ seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'wo_tool.js', '// wo_tool.js readable so
         { known: forgotKnown.body, unknown: forgotUnknown.body });
     check('forgot-password for a known email actually sent a reset email', !!lastEmailTo('william@example.com'), sentEmails.map(function(e) { return e.to; }));
 
+    // ── Package eligibility (private issue #3 "v1.0.0 — Modularisation" /
+    // public issue #1) — resolvePackagesForUser() against a real
+    // /check-access call. Package grants are plain members of the same
+    // grants list override/blacklist/allow/extraGrants already produce, so
+    // this reuses ZITZMWX (dev + beta_0, from the fixture restored above)
+    // and someuser (plain 'user', from the AVWP allow rule) rather than
+    // adding new permissions.json entries. Also seeds a THIRD user with the
+    // package's grant string held literally, to prove the beta_0-wildcard
+    // addition to resolvePackagesForUser() didn't break plain membership
+    // matching for everyone else.
+    seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'permissions.json', {
+        maximoHosts: [{ hostname: 'maximo.example.com', url: 'https://maximo.example.com/login' }],
+        override: [{ id: 'ovr_seed', bucketId: null, conditions: [{ field: 'username', op: 'eq', value: 'ZITZMWX' }], grants: ['dev'] }],
+        blacklist: [{ id: 'bla_seed', bucketId: null, conditions: [{ field: 'username', op: 'eq', value: 'JAMESXW' }] }],
+        allow: [{ id: 'alw_seed', grants: ['user'], bucketId: null, conditions: [{ field: 'insertSite', op: 'eq', value: 'AVWP' }] }],
+        extraGrants: [
+            { id: 'ext_seed', bucketId: null, conditions: [{ field: 'username', op: 'eq', value: 'ZITZMWX' }], grants: ['dev', 'beta_0'] },
+            { id: 'ext_literal_beta1', bucketId: null, conditions: [{ field: 'username', op: 'eq', value: 'LITERALBETA1' }], grants: ['user', 'beta_1'] },
+        ],
+    });
+    seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'packages.json', {
+        packages: [{ id: 'post-scan-actions', name: 'Post-Scan Actions', grant: 'beta_1', entry: 'packages/post-scan-actions.min.js' }],
+    });
+
+    var beta0HolderCheck = await call('POST', '/check-access', { body: { fields: { username: 'ZITZMWX', insertSite: 'NOWHERE' } } });
+    check('a beta_0 holder (not literally beta_1) is still resolved as eligible for a beta_1-gated package (wildcard mirrors hasGrant() client-side)',
+        beta0HolderCheck.body.granted === true && Array.isArray(beta0HolderCheck.body.packages) && beta0HolderCheck.body.packages.some(function(p) { return p.id === 'post-scan-actions'; }),
+        beta0HolderCheck.body);
+
+    var literalBeta1Check = await call('POST', '/check-access', { body: { fields: { username: 'LITERALBETA1', insertSite: 'AVWP' } } });
+    check('a user holding the literal beta_1 grant (no beta_0) is also resolved as eligible — plain membership matching still works alongside the wildcard',
+        literalBeta1Check.body.granted === true && Array.isArray(literalBeta1Check.body.packages) && literalBeta1Check.body.packages.some(function(p) { return p.id === 'post-scan-actions'; }),
+        literalBeta1Check.body);
+
+    var noBetaCheck = await call('POST', '/check-access', { body: { fields: { username: 'someuser', insertSite: 'AVWP' } } });
+    check('a plain user with neither beta_0 nor beta_1 does NOT see the beta_1-gated package',
+        noBetaCheck.body.granted === true && Array.isArray(noBetaCheck.body.packages) && !noBetaCheck.body.packages.some(function(p) { return p.id === 'post-scan-actions'; }),
+        noBetaCheck.body);
+
     await testOldShapeMigration();
 
     const failed = results.filter(function(r) { return !r.ok; });
