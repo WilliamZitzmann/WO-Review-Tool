@@ -1,9 +1,0 @@
-{
-  "name": "wo-review-tool-build-scripts",
-  "private": true,
-  "version": "1.0.0",
-  "description": "Build-time tooling only (currently: minifying wo_tool.js for push-private.sh). Not part of the runtime tool.",
-  "devDependencies": {
-    "terser": "^5.36.0"
-  }
-}
