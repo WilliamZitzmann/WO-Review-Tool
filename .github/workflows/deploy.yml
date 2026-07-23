@@ -1,0 +1,35 @@
+name: Deploy access-control Worker
+
+# Publishes access-control/worker.js to Cloudflare on every push to main
+# that touches it — wrangler deploy was previously a manual, easy-to-forget
+# step (see access-control/README.md's old deploy walkthrough), which is
+# exactly how the /package-content endpoint, the packages[] field in
+# /check-access, and the beta_0-wildcard fix in resolvePackagesForUser()
+# ended up sitting live in this repo for days without ever reaching the
+# actual deployed Worker. This closes that gap the same way
+# WO-Review-Tool-Private's own .github/workflows/build.yml closes the
+# "forgot to rebuild before pushing" gap.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'access-control/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy with Wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: access-control
+          command: deploy

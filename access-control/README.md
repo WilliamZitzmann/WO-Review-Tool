@@ -79,6 +79,8 @@ wrangler deploy
 
 Wrangler prints the deployed URL, something like `https://wo-review-tool-access.<your-subdomain>.workers.dev`. That's your `WORKER_BASE_URL` — you'll paste it into `loader.js`.
 
+**After this first manual deploy, every future change to `access-control/**` deploys automatically** — `.github/workflows/deploy.yml` runs `wrangler deploy` on every push to `main` that touches this directory, authenticated via the `CLOUDFLARE_API_TOKEN` repo secret (Settings → Secrets and variables → Actions). This closes the gap where a `worker.js` change could sit merged on `main` for days without ever reaching the actual deployed Worker (a manual step is easy to forget) — `git push` is now the only step, same as `wo_tool.js`'s own auto-build in the private repo. Requires `account_id` in `wrangler.toml` (already set) since there's no interactive `wrangler login` session in CI. Manual `wrangler deploy` from your machine still works fine any time — the workflow doesn't require it, it's just no longer the only path.
+
 ## 7. Test the endpoints
 
 ```

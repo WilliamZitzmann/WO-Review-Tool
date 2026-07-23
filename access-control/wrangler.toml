@@ -1,6 +1,12 @@
 name = "wo-review-tool-access"
 main = "worker.js"
 compatibility_date = "2025-01-01"
+# Explicit so `wrangler deploy` can run non-interactively in CI (see
+# .github/workflows/deploy.yml) — without this, wrangler falls back to
+# inferring the account from an interactive `wrangler login` session,
+# which doesn't exist on a GitHub Actions runner. Not sensitive, just an
+# account identifier.
+account_id = "993a0d07d50fa02638c8b154c16a5099"
 
 [vars]
 GITHUB_OWNER = "WilliamZitzmann"
