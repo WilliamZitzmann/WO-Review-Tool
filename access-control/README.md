@@ -8,15 +8,11 @@ This gates **casual/unauthorized use** — stops link-sharing, stops a deprovisi
 
 Encryption of the request body was considered and deliberately skipped — TLS already covers transit, and app-layer crypto wouldn't stop anyone who can already read the plaintext in their own browser's devtools.
 
-## 1. Create a second, private repo
+## 1. The private repo
 
 The Worker needs somewhere private to fetch `wo_tool.js`, `permissions.json`, `loader.js`, and `version.json` from. **`bookmarklet.js`** — the one-line snippet a user pastes into their own bookmarks bar once at install time — is the only piece that still needs to live somewhere publicly readable, since GitHub Pages (the guide/install page) serves it from the public repo and it's never fetched at runtime by anything. Everything `bookmarklet.js` triggers after that point (`loader.js`, `version.json`, `wo_tool.js`, `configs/`) is fetched exclusively through the Worker's own routes, sourced from the private repo — the public repo is not a runtime dependency for any of it. (Making the public repo private outright would still need a paid GitHub plan to keep Pages working, so that's a separate future step if you want to go that far — not required for any of the above.)
 
-Instead:
-1. Create a new **private** repo, e.g. `WO-Review-Tool-Private`.
-2. Copy `wo_tool.js`, `loader.js`, and `version.json` into it.
-3. Create `permissions.json` in it — use `access-control/permissions.example.json` (in the public repo) as the template. **This is the only file with the real allow/deny/override rules and real usernames — it must only ever exist in the private repo.**
-4. Going forward, whenever you update `wo_tool.js`/`loader.js`/`version.json`, push straight to the private repo (`scripts/push-private.sh`) — the public repo's copies are dev-source only now, not what anything fetches live.
+That private repo (`WO-Review-Tool-Private`) already exists and is the **sole source of truth** for `wo_tool.js`, `loader.js`, `version.json`, and `admin.html` — they're edited directly there, not authored in this public repo and copied over. (Earlier revisions of this guide described creating the private repo from scratch and copying these files in via a `scripts/push-private.sh` script in this repo — that script no longer exists; there's no copy step between the two repos anymore.) `permissions.json` — use `access-control/permissions.example.json` (in this public repo) as the template if you ever need to recreate it. **This is the only file with the real allow/deny/override rules and real usernames — it must only ever exist in the private repo.**
 
 ## 2. Create a GitHub fine-grained PAT
 
@@ -139,25 +135,25 @@ From there, open `/admin` in a browser, paste your `ROOT_ADMIN_TOKEN`, and start
 
 ## 8. Wire up loader.js
 
-Set `WORKER_BASE_URL` at the top of `loader.js` to your deployed Worker URL, commit, push to the **public** repo (loader.js itself has no secrets in it — it's just orchestration).
+Set `WORKER_BASE_URL` at the top of `loader.js` to your deployed Worker URL, commit, push to the **private** repo (`loader.js` lives there now, alongside `wo_tool.js`).
 
 ## 9. Roll out, then retire the old direct-fetch path
 
-Once you've verified the new flow end-to-end (a real login on the real Maximo instance, not just curl), you can stop pushing `wo_tool.js` updates to the public repo and rely on the private one exclusively. Existing users' bookmarklets don't need to change — `bookmarklet.js` (the actual thing pasted into a browser bookmark) now just fetches `loader.js`, and that's the piece doing the domain-check/access-check/token dance before ever touching `wo_tool.js`.
+Once you've verified the new flow end-to-end (a real login on the real Maximo instance, not just curl), you can stop pushing `wo_tool.js` updates to any public URL and rely on the private repo exclusively. Existing users' bookmarklets don't need to change — `bookmarklet.js` (the actual thing pasted into a browser bookmark) now just fetches `loader.js`, and that's the piece doing the domain-check/access-check/token dance before ever touching `wo_tool.js`.
 
 ## Releasing a new version — what's different now
 
-`wo_tool.js`'s own self-update mechanism (the in-tool "check for updates" / "install update" flow, not just the bookmarklet's first load) now also goes through this Worker — it re-runs the same whoami/access-check dance and fetches the new source via `/tool`, instead of pulling straight from a public raw URL like it used to. That closes the gap where a revoked user's already-running tool could just keep self-updating forever with no access check. The consequence: **every release now needs tagging in *both* repos, not just the public one.**
+`wo_tool.js`'s own self-update mechanism (the in-tool "check for updates" / "install update" flow, not just the bookmarklet's first load) goes through this Worker — it re-runs the same whoami/access-check dance and fetches the new source via `/tool`, instead of pulling straight from a public raw URL. That closes the gap where a revoked user's already-running tool could just keep self-updating forever with no access check.
 
-Per release, in addition to whatever you already do in the public repo:
+Per release, in the private repo (the one and only checkout — there's no public-repo step for `wo_tool.js` anymore):
 ```
 cd path/to/WO-Review-Tool-Private
-cp path/to/wo_tool.js .
-git add wo_tool.js && git commit -m "vX.Y.Z"
+# edit wo_tool.js directly, bump TOOL_VERSION, minify to wo_tool.min.js
+git add wo_tool.js wo_tool.min.js && git commit -m "vX.Y.Z"
 git tag vX.Y.Z
 git push origin main && git push origin vX.Y.Z
 ```
-Skipping this means anyone pinned to an exact version, or anyone whose auto-patch install tries to fetch that tag, gets a clear `GitHub fetch failed for wo_tool.js@vX.Y.Z: HTTP 404` from the Worker instead of the update — the currently-running tool keeps working either way (it never overwrites itself until the new source downloads successfully), it just won't update until the tag exists.
+Skipping the tag means anyone pinned to an exact version, or anyone whose auto-patch install tries to fetch that tag, gets a clear `GitHub fetch failed for wo_tool.js@vX.Y.Z: HTTP 404` from the Worker instead of the update — the currently-running tool keeps working either way (it never overwrites itself until the new source downloads successfully), it just won't update until the tag exists.
 
 The "dev channel" (unpinned tip-of-branch) doesn't need a tag at all — it always reads whatever `GITHUB_BRANCH` (`main` by default) currently holds in the private repo, same as before.
 
