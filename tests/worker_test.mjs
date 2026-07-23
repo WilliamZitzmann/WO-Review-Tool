@@ -278,10 +278,17 @@ seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'configs/index.json', {
                 { field: 'insertSite', op: 'eq', value: 'AVWP' },
             ],
         },
+        // configVersion-aware filtering (private issue #3, Phase 5,
+        // "modular configs") — this one is tagged for a schema only a v4+
+        // client understands, and no ownConditions at all, so the ONLY
+        // thing distinguishing whether a given /check-access caller sees it
+        // is the configVersion filter, not bucket/condition matching.
+        { id: 'cfg_v4_only', name: 'V4 Preset', description: 'Modular-configs shape', bucketId: null, conditions: [], configVersion: 4 },
     ],
 });
 seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'configs/cfg_universal.json', { rules: [{ id: 'r1' }], scan: {}, fields: {}, state: {}, vars: [] });
 seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'configs/cfg_avwp.json', { rules: [{ id: 'r2' }], scan: {}, fields: {}, state: {}, vars: [] });
+seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'configs/cfg_v4_only.json', { configVersion: 4, rules: { groups: [], rules: [{ id: 'r3' }], packages: {} }, scan: { scans: [] }, fields: {}, state: {}, vars: [] });
 seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'version.json', {
     latest: '1.0.0', channels: { stable: '1.0.0', beta: '1.0.0' },
     versions: [{ version: '1.0.0', name: 'Initial', changes: [] }],
@@ -372,6 +379,40 @@ seed(env.GITHUB_OWNER, env.GITHUB_REPO, 'wo_tool.js', '// wo_tool.js readable so
         avwpConfigsById.cfg_avwp && avwpConfigsById.cfg_avwp.bucket === 'AVWP', avwpConfigsById.cfg_avwp);
     check('...and a root-owned config (bucketId null) resolves bucket: null, not a stray label',
         avwpConfigsById.cfg_universal && avwpConfigsById.cfg_universal.bucket === null, avwpConfigsById.cfg_universal);
+
+    // ── configVersion-aware org-config filtering (private issue #3, Phase
+    // 5, "modular configs") — cfg_v4_only has no bucket/conditions at all
+    // (matches everyone the same as cfg_universal), so whether it shows up
+    // is governed ENTIRELY by the requester's own configVersion, isolating
+    // this from the bucket-matching logic already covered above. ──
+    var noVersionField = await call('POST', '/check-access', {
+        body: { fields: { username: 'ZITZMWX', email: 'zitzmwx@abbvie.com', country: 'US', insertSite: 'NOWHERE' } },
+    });
+    check('a caller that omits configVersion entirely (old loader.js/wo_tool.js build) never sees a v4-tagged config',
+        noVersionField.body.granted === true && !noVersionField.body.configs.some(function(c) { return c.id === 'cfg_v4_only'; }),
+        noVersionField.body.configs);
+
+    var v1Explicit = await call('POST', '/check-access', {
+        body: { fields: { username: 'ZITZMWX', email: 'zitzmwx@abbvie.com', country: 'US', insertSite: 'NOWHERE' }, configVersion: 1 },
+    });
+    check('a caller explicitly on configVersion 1 (e.g. 0.27.1) also never sees the v4-tagged config',
+        v1Explicit.body.granted === true && !v1Explicit.body.configs.some(function(c) { return c.id === 'cfg_v4_only'; }),
+        v1Explicit.body.configs);
+
+    var v4Client = await call('POST', '/check-access', {
+        body: { fields: { username: 'ZITZMWX', email: 'zitzmwx@abbvie.com', country: 'US', insertSite: 'NOWHERE' }, configVersion: 4 },
+    });
+    var v4ClientIds = (v4Client.body.configs || []).map(function(c) { return c.id; }).sort();
+    check('a v4-understanding client (1.0.0) DOES see the v4-tagged config, alongside the untagged (v1) universal one',
+        v4Client.body.granted === true && JSON.stringify(v4ClientIds) === JSON.stringify(['cfg_universal', 'cfg_v4_only']),
+        v4Client.body.configs);
+
+    var contentV4 = await call('GET', '/org-config-content?token=' + encodeURIComponent(v4Client.body.token));
+    var contentV4ById = {};
+    (contentV4.body.configs || []).forEach(function(c) { contentV4ById[c.id] = c; });
+    check('/org-config-content for a v4 client\'s token includes the v4-tagged config\'s real content',
+        contentV4ById.cfg_v4_only && contentV4ById.cfg_v4_only.content.rules.rules[0].id === 'r3',
+        contentV4ById.cfg_v4_only);
 
     var content = await call('GET', '/org-config-content?token=' + encodeURIComponent(avwpUser.body.token));
     var contentById = {};
