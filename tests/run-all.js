@@ -1,25 +1,16 @@
-// Runs every test file in this directory as its own process (mixing .mjs
-// ESM and .js CommonJS harnesses in one process isn't straightforward, and
-// each file is already a fully standalone script with its own exit code —
-// see each file's own header comment for what it actually verifies), then
-// reports a combined pass/fail summary.
+// Runs every test file in this directory as its own process, then reports
+// a combined pass/fail summary.
+//
+// Only worker_test.mjs lives here now — it tests access-control/worker.js,
+// which stays in this (public) repo. Every other test file (harness.js,
+// loader_test.mjs, admin_html_test.mjs, etc.) moved to the private repo
+// alongside wo_tool.js/loader.js/admin.html, the files they actually test.
+// See README.md.
 const { spawnSync } = require('child_process');
 const path = require('path');
 
 const FILES = [
     'worker_test.mjs',
-    'admin_html_test.mjs', // only present if this checkout also has admin.html copied in — see README.md
-    'harness.js',
-    'org_config_harness.js',
-    'loader_test.mjs',
-    'update_defer_test.js',
-    'sync_whoami_mapping_test.js',
-    'config_version_test.js',
-    'revoke_banner_test.js',
-    'feedback_tab_test.js',
-    'org_config_bucket_label_test.js',
-    'profiles_kebab_test.js',
-    'scanlog_minimize_test.js',
 ];
 
 const fs = require('fs');
