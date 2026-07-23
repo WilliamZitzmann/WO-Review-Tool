@@ -468,9 +468,24 @@ function computeConfigRequiredFields(configsDoc) {
 function matchesConfigConditions(user, conditions) {
     return Array.isArray(conditions) && conditions.every(function(c) { return evalCondition(user, c); });
 }
-function resolveOrgConfigsForUser(user, configsDoc) {
+// clientConfigVersion is the requesting wo_tool.js build's own
+// CURRENT_CONFIG_VERSION (private issue #3, Phase 5, "modular configs" —
+// configVersion-aware org-config filtering), sent on every /check-access
+// call by loader.js/wo_tool.js. An entry with no configVersion at all
+// predates this field and is treated as 1 (the oldest/most conservative
+// shape) — same `|| 1` convention wo_tool.js's own migrateProfile()/
+// installOrgConfig() already use for untagged content. A caller that omits
+// clientConfigVersion entirely (an old loader.js/wo_tool.js build that
+// predates this) is treated the same way: only version-1 configs are ever
+// offered to it, never a config shaped for a schema it can't understand.
+// This is a visibility filter ONLY — an incompatible config was already
+// unable to actually apply (migrateProfile()/applyBackup() throw a clear
+// error on a too-new configVersion); this just keeps it from ever showing
+// up as a choice in the first place.
+function resolveOrgConfigsForUser(user, configsDoc, clientConfigVersion) {
+    var maxVersion = typeof clientConfigVersion === 'number' && clientConfigVersion > 0 ? clientConfigVersion : 1;
     return (configsDoc.configs || []).filter(function(entry) {
-        return matchesConfigConditions(user, entry.conditions);
+        return matchesConfigConditions(user, entry.conditions) && (entry.configVersion || 1) <= maxVersion;
     });
 }
 
@@ -676,7 +691,7 @@ async function handleCheckAccess(request, env, ctx) {
     var matchedConfigs = [];
     try {
         var configsDoc = await loadConfigsIndexCached(env, ctx);
-        matchedConfigs = resolveOrgConfigsForUser(user, configsDoc);
+        matchedConfigs = resolveOrgConfigsForUser(user, configsDoc, body.configVersion);
     } catch (e) {
         matchedConfigs = [];
     }
@@ -1794,7 +1809,13 @@ async function handleAdminDeleteBucket(request, env, id) {
 // access-control entries.
 function configEntryPublic(doc) {
     return { id: doc.id, name: doc.name, description: doc.description || '', bucketId: doc.bucketId, conditions: doc.conditions,
-        createdBy: doc.createdBy, createdAt: doc.createdAt, updatedBy: doc.updatedBy, updatedAt: doc.updatedAt, size: doc.size || 0 };
+        createdBy: doc.createdBy, createdAt: doc.createdAt, updatedBy: doc.updatedBy, updatedAt: doc.updatedAt, size: doc.size || 0,
+        // Metadata mirror of the content's own configVersion (private issue
+        // #3, Phase 5) — resolveOrgConfigsForUser() filters on this WITHOUT
+        // fetching the full content blob, so a client only sees presets it
+        // can actually apply. `|| 1` matches wo_tool.js's own untagged-
+        // content convention (migrateProfile()/installOrgConfig()).
+        configVersion: doc.configVersion || 1 };
 }
 
 async function handleAdminGetConfigs(request, env) {
@@ -1836,6 +1857,10 @@ async function handleAdminCreateConfig(request, env) {
         bucketId: bucketId, conditions: conditions,
         createdBy: identity.label, createdAt: now, updatedBy: identity.label, updatedAt: now,
         size: contentText.length,
+        // Mirrors the uploaded content's own configVersion (untagged content
+        // is v1, same convention wo_tool.js uses) so resolveOrgConfigsForUser()
+        // can filter without fetching the full blob — see configEntryPublic().
+        configVersion: parsedContent.configVersion || 1,
     };
     indexLoad.doc.configs.push(entry);
     await writePrivateFile(env, 'configs/' + entry.id + '.json', JSON.stringify(parsedContent, null, 2), null,
@@ -1890,6 +1915,9 @@ async function handleAdminDuplicateConfig(request, env, id) {
         bucketId: bucketId, conditions: conditions,
         createdBy: identity.label, createdAt: now, updatedBy: identity.label, updatedAt: now,
         size: f.text.length,
+        // The content is byte-identical to the source, so its configVersion
+        // carries over unchanged — same reasoning as configEntryPublic().
+        configVersion: source.configVersion || 1,
     };
     indexLoad.doc.configs.push(entry);
     await writePrivateFile(env, 'configs/' + entry.id + '.json', f.text, null,
@@ -1938,6 +1966,12 @@ async function handleAdminPatchConfig(request, env, id) {
         await writePrivateFile(env, 'configs/' + id + '.json', JSON.stringify(parsedContent, null, 2), existing.sha,
             'admin: ' + identity.label + ' replaced content of config "' + entry.name + '"');
         entry.size = contentText.length;
+        // Re-derive from the NEW content, same reasoning as
+        // handleAdminCreateConfig — a content replacement can change shape
+        // (e.g. re-exported from a newer tool build), so the metadata's
+        // configVersion must track the content actually being served now,
+        // not whatever it was tagged at before this patch.
+        entry.configVersion = parsedContent.configVersion || 1;
         contentUpdated = true;
     }
     entry.updatedBy = identity.label;
